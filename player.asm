@@ -18,11 +18,20 @@
 ;   f = 195312,5 / (4096 - PITCH) Hz
 ;
 ; Időzítés: a ROM kurzor-IT-je (képkockánként egy, ~49,7 Hz). A 0038h-n lévő
-; RAM-beli belépési pont első 3 bájtját "JP irq"-re cseréljük; a saját
-; kezelőnk után a ROM eredeti kezelője is lefut (ugyanazzal a 8 bájttal, amit
-; a 0038h-ról elmentettünk), így a billentyűzet, a TIME stb. tovább megy.
+; RAM-beli belépési pont (PUSH AF / LD A,70h / OUT (02h),A / JP nnnn: C405h
+; a BASIC 2.2-ben, C412h az 1.2-es ROM-listában)
+; JP-jének célját a saját kezelőnkre cseréljük: az így már a ROM lapozása
+; (U0 U1 U2 SYS) után fut, majd a ROM kezelőjére ugrik (billentyűzet, TIME,
+; az IT törlése).
 ;
-; Leállítás: ESC vagy SPACE, vagy a dal vége (ha nem ismétel).
+; Belépési pontok (BASIC: X=USR(cím)):
+;   6759 (start)    a dal fejléce szerint előtérben vagy háttérben (autorun)
+;   6762 (start+3)  előtérben: a dal végéig vagy ESC/SPACE-ig, utána vissza
+;   6765 (start+6)  háttérben: a megszakításos rész és a dal a memória tetejére
+;                   kerül (a HIMEM alá, mint a ROM HI-MEM-SET rutinjánál), a
+;                   zene szól, a BASIC azonnal visszakapja a vezérlést;
+;                   utána EXT 0 leállítja, EXT 1 elölről indítja (a ROM
+;                   USRTAB-ja: 0021h/0023h). Ha nincs elég hely: előtérben.
 ; ============================================================================
 
 P_PITCHLO   equ 04h
@@ -38,12 +47,17 @@ V_PORT06    equ 0B13h
 V_SNDACT    equ 0B14h       ; SND_ACTIVE: a ROM SOUND időtartam-kezelése
 
 IRQVEC      equ 0038h
+IRQJP       equ 003Dh           ; a ROM IT-belépőjének JP C412h utasítása
+USRTAB      equ 0021h           ; EXT 0..6 címei
+V_HIMEM     equ 0B19h
+MIN_HIMEM   equ 1EACh           ; a ROM HI-MEM-SET alsó határa
+HIMEM_GAP   equ 512             ; a futó BASIC verme fölötte marad érintetlen
 
 ; billentyűzet 7. sor: b3 = ESC, b5 = SPACE (0 = lenyomva)
 KEYMASK     equ 28h
 
 ; ---- dal adatformátum (midi2tvc.py) ---------------------------------------
-; +0   flags: b0 = ismétlés
+; +0   flags: b0 = ismétlés, b1 = háttérben szóljon (a start belépésnél)
 ; +1   arpeggio sebesség (tick / lépés, >= 1)
 ; +2   lecsengés (tick / hangerőlépés, 0 = nincs)
 ; +3   lecsengés alsó szintje (0..15)
@@ -76,23 +90,26 @@ SONG_EVENTS equ song+8+256
 
             include "cas.inc"
 
-; ---- lejátszó -------------------------------------------------------------
+; ---- belépési pontok (fix címek) -------------------------------------------
 start:
             assert start < 10000
-            di
-            ld hl, IRQVEC           ; az eredeti IT-belépés mentése
-            ld de, orig_irq
-            ld bc, 8
-            ldir
+            jp play_auto            ; start
+            jp play_fg              ; start + 3
+            jp play_bg              ; start + 6
+
+play_auto:
+            ld a, (SONG_FLAGS)
+            and 02h
+            jp nz, play_bg
+; előtérben: a dal végéig vagy ESC/SPACE-ig
+play_fg:
             xor a
-            ld (V_SNDACT), a        ; a ROM ne kapcsolja ki a hangot
-            ld (done), a
-            call init_song
-            ld a, 0C3h              ; JP irq
-            ld (IRQVEC), a
-            ld hl, irq
-            ld (IRQVEC + 1), hl
-            ei
+            ld (bgmode), a
+            call res_play
+            ld a, h                 ; HL = -1: nem sikerült felfűzni
+            and l
+            inc a
+            ret z
 .loop:
             halt
             ld a, (done)
@@ -102,13 +119,7 @@ start:
             cp KEYMASK
             jr z, .loop
 .stop:
-            di
-            ld hl, orig_irq         ; az IT-belépés visszaállítása
-            ld de, IRQVEC
-            ld bc, 3
-            ldir
-            call sound_off
-            ei
+            call res_stop
 .release:                           ; megvárjuk, hogy elengedjék a gombot
             halt
             call read_keys
@@ -116,6 +127,137 @@ start:
             jr nz, .release
             ld hl, 0
             ret
+
+; háttérben: a rezidens rész (res_begin..res_end) a HIMEM alá kerül
+play_bg:
+            ld hl, (song_len)       ; a blokk mérete: a kód és a dal
+            ld de, song - res_begin
+            add hl, de
+            ld (res_size), hl
+            ; már telepítve (EXT 0 egy korábbi példányra mutat)? akkor oda
+            ld hl, (USRTAB)
+            ld de, -(res_stop - sig)
+            add hl, de              ; HL = a régi aláírás
+            push hl
+            ld de, sig
+            ld b, SIG_LEN
+.cmp:       ld a, (de)
+            cp (hl)
+            jr nz, .new
+            inc hl
+            inc de
+            djnz .cmp
+            ld e, (hl)              ; a régi blokk mérete
+            inc hl
+            ld d, (hl)
+            ld hl, (res_size)
+            ex de, hl
+            or a
+            sbc hl, de              ; régi - új
+            jr c, .new              ; nem fér bele
+            ld hl, (USRTAB)         ; leállítjuk a régit
+            call call_hl
+            pop hl
+            ld de, -(sig - res_begin)
+            add hl, de              ; HL = a régi blokk eleje
+            jr .copy
+.new:
+            pop hl
+            ld hl, (V_HIMEM)        ; helyfoglalás, mint a ROM HI-MEM-SET
+            ld de, (res_size)
+            or a
+            sbc hl, de
+            jp c, .fail
+            ld de, HIMEM_GAP
+            sbc hl, de
+            jp c, .fail
+            push hl
+            ld de, MIN_HIMEM
+            sbc hl, de
+            pop hl
+            jp c, .fail
+            push hl                 ; ne fedje a most futó programot
+            push hl
+            ld hl, (song_len)
+            ld de, song + RELOC_BYTES
+            add hl, de              ; HL = a program vége
+            ex de, hl
+            pop hl
+            or a
+            sbc hl, de
+            pop hl
+            jp c, .fail
+            ld (V_HIMEM), hl        ; az új HIMEM; a blokk közvetlenül fölötte,
+            inc hl                  ; a régi BASIC verem a GAP-ben marad
+.copy:
+            ld (bg_base), hl
+            ex de, hl
+            ld hl, res_begin
+            ld bc, (res_size)
+            ldir
+            ; relokáció: delta = bg_base - res_begin
+            ld hl, (bg_base)
+            ld de, res_begin
+            or a
+            sbc hl, de
+            ld (bg_delta), hl
+            ld ix, (song_len)       ; a tábla a dal mögött
+            ld de, song
+            add ix, de
+            ld bc, RELOC_BYTES / 2
+.rel:       ld a, b
+            or c
+            jr z, .reldone
+            ld l, (ix + 0)
+            ld h, (ix + 1)
+            ld de, (bg_delta)
+            add hl, de              ; a javítandó szó helye a másolatban
+            ld e, (hl)
+            inc hl
+            ld d, (hl)
+            push hl
+            ld hl, (bg_delta)
+            add hl, de
+            ex de, hl
+            pop hl
+            ld (hl), d
+            dec hl
+            ld (hl), e
+            inc ix
+            inc ix
+            dec bc
+            jr .rel
+.reldone:
+            ld de, (bg_delta)       ; a másolat: háttér-mód, blokkméret
+            ld hl, bgmode
+            add hl, de
+            ld (hl), 1
+            ld hl, sig + SIG_LEN
+            add hl, de
+            ld bc, (res_size)
+            ld (hl), c
+            inc hl
+            ld (hl), b
+            ld hl, res_stop         ; EXT 0 / EXT 1
+            add hl, de
+            ld (USRTAB), hl
+            ld hl, res_play
+            add hl, de
+            ld (USRTAB + 2), hl
+            call call_hl            ; indítás
+            ld a, h
+            and l
+            inc a
+            jr z, .fail2
+            ld hl, 0
+            ret
+.fail2:
+            ld hl, (USRTAB)         ; nem sikerült: előtérben
+            call call_hl
+.fail:
+            jp play_fg
+
+call_hl:    jp (hl)
 
 ; A = a billentyűzet 7. sorának ESC/SPACE bitjei (KEYMASK: nincs lenyomva)
 read_keys:
@@ -131,6 +273,67 @@ read_keys:
             out (P_KBDROW), a
             ei
             ld a, b
+            ret
+
+bg_base:    dw 0
+bg_delta:   dw 0
+res_size:   dw 0
+; a dal hossza: ebből számoljuk a blokk méretét és a relokációs tábla helyét
+; (a dal mögött); a weboldal (midi2tvc.js buildCas) ide írja be
+song_len:   dw song_end - song
+
+; ============================================================================
+; rezidens rész: áthelyezhető (sjasmplus RELOCATE), háttér-módban a HIMEM alá
+; másoljuk, és a reloc_table szerint javítjuk a címeket
+; ============================================================================
+            RELOCATE_START
+res_begin:
+
+; (újra)indítás elölről; EXT 1. Kimenet: HL = 0, vagy -1 ha nem fűzhető fel.
+res_play:
+            di
+            call unhook
+            xor a
+            ld (V_SNDACT), a        ; a ROM ne kapcsolja ki a hangot
+            ld (done), a
+            call init_song
+            ld a, (IRQJP)
+            cp 0C3h                 ; a ROM belépője: JP nn
+            jr nz, .fail
+            ld hl, (IRQJP + 1)
+            ld (irq_tail + 1), hl
+            ld hl, irq
+            ld (IRQJP + 1), hl
+            ld a, 1
+            ld (hooked), a
+            ei
+            ld hl, 0
+            ret
+.fail:
+            ei
+            ld hl, -1
+            ret
+
+; aláírás + a blokk mérete (play_bg ebből ismeri fel a korábbi példányt)
+sig:        db "TVCMIDI", 0
+SIG_LEN     equ 8
+            dw 0                    ; a blokk mérete (play_bg írja be)
+; leállítás; EXT 0
+res_stop:
+            di
+            call unhook
+            call sound_off
+            ei
+            ret
+
+unhook:
+            ld a, (hooked)
+            or a
+            ret z
+            ld hl, (irq_tail + 1)
+            ld (IRQJP + 1), hl
+            xor a
+            ld (hooked), a
             ret
 
 init_song:
@@ -155,22 +358,28 @@ init_song:
             ret
 
 ; ---- megszakítás ------------------------------------------------------------
+; a ROM belépője (PUSH AF / LD A,70h / OUT (02h),A) után fut: az AF mentve,
+; a lapozás U0 U1 U2 SYS
 irq:
-            push af
             in a, (P_IRQST)
             bit 4, a                ; 0: kurzor/hang IT (a képkocka-IT)
-            jr nz, .chain
+            jr nz, irq_tail
             push bc
             push de
             push hl
             call tick
             call drum_step
+            ld a, (done)            ; háttérben a dal végén lekapcsolódik
+            or a
+            jr z, .go
+            ld a, (bgmode)
+            or a
+            call nz, unhook
+.go:
             pop hl
             pop de
             pop bc
-.chain:
-            pop af
-            jp orig_irq             ; az eredeti ROM-kezelő (törli az IT-t)
+irq_tail:   jp 0                    ; a ROM kezelője (telepítéskor írjuk be)
 
 ; ---- egy tick (képkocka) ----------------------------------------------------
 tick:
@@ -519,7 +728,8 @@ sound_off:
             ret
 
 ; ---- változók ---------------------------------------------------------------
-orig_irq:   ds 8                    ; a 0038h eredeti 8 bájtja (itt fut le)
+hooked:     db 0                    ; 1: a ROM IT-belépője ránk ugrik
+bgmode:     db 0                    ; 1: háttérben (a dal végén lekapcsolódik)
 ptr:        dw 0
 loop_ptr:   dw 0
 wait:       dw 0
@@ -542,4 +752,13 @@ drum_noise: db 0
 lfsr:       dw 0ACE1h
 
 song:       incbin "build/song.bin"
+song_end:
+            RELOCATE_END
+
+; a rezidens rész relokációs táblája: a javítandó szavak címei (dw); a dal
+; mögött, mert a mérete csak a fordítás végén derül ki
+reloc_table:
+            RELOCATE_TABLE
+reloc_table_end:
+RELOC_BYTES equ reloc_table_end - reloc_table
 prog_end:

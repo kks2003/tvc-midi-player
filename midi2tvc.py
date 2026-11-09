@@ -628,6 +628,9 @@ def main():
     ap.add_argument("--min-volume", type=int, default=6)
     ap.add_argument("--max-volume", type=int, default=15)
     ap.add_argument("--loop", action="store_true", help="a dal végtelenítve szól")
+    ap.add_argument("--background", action="store_true",
+                    help="egycsatornás lejátszó: háttérben szól, a BASIC közben fut "
+                         "(EXT 0 leállítja, EXT 1 újraindítja)")
     ap.add_argument("--max-size", type=int, default=20000,
                     help="figyelmeztet, ha az adat ennél nagyobb (a 32k-s TVC miatt)")
     args = ap.parse_args()
@@ -656,11 +659,13 @@ def main():
     if not notes and not drums:
         sys.exit("a kiválasztott csatornákon nincs hang")
     if args.mode == "poly":
+        if args.background:
+            print("figyelem: a háttér-mód csak az egycsatornás lejátszóval működik (a poly a teljes CPU-t használja)")
         write_poly(args, notes, drums)
         return
     body, total, stats = convert(notes, args, drums)
 
-    flags = 1 if args.loop else 0
+    flags = (1 if args.loop else 0) | (2 if args.background else 0)
     table = pitch_table(args.tuning)
     kit_offset = 8 + 256 + len(body) if drums else 0
     header = struct.pack("<BBBBHH", flags, args.arp_speed, args.decay,

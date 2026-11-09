@@ -29,6 +29,7 @@ CASES = [
      {"mode": "poly", "decay": 4, "decayFloor": 5, "polyVolume": 11, "polyKnee": 8, "loop": True}),
     (["--mode", "poly", "--channels", "1,4,6,5,10"], {"mode": "poly", "channels": [1, 4, 6, 5, 10]}),
     (["--channels", "1,2,10", "--max-notes", "4"], {"channels": [1, 2, 10], "maxNotes": 4}),
+    (["--mode", "mono", "--background", "--loop"], {"mode": "mono", "background": True, "loop": True}),
 ]
 
 RUNNER = r"""

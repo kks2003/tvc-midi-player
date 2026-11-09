@@ -213,6 +213,10 @@ footer code, .hint code { font-family: var(--font-mono); font-size: 12.5px; }
           <div class="field wide"><label for="prio">Melyik hang szóljon</label>
             <select id="prio"><option value="high">a legmagasabb</option><option value="low">a legmélyebb</option><option value="last">a legutóbb leütött</option></select></div>
         </div>
+        <div class="fields" id="f-bg" hidden>
+          <label class="check field wide"><input id="background" type="checkbox"> Háttérben szóljon, a BASIC közben fut</label>
+          <p class="hint field wide">A zene a memória tetejére kerül (a HIMEM alá), a gép azonnal visszaadja a vezérlést. Leállítás: <code>EXT 0</code>, újraindítás: <code>EXT 1</code>. A lejátszó átlagosan a gép idejének ~4%-át használja.</p>
+        </div>
       </section>
 
       <section class="panel" aria-labelledby="h-snd">
@@ -382,11 +386,13 @@ footer code, .hint code { font-family: var(--font-mono); font-size: 12.5px; }
       transpose: num('transpose'), tuning: num('tuning'), speed: num('speed'),
       decay: num('decay'), decayFloor: num('decayFloor'), curve: num('curve'),
       minVolume: num('minVolume'), maxVolume: num('maxVolume'), loop: $('loop').checked,
+      background: mode !== 'poly' && $('background').checked,
     };
   }
   function showModeFields() {
     const mode = document.querySelector('input[name="mode"]:checked').value;
     for (const m of ['poly', 'arp', 'mono']) $('f-' + m).hidden = m !== mode;
+    $('f-bg').hidden = mode === 'poly';
     $('modeHint').textContent = MODE_HINTS[mode];
   }
   let regenTimer = 0;
@@ -457,7 +463,9 @@ footer code, .hint code { font-family: var(--font-mono); font-size: 12.5px; }
     const i = c.findIndex((x, j) => x === 0x55 && c[j + 1] === 0x53 && c[j + 2] === 0x52 && c[j + 3] === 0x96);
     const addr = String.fromCharCode(...c.slice(i + 4, i + 8));
     const title = String.fromCharCode(...M.titleBytes($('title').value || fileBase)).trimEnd();
-    $('basic').textContent = '1 PRINT "' + title + '"\n2 X=USR(' + addr + ')';
+    const bg = result && result.options.background;
+    $('basic').textContent = '1 PRINT "' + title + '"\n2 X=USR(' + addr + ')' +
+      (bg ? '\n\n! háttérben szól: EXT 0 leállítja, EXT 1 elölről indítja' : '');
   }
   function setOutputsEnabled(on) {
     $('dlBtn').disabled = !on;
@@ -670,7 +678,7 @@ footer code, .hint code { font-family: var(--font-mono); font-size: 12.5px; }
   // ---- események ------------------------------------------------------------------
   for (const el of document.querySelectorAll('input[name="mode"]')) el.addEventListener('change', () => { showModeFields(); regenerate(); });
   for (const id of ['polyVolume', 'polyKnee', 'maxNotes', 'arpSpeed', 'arpBass', 'prio', 'drums', 'transpose', 'decay',
-    'decayFloor', 'speed', 'title', 'tuning', 'curve', 'minVolume', 'maxVolume', 'loop']) {
+    'decayFloor', 'speed', 'title', 'tuning', 'curve', 'minVolume', 'maxVolume', 'loop', 'background']) {
     $(id).addEventListener(($(id).type === 'checkbox' || $(id).tagName === 'SELECT') ? 'change' : 'input', regenerate);
   }
   $('fileInput').addEventListener('change', (e) => {
