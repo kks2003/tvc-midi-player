@@ -127,6 +127,9 @@ def main():
         fr, pc, port, val = line.split()
         writes.append((int(fr), int(pc, 16), int(port, 16), int(val, 16)))
     mine = [w for w in writes if lo <= w[1] < hi]
+    dlo, dhi = sym["drum_start"], sym["drum_code_end"]
+    drum_w = [w for w in mine if dlo <= w[1] < dhi]
+    mine = [w for w in mine if not dlo <= w[1] < dhi]      # a dallam írásai
     check("a lejátszó írja a hangportokat (04h/05h/06h)", len(mine) > 20, "%d írás" % len(mine))
     check("az IT-vektor visszaállt (PUSH AF / LD A,70h)", res.split("isr=")[1].startswith("f5 3e 70"))
 
@@ -160,6 +163,21 @@ def main():
     check("időzítés: a C5 a 7*0,5 s = 3,5 s-nál (174 tick) szólal meg", abs(t_c5 - 174) <= 1,
           "%d tick" % t_c5)
 
+    # a második akkord (F-dúr: C4-F4-A4) a dob közben is megszólal
+    second = {n for fr, n in seq if 8 * 25 + 80 <= fr < 8 * 25 + 150}
+    check("a dob mellett a dallam halad (2. akkord: C4-F4-A4)", {60, 65, 69} <= second,
+          "kapott: %s" % sorted(second))
+
+    # dob: zajlöket (05h b4 = 0) a dobkódból, és a lábdob 160 Hz-es hangja
+    noise_frames = {fr for fr, pc, port, val in drum_w if port == 5 and not val & 0x10}
+    check("dob: zajlöketek (DAC-mód) a pergő/cin/crash ütéseknél", len(noise_frames) >= 10,
+          "%d tick" % len(noise_frames))
+    kick = int(round(midi2tvc.pitch_value(160)))
+    kicks = [fr for i, (fr, pc, port, val) in enumerate(drum_w)
+             if port == 4 and val == kick & 0xFF and i + 1 < len(drum_w)
+             and drum_w[i + 1][2] == 5 and drum_w[i + 1][3] & 0x0F == kick >> 8]
+    check("dob: lábdob (160 Hz-ről induló csúszás) 3 ütés", len(kicks) == 3, "%d" % len(kicks))
+
     # a hangfelvétel: az első skálahang (C4 = 261,6 Hz) frekvenciája
     with wave.open(wav) as w:
         rate = w.getframerate()
@@ -173,6 +191,16 @@ def main():
         check("az első hang frekvenciája", abs(f - want) < 1.0, "%.2f Hz, várt %.2f Hz" % (f, want))
         tail = data[-rate:]
         check("a dal végén csend", max(tail) - min(tail) < 200)
+        # zaj: 5 ms-os ablakokban a középszint-átlépések száma (a dallam
+        # legmagasabb hangja 523 Hz, ez ~5 átlépés / 5 ms)
+        win = rate // 200
+        best = 0
+        for i in range(start, len(data) - win, win):
+            seg = data[i:i + win]
+            m = (max(seg) + min(seg)) / 2
+            if max(seg) - min(seg) > 200:
+                best = max(best, sum(1 for j in range(1, win) if (seg[j - 1] < m) != (seg[j] < m)))
+        check("dob: a felvételben van zaj", best >= 30, "max. %d átlépés / 5 ms" % best)
 
     # 2. ESC megállítja a lejátszást
     wav2, plog2 = os.path.join(out, "esc.wav"), os.path.join(out, "esc_ports.txt")

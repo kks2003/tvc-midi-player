@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Tesztdal készítése (saját, szerzői jogtól mentes anyag): C-dúr skála
-negyedekben, majd négy akkord (C, F, G7, C) egy hosszú basszushanggal, és egy
-tempóváltás.  Kimenet: examples/teszt.mid"""
+negyedekben, majd négy akkord (C, F, G7, C) egy hosszú basszushanggal, egy
+tempóváltás, és a második akkordtól dobritmus (lábdob, pergő, zárt cin).  Kimenet: examples/teszt.mid"""
 import os, struct, sys
 
 def vlq(n):
@@ -39,9 +39,15 @@ for ch in ((60, 64, 67), (60, 65, 69), (59, 62, 65, 67), (60, 64, 67)):
         note(chords, t, 2 * Q - 60, n, 90, 1)
     t += 2 * Q
 note(chords, t - 8 * Q, 8 * Q, 36, 80, 1)              # C2 basszus (65 Hz)
-note(chords, t, Q, 42, 0x7F, 9)                        # dob: alapból kimarad
+# dob a 2. akkordtól: lábdob az 1. és 3., pergő a 2. és 4. negyeden, cin nyolcadokban
+drums = []
+for beat in range(6):
+    bt = t - 6 * Q + beat * Q
+    note(drums, bt, Q // 4, 36 if beat % 2 == 0 else 38, 110, 9)
+    note(drums, bt + Q // 2, Q // 4, 42, 70, 9)
+note(drums, t, Q, 49, 0x7F, 9)                         # crash a végén
 out = sys.argv[1] if len(sys.argv) > 1 else os.path.join(os.path.dirname(__file__), "..", "examples", "teszt.mid")
 with open(out, "wb") as f:
-    f.write(b"MThd" + struct.pack(">IHHH", 6, 1, 3, Q))
-    f.write(track(conductor) + track(melody) + track(chords))
+    f.write(b"MThd" + struct.pack(">IHHH", 6, 1, 4, Q))
+    f.write(track(conductor) + track(melody) + track(chords) + track(drums))
 print(out)

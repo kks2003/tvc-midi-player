@@ -26,7 +26,8 @@ a BASIC-nek.
 | `--mode arp` (alap) | akkordok arpeggióval: legfeljebb `--max-notes` (2–4, alap 3) hang, a legmagasabbak |
 | `--mode mono` | egyszólamú: `--prio high` (alap), `low` vagy `last` (a legutóbb leütött) |
 | `--arp-speed N` | arpeggio: N tickenként lép (alap 1, azaz ~50 Hz) |
-| `--channels 1,2` | csak ezek a MIDI csatornák; alapból mind, kivéve a 10. (dob) csatornát, amelyet a `--drums` is bekapcsol |
+| `--channels 1,2` | csak ezek a MIDI csatornák (alapból mind) |
+| `--drums synth` (alap) | a 10. csatorna szintetizált dobként szól (lásd lent); `pitched`: dallamhangként, `off`: kimarad |
 | `--transpose N`, `--tuning 440`, `--speed 1.0` | transzponálás (félhang), hangolás, tempószorzó |
 | `--decay N`, `--decay-floor V` | lecsengés: N tickenként eggyel halkul, legfeljebb V-ig |
 | `--curve`, `--min-volume`, `--max-volume` | MIDI erősség (velocity × CC7 × CC11) leképezése a 4 bites hangerőre |
@@ -37,6 +38,28 @@ A konverter kezeli a tempóváltásokat, a kitartó pedált (CC64), a CC7/CC11
 hangerőt és az „all notes off” üzeneteket. A nagyon rövid hangok is legalább
 egy tick hosszúak. A 47,7 Hz alatti hangok (MIDI 30 alatt) egy oktávval
 feljebb szólnak.
+
+### Dob
+
+A 10. csatorna (GM dob) hangjai szintetizált dobokká alakulnak. Egy dobütés
+1–6 tickre átveszi az egyetlen hangcsatornát. Közben a dallam állapota
+tovább halad (arpeggio, lecsengés, új hangok), és a dob után a dallam éppen
+aktuális hangja szól tovább.
+
+- **Lábdob, tamok, kolomp, perem:** az oszcillátor hangja tickenként lefelé
+  csúszik (a lábdob 160 → 110 → 80 → 60 Hz) és halkul; az elején egy rövid
+  zajkattanással.
+- **Pergő, cinek, crash, ride, taps:** zaj. A megszakításban a lejátszó a
+  `05h` b4 = 0 állással DAC-ra kapcsolja a hangerőregisztert, és egy 16 bites
+  LFSR-ből ~40 kHz-cel írja (tickenként legfeljebb ~10 ms, utána visszaáll
+  az oszcillátor). A pergő zaj és hang keveréke.
+- Ha egy tickre több dob esik, a fontosabb szól (lábdob > pergő > taps >
+  crash > tamok > nyitott cin > ride > kolomp > perem > zárt cin). A dobütés
+  erőssége gyengítésként (0–15) kerül az adatba.
+- A dobkészlet a `midi2tvc.py` `DRUM_KIT` táblázatában van (tickenként: hang
+  Hz-ben, hangerő, zaj hangereje és hossza), és a dallal együtt kerül a gépre,
+  így a lejátszó újrafordítása nélkül hangolható. A GM hangok hozzárendelése:
+  `GM_DRUMS`.
 
 ## Hardver (a [tvcdoc](https://github.com/kks2003/tvcdoc) alapján)
 
@@ -68,7 +91,7 @@ feljebb szólnak.
   olvassa a billentyűzetet, növeli a TIME-ot). Kilépéskor a 3 bájt visszakerül.
 - A hangot a megszakítás írja. A főprogram `HALT`-tal vár, és az ESC/SPACE
   gombot közvetlenül a billentyűzetmátrixból olvassa (7. sor, `03h`/`58h`).
-- Memória: a program `19EFh`-tól kezdődik, a lejátszó kódja kb. 500 bájt, utána jön a dal.
+- Memória: a program `19EFh`-tól kezdődik, a lejátszó kódja kb. 750 bájt, utána jön a dal.
   A konverter 20 000 bájt fölött figyelmeztet (a 32k-s gépen kb. eddig biztos
   a hely).
 
@@ -84,7 +107,7 @@ python3 test/emu_test.py --ep128web ../Ep128web --roms ep128emu_roms-2.0.11.bin
 ```
 
 Lépései: tesztdal (`test/make_test_mid.py`: C-dúr skála, tempóváltás, akkordok
-basszussal és egy dobhang), majd `build.sh`. Ezután a `.cas` a FILE: eszközre
+basszussal és dobritmus), majd `build.sh`. Ezután a `.cas` a FILE: eszközre
 kerül (`/files`), a TVC 64k+ / BASIC 2.2 bootol, és a teszt beírja:
 `load "teszt"`. Közben rögzíti a hangkimenetet (WAV) és a `04h`–`06h`
 portírásokat. Végül ellenőrzi:
@@ -92,6 +115,8 @@ portírásokat. Végül ellenőrzi:
 - a skála hangjainak sorrendjét és a PITCH-értékeket,
 - a hangkezdetek időzítését a tempótérkép szerint (±1 tick),
 - az arpeggiót (tickenként váltakozó hangok),
+- a dobot: a lábdob hangját, a zajlöketeket (DAC-mód) és a zajt a
+  felvételben, valamint azt, hogy a dallam a dob közben is halad,
 - a felvett hang frekvenciáját (C4: 261,45 Hz, a számított érték 261,46 Hz),
 - a dal végi és az ESC utáni csendet,
 - az IT-vektor visszaállítását.

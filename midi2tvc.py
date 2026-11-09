@@ -11,6 +11,11 @@ eseménylista.
   arp   akkordok arpeggióval: legfeljebb --max-notes hang, a lejátszó
         --arp-speed tickenként lép közöttük
 
+Dob (10. MIDI csatorna, --drums synth, alap): a GM dobhangok szintetizált
+dobokká alakulnak (lábdob és tamok: lefelé csúszó hang; pergő, cin, crash:
+zaj a DAC-módba kapcsolt hangerőregiszteren). Egy dobütés 1..6 tickre
+átveszi a csatornát.
+
 Csak a Python szabványos könyvtárát használja.
 """
 import argparse
@@ -230,6 +235,80 @@ def pitch_table(tuning):
     return table
 
 
+# ---- dobkészlet -------------------------------------------------------------
+# dobonként tickenkénti lépések: (hang Hz vagy None, hang hangereje,
+# zaj hangereje, zaj hossza ~1,2 ms-os egységekben, legfeljebb 8)
+DRUM_KIT = [
+    ("lábdob",   [(160, 15, 6, 1), (110, 14, 0, 0), (80, 12, 0, 0), (60, 9, 0, 0)]),
+    ("pergő",    [(220, 9, 13, 6), (190, 5, 10, 5), (None, 0, 7, 4)]),
+    ("zárt cin", [(None, 0, 8, 1)]),
+    ("nyitott cin", [(None, 0, 9, 3), (None, 0, 7, 3), (None, 0, 5, 3), (None, 0, 3, 2)]),
+    ("crash",    [(None, 0, 12, 7), (None, 0, 10, 6), (None, 0, 8, 5), (None, 0, 6, 4),
+                  (None, 0, 4, 3), (None, 0, 3, 2)]),
+    ("mély tam", [(190, 14, 4, 1), (140, 12, 0, 0), (110, 10, 0, 0), (95, 7, 0, 0)]),
+    ("közép tam", [(260, 14, 4, 1), (200, 12, 0, 0), (160, 10, 0, 0), (140, 7, 0, 0)]),
+    ("magas tam", [(350, 14, 4, 1), (270, 12, 0, 0), (220, 10, 0, 0), (190, 7, 0, 0)]),
+    ("taps",     [(None, 0, 12, 2), (None, 0, 11, 3), (None, 0, 6, 3)]),
+    ("kolomp",   [(800, 12, 5, 1), (800, 7, 0, 0)]),
+    ("ride",     [(None, 0, 6, 2), (None, 0, 4, 2), (None, 0, 3, 2)]),
+    ("perem",    [(1200, 10, 8, 1)]),
+]
+KICK, SNARE, HAT, OPENHAT, CRASH, LOTOM, MIDTOM, HITOM, CLAP, COWBELL, RIDE, RIM = range(12)
+GM_DRUMS = {35: KICK, 36: KICK, 37: RIM, 38: SNARE, 40: SNARE, 39: CLAP,
+            42: HAT, 44: HAT, 46: OPENHAT, 54: OPENHAT,
+            49: CRASH, 52: CRASH, 55: CRASH, 57: CRASH, 51: RIDE, 53: RIDE, 59: RIDE,
+            41: LOTOM, 43: LOTOM, 45: MIDTOM, 47: MIDTOM, 48: HITOM, 50: HITOM,
+            56: COWBELL}
+# ha egy tickre több dob esik, ez dönt (előrébb = fontosabb)
+DRUM_PRIORITY = [KICK, SNARE, CLAP, CRASH, LOTOM, MIDTOM, HITOM, OPENHAT, RIDE, COWBELL, RIM, HAT]
+
+
+def drum_kit_bytes():
+    """-> dobonként a lépések bájtjai (a címtáblát build_kit teszi elé)."""
+    steps = []
+    for _, kit in DRUM_KIT:
+        b = bytearray()
+        for hz, tvol, nvol, nlen in kit:
+            if hz is None:
+                lo, hi = 0, 0xFF
+            else:
+                p = max(0, min(4094, int(round(pitch_value(hz)))))
+                lo, hi = p & 0xFF, p >> 8
+            b += bytes((tvol, lo, hi, (nvol << 4) | min(8, nlen)))
+        b.append(0xFF)
+        steps.append(bytes(b))
+    return steps
+
+
+def build_kit(kit_offset):
+    steps = drum_kit_bytes()
+    head = 1 + 2 * len(steps)
+    out = bytearray([len(steps)])
+    pos = kit_offset + head
+    for st in steps:
+        out += struct.pack("<H", pos)
+        pos += len(st)
+    for st in steps:
+        out += st
+    return bytes(out)
+
+
+def drum_hits(notes, rate, curve):
+    """Dob hangok -> {tick: (dob, gyengítés)}"""
+    hits = {}
+    for s, e, n, v, ch in notes:
+        if n not in GM_DRUMS and not 27 <= n <= 87:
+            continue
+        k = GM_DRUMS.get(n, HAT)
+        t = int(round(s * rate))
+        att = max(0, min(15, int(round((1.0 - max(0.0, min(1.0, v / 127.0)) ** curve) * 8))))
+        old = hits.get(t)
+        if old is None or DRUM_PRIORITY.index(k) < DRUM_PRIORITY.index(old[0]) or \
+                (k == old[0] and att < old[1]):
+            hits[t] = (k, att)
+    return hits
+
+
 def velocity_to_volume(vel, curve, vmin, vmax):
     """MIDI erősség (0..127, a CC7/CC11 már benne) -> 1..15."""
     x = max(0.0, min(1.0, vel / 127.0)) ** curve
@@ -280,9 +359,10 @@ def encode_wait(out, n):
         n -= k
 
 
-def convert(notes, args):
+def convert(notes, args, drums=None):
     ticks = build_ticks(notes, args.rate)
-    total = max((t[1] for t in ticks), default=0)
+    drums = drums or {}
+    total = max([t[1] for t in ticks] + [t + 6 for t in drums])
     starts = {}
     for t in ticks:
         starts.setdefault(t[0], []).append(t)
@@ -291,7 +371,7 @@ def convert(notes, args):
     prev = None          # (notes tuple, idx set) az előző tickben
     cur_vol = None
     pending_wait = 0
-    stats = {"chords": 0, "notes": 0, "rests": 0}
+    stats = {"chords": 0, "notes": 0, "rests": 0, "drums": len(drums)}
     for t in range(total + 1):
         for k in [k for k, a in active.items() if a[1] <= t]:
             del active[k]
@@ -322,6 +402,11 @@ def convert(notes, args):
                         out += bytes(s[0] for s in sel)
                         stats["chords"] += 1
             prev = key
+        if t in drums:
+            encode_wait(out, pending_wait)
+            pending_wait = 0
+            k, att = drums[t]
+            out += bytes((0xA1 + k, att))
         pending_wait += 1
     encode_wait(out, pending_wait)
     out.append(0x80)
@@ -346,7 +431,9 @@ def main():
     ap.add_argument("--arp-speed", type=int, default=1,
                     help="arpeggio: ennyi tickenként lép (alap: 1 = ~50 Hz)")
     ap.add_argument("--channels", help="csak ezek a MIDI csatornák (1..16, vesszővel)")
-    ap.add_argument("--drums", action="store_true", help="a 10. (dob) csatorna is szóljon")
+    ap.add_argument("--drums", choices=("synth", "pitched", "off"), default="synth",
+                    help="a 10. csatorna: synth = szintetizált dobok (alap), "
+                         "pitched = dallamhangként, off = kimarad")
     ap.add_argument("--transpose", type=int, default=0, help="félhangokban")
     ap.add_argument("--tuning", type=float, default=440.0, help="az A4 frekvenciája")
     ap.add_argument("--speed", type=float, default=1.0, help="tempószorzó")
@@ -365,7 +452,10 @@ def main():
     if args.channels:
         channels = {int(c) - 1 for c in args.channels.split(",")}
     else:
-        channels = {c for c in range(16) if args.drums or c != DRUM_CHANNEL}
+        channels = set(range(16))
+    use_drums = args.drums == "synth" and DRUM_CHANNEL in channels
+    if args.drums != "pitched":
+        channels.discard(DRUM_CHANNEL)
     if not 1 <= args.arp_speed <= 255:
         ap.error("--arp-speed: 1..255")
     if not 0 <= args.decay <= 255:
@@ -376,15 +466,22 @@ def main():
     with open(args.midi, "rb") as f:
         division, events = parse_midi(f.read())
     notes = collect_notes(division, events, channels, args.transpose, args.speed)
-    if not notes:
+    drums = {}
+    if use_drums:
+        drums = drum_hits(collect_notes(division, events, {DRUM_CHANNEL}, 0, args.speed),
+                          args.rate, args.curve)
+    if not notes and not drums:
         sys.exit("a kiválasztott csatornákon nincs hang")
-    body, total, stats = convert(notes, args)
+    body, total, stats = convert(notes, args, drums)
 
     flags = 1 if args.loop else 0
-    header = struct.pack("<BBBBHH", flags, args.arp_speed, args.decay,
-                         max(0, min(15, args.decay_floor)), 0, 0)
     table = pitch_table(args.tuning)
+    kit_offset = 8 + 256 + len(body) if drums else 0
+    header = struct.pack("<BBBBHH", flags, args.arp_speed, args.decay,
+                         max(0, min(15, args.decay_floor)), 0, kit_offset)
     data = header + b"".join(struct.pack("<H", p) for p in table) + body
+    if drums:
+        data += build_kit(kit_offset)
 
     os.makedirs(os.path.dirname(os.path.abspath(args.output)), exist_ok=True)
     with open(args.output, "wb") as f:
@@ -398,13 +495,14 @@ def main():
 
     used = sorted({n[2] for n in notes})
     secs = total / args.rate
-    print("%s: %d hang, %d:%04.1f, %d tick; %d hang, %d akkord, %d szünet; %d bájt"
+    print("%s: %d hang, %d:%04.1f, %d tick; %d hang, %d akkord, %d szünet, %d dobütés; %d bájt"
           % (os.path.basename(args.midi), len(notes), secs // 60, secs % 60, total,
-             stats["notes"], stats["chords"], stats["rests"], len(data)))
-    lo, hi = used[0], used[-1]
-    print("hangterjedelem: MIDI %d..%d (%.1f..%.1f Hz)"
-          % (lo, hi, note_freq(lo, args.tuning), note_freq(hi, args.tuning)))
-    if note_freq(lo, args.tuning) < TVC_CLOCK / 4096:
+             stats["notes"], stats["chords"], stats["rests"], stats["drums"], len(data)))
+    lo, hi = (used[0], used[-1]) if used else (60, 60)
+    if used:
+        print("hangterjedelem: MIDI %d..%d (%.1f..%.1f Hz)"
+              % (lo, hi, note_freq(lo, args.tuning), note_freq(hi, args.tuning)))
+    if used and note_freq(lo, args.tuning) < TVC_CLOCK / 4096:
         print("figyelem: a 47,7 Hz alatti hangok egy oktávval feljebb szólnak")
     if len(data) > args.max_size:
         print("figyelem: %d bájt, a 32k-s gépen kevés lehet a hely" % len(data))

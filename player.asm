@@ -49,7 +49,7 @@ KEYMASK     equ 28h
 ; +2   lecsengés (tick / hangerőlépés, 0 = nincs)
 ; +3   lecsengés alsó szintje (0..15)
 ; +4   dw ismétlési pont (az eseménylista elejéhez képest)
-; +6   dw tartalék
+; +6   dw a dobkészlet helye a dal elejéhez képest (0 = nincs)
 ; +8   128 x dw PITCH (MIDI hangjegy -> 12 bites PITCH)
 ; +264 eseménylista:
 ;   00..7F  hang (MIDI hangjegy), egyszólamú
@@ -57,13 +57,21 @@ KEYMASK     equ 28h
 ;   82..84  akkord: utána 2..4 hangjegy, arpeggióval szól
 ;   90..9F  hangerő (a következő hangoktól)
 ;   A0 lo hi  várakozás lo+256*hi tick (>= 1)
+;   A1..BF g  dobütés: a dobkészlet (A-A1h). eleme, g = gyengítés (0..15)
 ;   C0..FE  várakozás 1..63 tick
 ;   FF      vége (ismétléskor ugrás az ismétlési pontra)
+;
+; Dobkészlet: db darabszám, darabszám x dw (a dal elejéhez képest), majd
+; dobonként tickenkénti lépések, 4 bájt: hangerő (FF = vége), PITCH lo,
+; PITCH hi (FF = nincs hang), zaj (b4..b7 hangerő, b0..b3 hossz ~1,2 ms-os
+; egységekben). A dobütés néhány tickre átveszi a csatornát; közben a dallam
+; állapota tovább halad, és a dob végén a dallam aktuális hangja szól tovább.
 SONG_FLAGS  equ song+0
 SONG_ARP    equ song+1
 SONG_DECAY  equ song+2
 SONG_FLOOR  equ song+3
 SONG_LOOP   equ song+4
+SONG_KIT    equ song+6
 PITCH_TAB   equ song+8
 SONG_EVENTS equ song+8+256
 
@@ -172,6 +180,7 @@ init_song:
             xor a
             ld (arp_n), a
             ld (cur_vol), a
+            ld (drum_on), a
             ld a, 12
             ld (note_vol), a
             ld a, (SONG_ARP)
@@ -191,6 +200,7 @@ irq:
             push de
             push hl
             call tick
+            call drum_step
             pop hl
             pop de
             pop bc
@@ -223,7 +233,7 @@ tick:
             jr c, .vol
             jr z, .lwait
             cp 0C0h
-            jr c, .next             ; A1..BF: fenntartott, átlépjük
+            jp c, .drum             ; A1..BF: dobütés
             cp 0FFh
             jr z, .end
             sub 0BFh                ; C0..FE -> 1..63
@@ -240,6 +250,14 @@ tick:
             ld (ptr), hl
             ld (wait), de
             ret
+.drum:
+            sub 0A1h                ; a dob sorszáma
+            ld c, (hl)              ; gyengítés
+            inc hl
+            push hl
+            call drum_start
+            pop hl
+            jp .next
 .vol:
             and 0Fh
             ld (note_vol), a
@@ -344,8 +362,139 @@ effects:
             ld (cur_vol), a
             jp set_vol
 
+; ---- dob ---------------------------------------------------------------------
+; A = a dob sorszáma, C = gyengítés
+drum_start:
+            ld b, a
+            ld hl, (SONG_KIT)
+            ld a, h
+            or l
+            ret z                   ; nincs dobkészlet
+            ld de, song
+            add hl, de
+            ld a, b
+            cp (hl)
+            ret nc                  ; nincs ilyen dob
+            inc hl
+            add a, a
+            ld e, a
+            ld d, 0
+            add hl, de
+            ld e, (hl)
+            inc hl
+            ld d, (hl)
+            ld hl, song
+            add hl, de
+            ld (drum_ptr), hl
+            ld a, c
+            ld (drum_att), a
+            ld a, 1
+            ld (drum_on), a
+            ret
+
+; a futó dob egy lépése (minden tickben, a dallam után)
+drum_step:
+            ld a, (drum_on)
+            or a
+            ret z
+            ld hl, (drum_ptr)
+            ld a, (hl)
+            inc hl
+            cp 0FFh
+            jr z, .end
+            call atten
+            ld (drum_vol), a
+            ld e, (hl)
+            inc hl
+            ld d, (hl)
+            inc hl
+            ld a, (hl)
+            inc hl
+            ld (drum_ptr), hl
+            ld (drum_noise), a
+            ld a, d
+            inc a
+            jr z, .notone
+            ld a, e                 ; a dob hangja
+            out (P_PITCHLO), a
+            ld a, (V_PORT05)
+            and 0C0h
+            or 10h
+            or d
+            ld (V_PORT05), a
+            out (P_PITCHHI), a
+            ld a, (drum_vol)
+            jr .tvol
+.notone:    xor a
+            ld (drum_vol), a
+.tvol:      call hw_vol
+            ld a, (drum_noise)      ; zaj
+            and 0Fh
+            ret z
+            ld b, a                 ; B = hossz
+            ld a, (drum_noise)
+            rrca
+            rrca
+            rrca
+            rrca
+            and 0Fh
+            call atten
+            or a
+            ret z
+            add a, a
+            add a, a
+            ld c, a                 ; C = amplitúdó (06h b2..b5)
+            ld a, (V_PORT06)
+            and 0C3h
+            ld d, a                 ; D = a 06h többi bitje
+            ld a, (V_PORT05)
+            and 0EFh                ; b4 = 0: az amplitúdóregiszter DAC
+            out (P_PITCHHI), a
+            ld hl, (lfsr)
+.unit:      push bc
+            ld b, 48                ; 48 x 79 ciklus = ~1,2 ms
+.sample:    srl h                   ; 16 bites Galois-LFSR (B400h)
+            rr l
+            sbc a, a
+            ld e, a
+            and 0B4h
+            xor h
+            ld h, a
+            ld a, e
+            and c
+            or d
+            out (P_AMP), a
+            djnz .sample
+            pop bc
+            djnz .unit
+            ld (lfsr), hl
+            ld a, (V_PORT05)        ; az oszcillátor vissza
+            out (P_PITCHHI), a
+            ld a, (drum_vol)
+            jp hw_vol
+.end:
+            xor a
+            ld (drum_on), a
+            call hw_tone            ; a dallam hangja szól tovább
+            ld a, (cur_vol)
+            jp hw_vol
+
+; A = max(0, A - gyengítés)
+atten:
+            push bc
+            ld b, a
+            ld a, (drum_att)
+            ld c, a
+            ld a, b
+            sub c
+            jr nc, .ok
+            xor a
+.ok:        pop bc
+            ret
+drum_code_end:
+
 ; ---- hardver ----------------------------------------------------------------
-; A = MIDI hangjegy (0..127): PITCH beállítása, oszcillátor be
+; A = MIDI hangjegy (0..127): a dallam PITCH-e; dob közben csak eltároljuk
 set_note:
             ld l, a
             ld h, 0
@@ -353,18 +502,36 @@ set_note:
             ld de, PITCH_TAB
             add hl, de
             ld a, (hl)
-            out (P_PITCHLO), a
+            ld (sh_lo), a
             inc hl
+            ld a, (hl)
+            ld (sh_hi), a
+            ld a, (drum_on)
+            or a
+            ret nz
+; a dallam eltárolt PITCH-e a hardverre, oszcillátor be
+hw_tone:
+            ld a, (sh_lo)
+            out (P_PITCHLO), a
+            ld a, (sh_hi)
+            ld b, a
             ld a, (V_PORT05)
             and 0C0h                ; magnómotorok maradnak, hang-IT tiltva
             or 10h                  ; hangjel engedélyezve
-            or (hl)                 ; PITCH b8..b11
+            or b                    ; PITCH b8..b11
             ld (V_PORT05), a
             out (P_PITCHHI), a
             ret
 
-; A = hangerő (0..15)
+; A = a dallam hangereje (0..15); dob közben nem írjuk ki
 set_vol:
+            ld b, a
+            ld a, (drum_on)
+            or a
+            ret nz
+            ld a, b
+; A = hangerő (0..15) a hardverre
+hw_vol:
             add a, a
             add a, a
             ld b, a
@@ -378,7 +545,9 @@ set_vol:
 sound_off:
             xor a
             ld (arp_n), a
-            call set_vol
+            ld (drum_on), a
+            ld (cur_vol), a
+            call hw_vol
             ld a, (V_PORT05)
             and 0C0h                ; hangjel és hang-IT ki
             ld (V_PORT05), a
@@ -399,6 +568,14 @@ arp_cnt:    db 0
 arp_n:      db 0
 arp_i:      db 0
 arp_notes:  ds 4
+sh_lo:      db 0                    ; a dallam PITCH-e (dob közben)
+sh_hi:      db 0
+drum_on:    db 0
+drum_ptr:   dw 0
+drum_att:   db 0
+drum_vol:   db 0
+drum_noise: db 0
+lfsr:       dw 0ACE1h
 
 song:       incbin "build/song.bin"
 prog_end:
