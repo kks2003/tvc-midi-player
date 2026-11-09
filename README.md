@@ -26,6 +26,30 @@ Ep128web „CAS → WAV…” funkciójával készíthető magnós hangfájl. Le
 közben az **ESC** vagy a **SPACE** leállítja a zenét, és visszaadja a vezérlést
 a BASIC-nek.
 
+## Webes felület (`web/`)
+
+A `web/index.html` böngészőben végzi el ugyanezt, telepítés nélkül:
+
+- ráhúzott MIDI-fájl, a csatornák listája (sávnév, hangszám, hangterjedelem)
+  jelölőnégyzetekkel, a lejátszó módja és a beállítások,
+- azonnali újraszámolás, összegzés (hossz, méret, memória a 32k-s gépen),
+- **előnézet:** a `web/preview.js` a két lejátszót szimulálja (a poly motort
+  mintára pontosan), zongoratekercs-nézettel, amelyen halványan a MIDI,
+  színesen a TVC kimenete látszik,
+- `.cas` letöltése, és **megnyitás az Ep128web-ben**: a program a linkben
+  utazik (`#m=gép&f=…`), az emulátor betölti és elindítja.
+
+A `web/midi2tvc.js` a Python konverter JavaScript-portja, a kimenete bájtra
+azonos (`python3 test/web_parity.py` ellenőrzi 11 beállítással, a tesztdalon
+és a DuckTales-en). A lejátszók gépi kódja a `web/players.js`-ben van; a
+`player*.asm` módosítása után újra kell generálni:
+
+```sh
+python3 tools/export_players.py
+```
+
+Helyben a `web/index.html` közvetlenül megnyitható (`file://` is jó).
+
 ## A konverter (`midi2tvc.py`)
 
 | Kapcsoló | Jelentés |
