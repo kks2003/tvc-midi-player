@@ -8,6 +8,9 @@ fájlokat olvassa. A fejlécet a TVC dolgozza fel, a zene 6502-es
 lejátszórutinját pedig egy Z80-as 6502-emulátor futtatja. A SID-regiszterek
 írása a kártya `$E0..$F8` regisztereibe megy, a hangot a kártya állítja elő.
 
+A kész, lefordított lejátszó: **[`sidplay.cas`](sidplay.cas)** (ebben a
+könyvtárban). Saját fordítás:
+
 ```sh
 ./build.sh                   # -> build/sidplay.cas
 ```
