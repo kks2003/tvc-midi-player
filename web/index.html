@@ -1,0 +1,723 @@
+<!doctype html>
+<html lang="hu">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<title>TVC MIDI-lejátszó</title>
+<meta name="claude:viewport-fit-sides" content="cover">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500&family=IBM+Plex+Sans:wght@400;500;600&family=IBM+Plex+Sans+Condensed:wght@600;700&display=swap">
+<style>
+/* Elrendezés: bal oldalt a beállítások hasábja, jobbra az eredmény (összegzés,
+   zongoratekercs, kimenet); keskeny képernyőn egymás alatt. A szólamok színei
+   adatszínek: 1. szólam kobalt, 2. türkiz, 3. borostyán, zaj/dob szürke. */
+:root {
+  --bg: #eef0f3;
+  --surface: #ffffff;
+  --sunk: #e4e7ec;
+  --ink: #1a2130;
+  --muted: #5a6476;
+  --line: #d3d8e0;
+  --accent: #2f45c4;
+  --accent-ink: #ffffff;
+  --v0: #2f45c4;
+  --v1: #0e8a7e;
+  --v2: #c27a0e;
+  --v3: #7d8698;
+  --src: rgba(26, 33, 48, 0.13);
+  --warn: #a8471b;
+  --ok: #1d7a43;
+  --font-body: "IBM Plex Sans", system-ui, -apple-system, "Segoe UI", sans-serif;
+  --font-head: "IBM Plex Sans Condensed", "IBM Plex Sans", system-ui, sans-serif;
+  --font-mono: "IBM Plex Mono", ui-monospace, "SFMono-Regular", Menlo, Consolas, monospace;
+  --r: 6px;
+}
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    --bg: #12151b; --surface: #1a1e26; --sunk: #232833; --ink: #e6e9ef; --muted: #9aa3b4;
+    --line: #2e3442; --accent: #8a9bff; --accent-ink: #10131a;
+    --v0: #8a9bff; --v1: #3fc7b8; --v2: #e3a647; --v3: #8d96a8;
+    --src: rgba(230, 233, 239, 0.14); --warn: #f08a5d; --ok: #5cc98a;
+    color-scheme: dark;
+  }
+}
+:root[data-theme="dark"] {
+  --bg: #12151b; --surface: #1a1e26; --sunk: #232833; --ink: #e6e9ef; --muted: #9aa3b4;
+  --line: #2e3442; --accent: #8a9bff; --accent-ink: #10131a;
+  --v0: #8a9bff; --v1: #3fc7b8; --v2: #e3a647; --v3: #8d96a8;
+  --src: rgba(230, 233, 239, 0.14); --warn: #f08a5d; --ok: #5cc98a;
+  color-scheme: dark;
+}
+* { box-sizing: border-box; }
+[hidden] { display: none !important; }
+html { -webkit-text-size-adjust: 100%; }
+body {
+  margin: 0; background: var(--bg); color: var(--ink);
+  font: 15px/1.5 var(--font-body);
+}
+.wrap {
+  max-width: 1240px; margin: 0 auto;
+  padding-block: 20px 40px;
+  padding-left: max(16px, env(safe-area-inset-left, 0px));
+  padding-right: max(16px, env(safe-area-inset-right, 0px));
+  display: grid; gap: 20px;
+}
+header { display: flex; flex-wrap: wrap; align-items: baseline; gap: 6px 16px; }
+h1 { font: 700 28px/1.1 var(--font-head); letter-spacing: 0.01em; margin: 0; text-wrap: balance; }
+header p { margin: 0; color: var(--muted); max-width: 70ch; }
+h2 {
+  font: 600 12px/1.2 var(--font-head); text-transform: uppercase; letter-spacing: 0.09em;
+  color: var(--muted); margin: 0;
+}
+.grid { display: grid; gap: 20px; grid-template-columns: minmax(0, 360px) minmax(0, 1fr); align-items: start; }
+@media (max-width: 900px) { .grid { grid-template-columns: minmax(0, 1fr); } }
+.col { display: grid; gap: 16px; min-width: 0; }
+.panel { background: var(--surface); border: 1px solid var(--line); border-radius: var(--r); padding: 16px; display: grid; gap: 12px; min-width: 0; }
+
+/* forrás */
+.drop {
+  border: 1.5px dashed var(--line); border-radius: var(--r); padding: 14px; display: grid; gap: 8px;
+  background: var(--sunk); transition: border-color .15s, background .15s;
+}
+.drop.over { border-color: var(--accent); }
+.drop .file { font: 500 14px/1.3 var(--font-mono); word-break: break-all; }
+.drop .meta { color: var(--muted); font-size: 13px; }
+.row { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; }
+
+button, .btn, select, input[type="number"], input[type="text"] {
+  font: inherit; color: inherit;
+}
+button, .btn {
+  display: inline-flex; align-items: center; gap: 6px; cursor: pointer;
+  border: 1px solid var(--line); background: var(--surface); border-radius: var(--r);
+  padding: 7px 12px; font-weight: 500; font-size: 14px; text-decoration: none; color: var(--ink);
+}
+button:hover, .btn:hover { border-color: var(--muted); }
+button.primary, .btn.primary { background: var(--accent); border-color: var(--accent); color: var(--accent-ink); }
+button:disabled, .btn[aria-disabled="true"] { opacity: .45; cursor: not-allowed; pointer-events: none; }
+:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+
+/* csatornák */
+table { border-collapse: collapse; width: 100%; font-size: 13.5px; }
+.tablewrap { overflow-x: auto; }
+th { text-align: left; font-weight: 500; color: var(--muted); font-size: 12px; padding: 0 6px 6px; }
+td { padding: 5px 6px; border-top: 1px solid var(--line); vertical-align: middle; }
+td.num, th.num { text-align: right; font-variant-numeric: tabular-nums; font-family: var(--font-mono); font-size: 12.5px; }
+td.name { max-width: 150px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.tag { font: 500 11px/1 var(--font-mono); padding: 3px 5px; border-radius: 4px; background: var(--sunk); color: var(--muted); white-space: nowrap; }
+
+/* mód választó */
+.seg { display: grid; grid-template-columns: repeat(3, 1fr); border: 1px solid var(--line); border-radius: var(--r); overflow: hidden; }
+.seg input { position: absolute; opacity: 0; pointer-events: none; }
+.seg label { padding: 8px 6px; text-align: center; cursor: pointer; font-size: 13.5px; font-weight: 500; border-left: 1px solid var(--line); }
+.seg label:first-of-type { border-left: 0; }
+.seg input:checked + label { background: var(--accent); color: var(--accent-ink); }
+.seg input:focus-visible + label { outline: 2px solid var(--accent); outline-offset: -3px; }
+.hint { color: var(--muted); font-size: 13px; margin: 0; }
+
+.fields { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 10px 12px; }
+.field { display: grid; gap: 3px; min-width: 0; }
+.field label { font-size: 12.5px; color: var(--muted); }
+.field input[type="number"], .field input[type="text"], .field select {
+  width: 100%; border: 1px solid var(--line); border-radius: var(--r); background: var(--surface);
+  padding: 6px 8px; font-size: 14px; font-family: var(--font-mono);
+}
+.field.wide { grid-column: 1 / -1; }
+.check { display: flex; align-items: center; gap: 8px; font-size: 14px; }
+details summary { cursor: pointer; font-size: 13.5px; color: var(--muted); }
+details[open] summary { margin-bottom: 10px; }
+
+/* eredmény */
+.stats { display: grid; grid-template-columns: repeat(auto-fit, minmax(130px, 1fr)); gap: 1px; background: var(--line); border: 1px solid var(--line); border-radius: var(--r); overflow: hidden; }
+.stat { background: var(--surface); padding: 10px 12px; display: grid; gap: 2px; }
+.stat b { font: 500 18px/1.2 var(--font-mono); font-variant-numeric: tabular-nums; }
+.stat span { font-size: 12px; color: var(--muted); }
+.mem { display: grid; gap: 5px; }
+.membar { height: 8px; border-radius: 4px; background: var(--sunk); overflow: hidden; display: flex; }
+.membar i { display: block; height: 100%; }
+.mem .legend { display: flex; flex-wrap: wrap; gap: 4px 14px; font-size: 12.5px; color: var(--muted); font-family: var(--font-mono); }
+.dot { display: inline-block; width: 8px; height: 8px; border-radius: 2px; margin-right: 5px; vertical-align: 0; }
+.warns { display: grid; gap: 4px; margin: 0; padding: 0; list-style: none; font-size: 13.5px; color: var(--warn); }
+.error { color: var(--warn); font-weight: 500; }
+
+.rollbox { position: relative; border: 1px solid var(--line); border-radius: var(--r); background: var(--sunk); overflow: hidden; cursor: crosshair; }
+#roll { display: block; width: 100%; height: 280px; }
+#playhead { position: absolute; top: 0; bottom: 0; width: 2px; background: var(--ink); opacity: .7; pointer-events: none; left: 0; }
+.legendrow { display: flex; flex-wrap: wrap; gap: 4px 16px; font-size: 12.5px; color: var(--muted); }
+.time { font: 500 14px/1 var(--font-mono); font-variant-numeric: tabular-nums; }
+
+pre.basic {
+  margin: 0; padding: 12px 14px; border-radius: var(--r); background: var(--sunk); border: 1px solid var(--line);
+  font: 13.5px/1.6 var(--font-mono); overflow-x: auto;
+}
+.actions { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; }
+.note { font-size: 13px; color: var(--muted); }
+.status { font-size: 13px; min-height: 1.2em; }
+footer { color: var(--muted); font-size: 13px; }
+footer code, .hint code { font-family: var(--font-mono); font-size: 12.5px; }
+@media (prefers-reduced-motion: reduce) { * { transition: none !important; } }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <header>
+    <h1>TVC MIDI-lejátszó</h1>
+    <p>MIDI-fájlból Videoton TV-Computerre betölthető, magától induló <code>.cas</code> program. A beállítások változására azonnal újraszámol; az előnézet a TVC lejátszóját szimulálja.</p>
+  </header>
+
+  <div class="grid">
+    <div class="col">
+      <section class="panel" aria-labelledby="h-src">
+        <h2 id="h-src">Forrás</h2>
+        <div class="drop" id="drop">
+          <div class="file" id="srcName">–</div>
+          <div class="meta" id="srcMeta">Húzz ide egy .mid fájlt, vagy válassz egyet.</div>
+          <div class="row">
+            <label class="btn primary" for="fileInput">MIDI-fájl megnyitása…</label>
+            <input id="fileInput" type="file" accept=".mid,.midi,audio/midi" hidden>
+            <button id="sampleBtn" type="button">Példadal</button>
+          </div>
+        </div>
+      </section>
+
+      <section class="panel" aria-labelledby="h-ch">
+        <h2 id="h-ch">Csatornák</h2>
+        <div class="tablewrap">
+          <table>
+            <thead><tr><th></th><th class="num">Cs.</th><th>Sáv</th><th class="num">Hang</th><th>Tartomány</th></tr></thead>
+            <tbody id="chBody"><tr><td colspan="5" class="note">Nincs betöltött fájl.</td></tr></tbody>
+          </table>
+        </div>
+        <p class="hint">A 10. csatorna a dob. Többszólamú módban a legmagasabb hang (dallam), a legmélyebb (basszus) és a következő legmagasabb kap szólamot, ezért érdemes a kísérő sávokat válogatni.</p>
+      </section>
+
+      <section class="panel" aria-labelledby="h-mode">
+        <h2 id="h-mode">Lejátszó</h2>
+        <div class="seg" role="radiogroup" aria-labelledby="h-mode">
+          <input type="radio" name="mode" id="m-poly" value="poly" checked><label for="m-poly">Többszólamú</label>
+          <input type="radio" name="mode" id="m-arp" value="arp"><label for="m-arp">Arpeggio</label>
+          <input type="radio" name="mode" id="m-mono" value="mono"><label for="m-mono">Egyszólamú</label>
+        </div>
+        <p class="hint" id="modeHint"></p>
+        <div class="fields" id="f-poly">
+          <div class="field"><label for="polyVolume">Szólam hangereje</label><input id="polyVolume" type="number" min="1" max="15" value="9"></div>
+          <div class="field"><label for="polyKnee">Keverés térde</label><input id="polyKnee" type="number" min="1" max="15" value="10"></div>
+        </div>
+        <div class="fields" id="f-arp" hidden>
+          <div class="field"><label for="maxNotes">Hangok száma</label><select id="maxNotes"><option>2</option><option selected>3</option><option>4</option></select></div>
+          <div class="field"><label for="arpSpeed">Lépés (tick)</label><input id="arpSpeed" type="number" min="1" max="255" value="1"></div>
+          <label class="check field wide"><input id="arpBass" type="checkbox"> A basszus mindig szóljon</label>
+        </div>
+        <div class="fields" id="f-mono" hidden>
+          <div class="field wide"><label for="prio">Melyik hang szóljon</label>
+            <select id="prio"><option value="high">a legmagasabb</option><option value="low">a legmélyebb</option><option value="last">a legutóbb leütött</option></select></div>
+        </div>
+      </section>
+
+      <section class="panel" aria-labelledby="h-snd">
+        <h2 id="h-snd">Hang</h2>
+        <div class="fields">
+          <div class="field"><label for="drums">Dob (10. cs.)</label>
+            <select id="drums"><option value="synth">szintetizált</option><option value="pitched">dallamhangként</option><option value="off">kimarad</option></select></div>
+          <div class="field"><label for="transpose">Transzponálás</label><input id="transpose" type="number" min="-48" max="48" value="0"></div>
+          <div class="field"><label for="decay">Lecsengés (tick/lépés)</label><input id="decay" type="number" min="0" max="15" value="4"></div>
+          <div class="field"><label for="decayFloor">…eddig halkul</label><input id="decayFloor" type="number" min="0" max="15" value="5"></div>
+          <div class="field"><label for="speed">Tempószorzó</label><input id="speed" type="number" min="0.25" max="4" step="0.05" value="1"></div>
+          <div class="field"><label for="title">Cím (BASIC sor)</label><input id="title" type="text" maxlength="32"></div>
+        </div>
+        <details>
+          <summary>További beállítások</summary>
+          <div class="fields">
+            <div class="field"><label for="tuning">Hangolás, A4 (Hz)</label><input id="tuning" type="number" min="400" max="480" step="0.5" value="440"></div>
+            <div class="field"><label for="curve">Erősség görbéje</label><input id="curve" type="number" min="0.2" max="3" step="0.1" value="0.7"></div>
+            <div class="field"><label for="minVolume">Min. hangerő</label><input id="minVolume" type="number" min="1" max="15" value="6"></div>
+            <div class="field"><label for="maxVolume">Max. hangerő</label><input id="maxVolume" type="number" min="1" max="15" value="15"></div>
+            <label class="check field wide"><input id="loop" type="checkbox"> Végtelenítve szóljon</label>
+          </div>
+        </details>
+      </section>
+    </div>
+
+    <div class="col">
+      <section class="panel" aria-labelledby="h-res">
+        <h2 id="h-res">Eredmény</h2>
+        <div class="stats" id="stats"></div>
+        <div class="mem" id="mem"></div>
+        <ul class="warns" id="warns"></ul>
+      </section>
+
+      <section class="panel" aria-labelledby="h-roll">
+        <div class="row" style="justify-content: space-between">
+          <h2 id="h-roll">Előnézet</h2>
+          <div class="row">
+            <span class="time" id="time">0:00.0 / 0:00.0</span>
+            <button id="playBtn" class="primary" type="button" disabled>▶ Lejátszás</button>
+          </div>
+        </div>
+        <div class="rollbox" id="rollbox">
+          <canvas id="roll" aria-label="Zongoratekercs: halványan a MIDI hangjai, színesen amit a TVC lejátszik"></canvas>
+          <div id="playhead"></div>
+        </div>
+        <div class="legendrow" id="legend"></div>
+        <p class="hint">Halványan a kiválasztott csatornák MIDI-hangjai, színesen az, amit a TVC tényleg lejátszik. Kattintással oda lehet ugrani.</p>
+      </section>
+
+      <section class="panel" aria-labelledby="h-out">
+        <h2 id="h-out">Kimenet</h2>
+        <pre class="basic" id="basic"></pre>
+        <div class="actions">
+          <button id="dlBtn" class="primary" type="button" disabled>.cas letöltése</button>
+          <button id="srcBtn" type="button" disabled>Forrás letöltése (.zip)</button>
+          <div class="field" style="min-width: 0">
+            <select id="machine" aria-label="Gép az emulátorban">
+              <option value="tvc64p-22" selected>TVC 64k+ · BASIC 2.2</option>
+              <option value="tvc64-12">TVC 64k · BASIC 1.2</option>
+              <option value="tvc32-12">TVC 32k · BASIC 1.2</option>
+            </select>
+          </div>
+          <a class="btn" id="emuLink" href="https://kks2003.github.io/Ep128web/" target="_blank" rel="noopener" aria-disabled="true">Megnyitás az Ep128web-ben ↗</a>
+        </div>
+        <div class="status" id="status"></div>
+        <p class="note">Az Ep128web a linkben kapja meg a programot, betölti és elindítja. Lejátszás közben ESC vagy SPACE állítja le. A lejátszót valódi TVC 64k+ / BASIC 2.2 ROM-mal teszteltük.</p>
+        <p class="note">A forráscsomagban a lejátszó assembly forrása, a dal adatai, az eredeti MIDI és a kész .cas van; a <code>build.sh</code> sjasmplus-szal bájtra ugyanezt a .cas-t fordítja újra, a README pedig megadja az egyenértékű <code>midi2tvc.py</code> parancssort.</p>
+      </section>
+    </div>
+  </div>
+
+  <footer>
+    tvc-midi-player · a konverter a <code>midi2tvc.py</code> bájtra azonos JavaScript-portja; a lejátszók: <code>player_poly.asm</code>, <code>player.asm</code>.
+  </footer>
+</div>
+
+<script src="midi2tvc.js"></script>
+<script src="players.js"></script>
+<script src="preview.js"></script>
+<script>
+(function () {
+  'use strict';
+  const M = window.Midi2Tvc, PV = window.TvcPreview, PLAYERS = window.TVC_PLAYERS;
+  const SAMPLE_B64 = 'TVRoZAAAAAYAAQAEAeBNVHJrAAAAEwD/UQMHoSCeAP9RAwtxsAD/LwBNVHJrAAAATACQPGSDOIA8ACiQPmSDOIA+ACiQQGSDOIBAACiQQWSDOIBBACiQQ2SDOIBDACiQRWSDOIBFACiQR2SDOIBHACiQSGSDOIBIAAD/LwBNVHJrAAAAeZ4AkTxaAJFAWgCRQ1oAkSRQhwSBPAAAgUAAAIFDADyRPFoAkUFaAJFFWocEgTwAAIFBAACBRQA8kTtaAJE+WgCRQVoAkUNahwSBOwAAgT4AAIFBAACBQwA8kTxaAJFAWgCRQ1qHBIE8AACBQAAAgUMAPIEkAAD/LwBNVHJrAAAAbqVAmSRueIkkAHiZKkZ4iSoAeJkmbniJJgB4mSpGeIkqAHiZJG54iSQAeJkqRniJKgB4mSZueIkmAHiZKkZ4iSoAeJkkbniJJAB4mSpGeIkqAHiZJm54iSYAeJkqRniJKgB4mTF/g2CJMQAA/y8A';
+  const $ = (id) => document.getElementById(id);
+  const NOTE_NAMES = ['C', 'C♯', 'D', 'D♯', 'E', 'F', 'F♯', 'G', 'G♯', 'A', 'A♯', 'H'];
+  const noteName = (n) => NOTE_NAMES[n % 12] + (Math.floor(n / 12) - 1);
+  const hex4 = (n) => n.toString(16).toUpperCase().padStart(4, '0') + 'h';
+  const fmtTime = (s) => Math.floor(s / 60) + ':' + (s % 60).toFixed(1).padStart(4, '0');
+  const MODE_HINTS = {
+    poly: '3 négyszög szólam és zaj, szoftveres keverés a DAC-ként használt hangerőregiszteren (~11,3 kHz).',
+    arp: 'A hardveres hangoszcillátor; akkordnál a hangok tickenként (~50 Hz) váltakoznak.',
+    mono: 'A hardveres hangoszcillátor; egyszerre egy hang szól.',
+  };
+  const VOICE_COLORS = ['--v0', '--v1', '--v2', '--v3'];
+
+  let midiBytes = null, parsed = null, fileBase = 'dal', result = null, sim = null, casBytes = null;
+  let channelSel = new Set();
+  const store = {
+    get(k) { try { return localStorage.getItem('tvcmidi.' + k); } catch (e) { return null; } },
+    set(k, v) { try { localStorage.setItem('tvcmidi.' + k, v); } catch (e) { /* nincs tároló */ } },
+  };
+
+  // ---- forrás ----------------------------------------------------------------
+  function loadMidi(bytes, name) {
+    let p;
+    try { p = M.parseMidi(bytes); }
+    catch (e) { setStatus('A fájl nem olvasható: ' + e.message, true); return; }
+    stop();
+    setStatus('');
+    midiBytes = bytes; parsed = p;
+    fileBase = name.replace(/\.[^.]*$/, '') || 'dal';
+    $('srcName').textContent = name;
+    $('title').value = fileBase.slice(0, 32);
+    const chans = channelInfo(p);
+    channelSel = new Set(chans.map((c) => c.ch));
+    const tempo = p.events.find((e) => e[2] === 'tempo');
+    const bpm = tempo ? Math.round(60e6 / tempo[4]) : 120;
+    $('srcMeta').textContent = p.tracks.length + ' sáv · ' + chans.length + ' csatorna · ' + bpm + ' BPM · ' + bytes.length + ' bájt';
+    renderChannels(chans);
+    regenerate();
+  }
+  function channelInfo(p) {
+    const map = new Map();
+    for (const t of p.tracks) {
+      for (const [ch, c] of Object.entries(t.channels)) {
+        const k = +ch;
+        const m = map.get(k) || { ch: k + 1, notes: 0, lo: 127, hi: 0, names: [] };
+        m.notes += c.notes; m.lo = Math.min(m.lo, c.lo); m.hi = Math.max(m.hi, c.hi);
+        if (t.name && !m.names.includes(t.name)) m.names.push(t.name.trim());
+        map.set(k, m);
+      }
+    }
+    return [...map.values()].sort((a, b) => a.ch - b.ch);
+  }
+  function renderChannels(chans) {
+    const body = $('chBody');
+    body.textContent = '';
+    for (const c of chans) {
+      const tr = document.createElement('tr');
+      const id = 'ch-' + c.ch;
+      tr.innerHTML = '<td><input type="checkbox" id="' + id + '" checked></td><td class="num"></td><td class="name"></td><td class="num"></td><td></td>';
+      tr.children[1].textContent = c.ch;
+      const nm = tr.children[2];
+      nm.textContent = c.names.join(', ') || '–';
+      nm.title = nm.textContent;
+      tr.children[3].textContent = c.notes;
+      if (c.ch === 10) tr.children[4].innerHTML = '<span class="tag">dob</span>';
+      else tr.children[4].textContent = noteName(c.lo) + '–' + noteName(c.hi);
+      tr.querySelector('input').addEventListener('change', (e) => {
+        if (e.target.checked) channelSel.add(c.ch); else channelSel.delete(c.ch);
+        regenerate();
+      });
+      body.appendChild(tr);
+    }
+  }
+
+  // ---- beállítások -> konverzió ------------------------------------------------
+  const num = (id) => Number($(id).value);
+  function options() {
+    const mode = document.querySelector('input[name="mode"]:checked').value;
+    return {
+      mode, prio: $('prio').value, maxNotes: num('maxNotes'), arpBass: $('arpBass').checked,
+      arpSpeed: num('arpSpeed'), polyVolume: num('polyVolume'), polyKnee: num('polyKnee'),
+      channels: [...channelSel].sort((a, b) => a - b), drums: $('drums').value,
+      transpose: num('transpose'), tuning: num('tuning'), speed: num('speed'),
+      decay: num('decay'), decayFloor: num('decayFloor'), curve: num('curve'),
+      minVolume: num('minVolume'), maxVolume: num('maxVolume'), loop: $('loop').checked,
+    };
+  }
+  function showModeFields() {
+    const mode = document.querySelector('input[name="mode"]:checked').value;
+    for (const m of ['poly', 'arp', 'mono']) $('f-' + m).hidden = m !== mode;
+    $('modeHint').textContent = MODE_HINTS[mode];
+  }
+  let regenTimer = 0;
+  function regenerate() {
+    clearTimeout(regenTimer);
+    regenTimer = setTimeout(doRegenerate, 120);
+  }
+  function doRegenerate() {
+    if (!parsed) return;
+    stop();
+    const o = options();
+    const warns = [];
+    try {
+      if (!o.channels.length) throw new Error('nincs kiválasztott csatorna');
+      result = M.convertMidi(parsed, o);
+    } catch (e) {
+      result = null; sim = null; casBytes = null;
+      $('stats').textContent = '';
+      $('mem').textContent = '';
+      $('warns').innerHTML = '';
+      const li = document.createElement('li');
+      li.className = 'error';
+      li.textContent = 'Nem készült program: ' + e.message + '.';
+      $('warns').appendChild(li);
+      setOutputsEnabled(false);
+      drawRoll();
+      return;
+    }
+    const player = o.mode === 'poly' ? PLAYERS.poly : PLAYERS.mono;
+    casBytes = M.buildCas(player, result.song, $('title').value || fileBase);
+    sim = PV.simulate(result.song, o.mode, 44100);
+    renderStats(player, warns);
+    renderBasic(player);
+    drawRoll();
+    setOutputsEnabled(true);
+    updateEmuLink();
+    store.set('opts', JSON.stringify(Object.assign({}, o, { channels: undefined })));
+  }
+  function renderStats(player, warns) {
+    const r = result, s = r.stats;
+    const secs = r.total / r.rate;
+    const items = [
+      [fmtTime(secs), 'hossz'],
+      [r.song.length.toLocaleString('hu-HU'), 'bájt dal'],
+      [casBytes.length.toLocaleString('hu-HU'), 'bájt .cas'],
+    ];
+    if (r.mode === 'poly') items.push([s.notes, 'hangindítás'], [s.voices_max + ' + zaj', 'szólam egyszerre']);
+    else items.push([s.notes + s.chords, s.chords ? 'hang / akkord' : 'hang']);
+    items.push([s.drums, 'dobütés']);
+    $('stats').innerHTML = items.map(([b, l]) => '<div class="stat"><b></b><span></span></div>').join('');
+    [...$('stats').children].forEach((el, i) => { el.children[0].textContent = items[i][0]; el.children[1].textContent = items[i][1]; });
+    // memória: a program 19EFh-tól; a 32k-s gépen 7FFFh a felső határ
+    const start = 0x19EF, codeEnd = start + player.code.length, end = codeEnd + r.song.length;
+    const top = 0x7FFF, span = top - start;
+    const pc = (x) => (100 * x / span).toFixed(2) + '%';
+    $('mem').innerHTML =
+      '<div class="membar" role="img" aria-label="Memória a 32k-s gépen"><i style="width:' + pc(codeEnd - start) +
+      ';background:var(--v3)"></i><i style="width:' + pc(end - codeEnd) + ';background:var(--accent)"></i></div>' +
+      '<div class="legend"><span><i class="dot" style="background:var(--v3)"></i>BASIC + lejátszó ' + hex4(start) + '–' + hex4(codeEnd - 1) +
+      '</span><span><i class="dot" style="background:var(--accent)"></i>dal –' + hex4(end - 1) + '</span><span>32k-s gép: ' + hex4(top) + '-ig</span></div>';
+    const w = $('warns');
+    w.innerHTML = '';
+    for (const t of r.warnings.concat(warns)) { const li = document.createElement('li'); li.textContent = 'Figyelem: ' + t + '.'; w.appendChild(li); }
+    if (r.song.length > 20000) { const li = document.createElement('li'); li.textContent = 'Figyelem: a dal ' + r.song.length + ' bájt, a 32k-s gépen kevés lehet a hely.'; w.appendChild(li); }
+  }
+  function renderBasic(player) {
+    const c = player.code;
+    const i = c.findIndex((x, j) => x === 0x55 && c[j + 1] === 0x53 && c[j + 2] === 0x52 && c[j + 3] === 0x96);
+    const addr = String.fromCharCode(...c.slice(i + 4, i + 8));
+    const title = String.fromCharCode(...M.titleBytes($('title').value || fileBase)).trimEnd();
+    $('basic').textContent = '1 PRINT "' + title + '"\n2 X=USR(' + addr + ')';
+  }
+  function setOutputsEnabled(on) {
+    $('dlBtn').disabled = !on;
+    $('srcBtn').disabled = !on;
+    $('playBtn').disabled = !on;
+    $('emuLink').setAttribute('aria-disabled', on ? 'false' : 'true');
+  }
+  function setStatus(t, bad) {
+    const s = $('status');
+    s.textContent = t || '';
+    s.style.color = bad ? 'var(--warn)' : 'var(--muted)';
+  }
+
+  // ---- zongoratekercs --------------------------------------------------------
+  function cssVar(n) { return getComputedStyle(document.documentElement).getPropertyValue(n).trim(); }
+  function drawRoll() {
+    const cv = $('roll');
+    const dpr = window.devicePixelRatio || 1;
+    const W = cv.clientWidth, H = cv.clientHeight;
+    cv.width = Math.round(W * dpr); cv.height = Math.round(H * dpr);
+    const g = cv.getContext('2d');
+    g.setTransform(dpr, 0, 0, dpr, 0, 0);
+    g.clearRect(0, 0, W, H);
+    renderLegend();
+    if (!result || !sim) return;
+    const frames = sim.roll.length, dur = sim.levels.length / sim.rate;
+    const notes = result.notes;
+    let lo = 127, hi = 0;
+    for (const n of notes) { lo = Math.min(lo, n[2]); hi = Math.max(hi, n[2]); }
+    for (const fr of sim.roll) for (const x of fr) if (x.note >= 0 && !x.drum) { lo = Math.min(lo, x.note); hi = Math.max(hi, x.note); }
+    if (lo > hi) { lo = 48; hi = 72; }
+    lo -= 2; hi += 2;
+    const drumH = 18, plotH = H - drumH - 4;
+    const rowH = plotH / (hi - lo + 1);
+    const yOf = (n) => (hi - n) * rowH;
+    const xOfS = (s) => s / dur * W;
+    // oktávvonalak
+    g.fillStyle = cssVar('--line');
+    g.font = '11px ' + cssVar('--font-mono');
+    for (let n = Math.ceil(lo / 12) * 12; n <= hi; n += 12) {
+      g.fillRect(0, yOf(n) + rowH, W, 1);
+      g.fillStyle = cssVar('--muted');
+      g.fillText(noteName(n), 4, yOf(n) + rowH - 3);
+      g.fillStyle = cssVar('--line');
+    }
+    // MIDI-forrás
+    g.fillStyle = cssVar('--src');
+    for (const [s, e, n] of notes) g.fillRect(xOfS(s), yOf(n), Math.max(1, xOfS(e) - xOfS(s)), Math.max(1.5, rowH));
+    // a TVC kimenete: tickenként, egyforma hangokból szakaszok
+    const fx = W / frames;
+    const colors = VOICE_COLORS.map(cssVar);
+    const open = new Map();
+    const flush = (key, endF) => {
+      const o = open.get(key);
+      g.fillStyle = colors[o.v];
+      g.globalAlpha = 0.45 + 0.55 * Math.min(1, o.vol / 12);
+      if (o.drum) g.fillRect(o.f * fx, H - drumH + (o.v === 3 ? 9 : 2), Math.max(1.5, (endF - o.f) * fx), 6);
+      else g.fillRect(o.f * fx, yOf(o.note) + 0.5, Math.max(1, (endF - o.f) * fx), Math.max(1.5, rowH - 1));
+      g.globalAlpha = 1;
+      open.delete(key);
+    };
+    for (let f = 0; f < frames; f++) {
+      const seen = new Set();
+      for (const x of sim.roll[f]) {
+        const key = x.v + ':' + (x.drum ? 'd' : x.note);
+        seen.add(key);
+        const o = open.get(key);
+        if (!o) open.set(key, { f, v: x.v, note: x.note, vol: x.vol, drum: x.drum });
+      }
+      for (const key of [...open.keys()]) if (!seen.has(key)) flush(key, f);
+    }
+    for (const key of [...open.keys()]) flush(key, frames);
+    g.fillStyle = cssVar('--line');
+    g.fillRect(0, H - drumH - 2, W, 1);
+    g.fillStyle = cssVar('--muted');
+    g.fillText('dob', W - 28, H - 5);
+    updatePlayhead();
+  }
+  function renderLegend() {
+    const mode = result ? result.mode : 'poly';
+    const items = mode === 'poly'
+      ? [['--v0', '1. szólam'], ['--v1', '2. szólam'], ['--v2', '3. szólam'], ['--v3', 'zaj (dob)']]
+      : [['--v0', 'hangoszcillátor'], ['--v3', 'dob']];
+    $('legend').innerHTML = items.map(([c, t]) => '<span><i class="dot" style="background:var(' + c + ')"></i>' + t + '</span>').join('') +
+      '<span><i class="dot" style="background:var(--src)"></i>MIDI</span>';
+  }
+
+  // ---- lejátszás ---------------------------------------------------------------
+  let ctx = null, srcNode = null, startAt = 0, offset = 0, raf = 0;
+  function duration() { return sim ? sim.levels.length / sim.rate : 0; }
+  function position() { return srcNode ? Math.min(duration(), ctx.currentTime - startAt) : offset; }
+  function play() {
+    if (!sim) return;
+    try {
+      ctx = ctx || new (window.AudioContext || window.webkitAudioContext)();
+    } catch (e) { setStatus('A böngésző nem tud hangot lejátszani.', true); return; }
+    if (ctx.state === 'suspended') ctx.resume();
+    const data = PV.toAudio(sim.levels);
+    const buf = ctx.createBuffer(1, data.length, Math.round(sim.rate));
+    buf.copyToChannel(data, 0);
+    srcNode = ctx.createBufferSource();
+    srcNode.buffer = buf;
+    srcNode.connect(ctx.destination);
+    if (offset >= duration() - 0.05) offset = 0;
+    startAt = ctx.currentTime - offset;
+    srcNode.start(0, offset);
+    srcNode.onended = () => { if (srcNode && position() >= duration() - 0.05) { srcNode = null; offset = 0; setPlayUi(false); updatePlayhead(); } };
+    setPlayUi(true);
+    tickUi();
+  }
+  function stop() {
+    if (srcNode) {
+      offset = position();
+      const n = srcNode; srcNode = null;
+      try { n.onended = null; n.stop(); } catch (e) { /* már leállt */ }
+    }
+    setPlayUi(false);
+  }
+  function setPlayUi(on) {
+    $('playBtn').textContent = on ? '■ Leállítás' : '▶ Lejátszás';
+    cancelAnimationFrame(raf);
+  }
+  function tickUi() {
+    updatePlayhead();
+    if (srcNode) raf = requestAnimationFrame(tickUi);
+  }
+  function updatePlayhead() {
+    const d = duration(), p = position();
+    $('time').textContent = fmtTime(p) + ' / ' + fmtTime(d);
+    $('playhead').style.left = (d ? (p / d) * $('roll').clientWidth : 0) + 'px';
+  }
+  $('playBtn').addEventListener('click', () => (srcNode ? stop() : play()));
+  $('rollbox').addEventListener('click', (e) => {
+    if (!sim) return;
+    const r = $('roll').getBoundingClientRect();
+    const was = !!srcNode;
+    stop();
+    offset = Math.max(0, Math.min(1, (e.clientX - r.left) / r.width)) * duration();
+    updatePlayhead();
+    if (was) play();
+  });
+
+  // ---- kimenet -----------------------------------------------------------------
+  const baseName = () => (fileBase.replace(/[^A-Za-z0-9_-]+/g, '').slice(0, 12) || 'dal').toLowerCase();
+  const casName = () => baseName() + '.cas';
+  // fájl mentése: az artifact-nézetben a downloads képességgel (ott .cas
+  // nem, .zip igen), különben hagyományos letöltéssel
+  async function saveFile(filename, data, zipFallbackName) {
+    let dl = null;
+    if (window.claude && typeof window.claude.use === 'function') {
+      try { dl = await window.claude.use('downloads'); } catch (e) { dl = null; }
+    }
+    if (dl) {
+      let fname = filename, payload = data;
+      if (!/\.zip$/.test(filename)) {          // .cas -> .zip, benne a .cas
+        fname = zipFallbackName;
+        payload = M.zipFiles([[filename, data]]);
+      }
+      try {
+        await dl.save({ filename: fname, data: new Blob([payload]) });
+        setStatus('Mentve: ' + fname + (fname !== filename ? ' (benne: ' + filename + ')' : '') + '.');
+      } catch (e) {
+        if (e && e.code === 'declined') setStatus('A mentés elmaradt.');
+        else setStatus('A mentés nem sikerült (' + ((e && e.code) || 'hiba') + ').', true);
+      }
+      return;
+    }
+    const url = URL.createObjectURL(new Blob([data], { type: 'application/octet-stream' }));
+    const a = document.createElement('a');
+    a.href = url; a.download = filename;
+    document.body.appendChild(a); a.click(); a.remove();
+    setTimeout(() => URL.revokeObjectURL(url), 5000);
+    setStatus('Letöltve: ' + filename + '.');
+  }
+  $('dlBtn').addEventListener('click', () => {
+    if (casBytes) saveFile(casName(), casBytes, baseName() + '.zip');
+  });
+  $('srcBtn').addEventListener('click', () => {
+    if (!casBytes || !result) return;
+    const name = baseName();
+    const files = M.sourcePackage({
+      players: PLAYERS, result, midiBytes, midiName: name + '.mid', name,
+      title: $('title').value || fileBase, casBytes,
+    });
+    saveFile(name + '-forras.zip', M.zipFiles(files, /\.sh$/), name + '-forras.zip');
+  });
+
+  // Ep128web: #m=gép&f=a fájl (deflate-raw, base64url)&n=név
+  let linkSeq = 0;
+  async function updateEmuLink() {
+    const a = $('emuLink');
+    if (!casBytes || typeof CompressionStream === 'undefined') { a.setAttribute('aria-disabled', 'true'); return; }
+    const seq = ++linkSeq;
+    const z = new Uint8Array(await new Response(new Blob([casBytes]).stream().pipeThrough(new CompressionStream('deflate-raw'))).arrayBuffer());
+    if (seq !== linkSeq) return;
+    let bin = '';
+    for (let i = 0; i < z.length; i += 0x8000) bin += String.fromCharCode.apply(null, z.subarray(i, i + 0x8000));
+    const f = btoa(bin).replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '');
+    if (f.length > 60000) {
+      a.setAttribute('aria-disabled', 'true');
+      a.title = 'A program túl nagy a linkhez: töltsd le, és húzd rá az emulátorra.';
+      return;
+    }
+    a.title = '';
+    a.href = 'https://kks2003.github.io/Ep128web/#m=' + $('machine').value + '&f=' + f + '&n=' + encodeURIComponent(casName());
+    a.setAttribute('aria-disabled', 'false');
+  }
+  $('machine').addEventListener('change', updateEmuLink);
+
+  // ---- események ------------------------------------------------------------------
+  for (const el of document.querySelectorAll('input[name="mode"]')) el.addEventListener('change', () => { showModeFields(); regenerate(); });
+  for (const id of ['polyVolume', 'polyKnee', 'maxNotes', 'arpSpeed', 'arpBass', 'prio', 'drums', 'transpose', 'decay',
+    'decayFloor', 'speed', 'title', 'tuning', 'curve', 'minVolume', 'maxVolume', 'loop']) {
+    $(id).addEventListener(($(id).type === 'checkbox' || $(id).tagName === 'SELECT') ? 'change' : 'input', regenerate);
+  }
+  $('fileInput').addEventListener('change', (e) => {
+    const f = e.target.files[0];
+    e.target.value = '';
+    if (f) f.arrayBuffer().then((b) => loadMidi(new Uint8Array(b), f.name));
+  });
+  $('sampleBtn').addEventListener('click', loadSample);
+  const drop = $('drop');
+  document.addEventListener('dragover', (e) => { e.preventDefault(); drop.classList.add('over'); });
+  document.addEventListener('dragleave', (e) => { if (!e.relatedTarget) drop.classList.remove('over'); });
+  document.addEventListener('drop', (e) => {
+    e.preventDefault();
+    drop.classList.remove('over');
+    const f = e.dataTransfer.files[0];
+    if (f) f.arrayBuffer().then((b) => loadMidi(new Uint8Array(b), f.name));
+  });
+  let rz = 0;
+  window.addEventListener('resize', () => { clearTimeout(rz); rz = setTimeout(drawRoll, 100); });
+  if (window.matchMedia) window.matchMedia('(prefers-color-scheme: dark)').addEventListener('change', drawRoll);
+  new MutationObserver(drawRoll).observe(document.documentElement, { attributes: true, attributeFilter: ['data-theme'] });
+
+  function loadSample() {
+    const bin = atob(SAMPLE_B64);
+    const u8 = new Uint8Array(bin.length);
+    for (let i = 0; i < bin.length; i++) u8[i] = bin.charCodeAt(i);
+    loadMidi(u8, 'teszt.mid');
+    setStatus('Példadal: C-dúr skála, akkordok basszussal, dobritmus (a tesztdal).');
+  }
+
+  // a korábbi beállítások (csak ebben a böngészőben)
+  try {
+    const o = JSON.parse(store.get('opts') || 'null');
+    if (o) {
+      const r = document.querySelector('input[name="mode"][value="' + o.mode + '"]');
+      if (r) r.checked = true;
+      for (const [k, v] of Object.entries(o)) {
+        const el = $(k);
+        if (!el || k === 'title' || k === 'mode') continue;
+        if (el.type === 'checkbox') el.checked = !!v; else if (v !== undefined) el.value = v;
+      }
+    }
+  } catch (e) { /* alapbeállítások */ }
+  showModeFields();
+  renderLegend();
+  loadSample();
+})();
+</script>
+</body>
+</html>
