@@ -38,6 +38,9 @@ const double *ep_dbg_measure_samples();
 int ep_frame_width();
 int ep_frame_height();
 const char *ep_dbg_iolog(int);
+void ep_set_tvc_card256(int, int);
+int ep_tvc_card_put_file(const char *, const char *);
+void ep_write_memory(int, int);
 }
 static std::vector<int16_t> audio;
 static bool recording = false;
@@ -113,6 +116,9 @@ int main(int argc, char **argv)
 {
   if (argc < 6) { std::fprintf(stderr, "usage: %s pkg name seconds out.wav portlog [stop]\n", argv[0]); return 2; }
   mkdir("/tmp/tvcroms", 0755);
+  // CARD=slot: TVC256k++ kártya a megadott slotban (a SID-lejátszó tesztjéhez)
+  int cardSlot = std::getenv("CARD") ? std::atoi(std::getenv("CARD")) : -1;
+  if (cardSlot >= 0) ep_set_tvc_card256(1, cardSlot);
   if (ep_init(48000) != 0 || ep_set_machine_type(1) != 0) { std::fprintf(stderr, "init %s\n", ep_last_error()); return 1; }
   if (ep_unpack_rom_package(argv[1], "/tmp/tvcroms") < 10) { std::fprintf(stderr, "unpack %s\n", ep_last_error()); return 1; }
   ep_reset_memory(128);
@@ -123,7 +129,13 @@ int main(int argc, char **argv)
   }
   ep_reset(1);
   runMs(4000);
-  key(0x3E); runMs(3000);                  // a bekapcsolási kép után Enter; az első leütés elveszhet, ezért " load"
+  key(0x3E); runMs(3000);
+  // CARD_FILE=név,útvonal: a fájl a kártya PSRAM-meghajtójára, a LOAD a kártyáról tölt
+  if (const char *cf = std::getenv("CARD_FILE")) {
+    std::string a(cf); size_t c = a.find(',');
+    if (ep_tvc_card_put_file(a.substr(0, c).c_str(), a.substr(c + 1).c_str()) != 0) { std::fprintf(stderr, "card file: %s\n", ep_last_error()); return 1; }
+    ep_write_memory(0x0B05, 0x80 | cardSlot); ep_write_memory(0x0B0D, 0x80 | cardSlot);
+  }                  // a bekapcsolási kép után Enter; az első leütés elveszhet, ezért " load"
   std::printf("isr0=");                     // az IT-belépő a betöltés előtt
   for (int a = 0x38; a < 0x40; a++) std::printf("%02x ", ep_read_memory(a));
   std::printf("\n");
