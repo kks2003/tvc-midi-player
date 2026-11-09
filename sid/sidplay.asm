@@ -43,14 +43,14 @@ start:
             ld sp, (saved_sp)
             ret
 
-; ---- szöveg kiírása (ROM: RST 30h / 01 = karakter a C-ből) -----------------
+; ---- szöveg kiírása (ROM: RST 30h / 21h = EDITOR karakterkiírás, C) -----------------
 prstr:      ld a, (hl)
             or a
             ret z
             push hl
             ld c, a
             rst 30h
-            db 01h
+            db 21h
             pop hl
             inc hl
             jr prstr
@@ -69,7 +69,7 @@ prfield:    ld b, 32
             push bc
             ld c, a
             rst 30h
-            db 01h
+            db 21h
             pop bc
             pop hl
             inc hl
