@@ -9,7 +9,7 @@ eszközre (/files) -> TVC 64k+ boot -> load "teszt" (autorun) ->
 hangfelvétel és portnapló -> ellenőrzések.  Kell: g++, gcc, sjasmplus, és
 írási jog a /files könyvtárba (az Ep128web FILE: eszköze oda mutat).
 """
-import argparse, glob, os, shutil, struct, subprocess, sys, tempfile, wave
+import argparse, glob, math, os, shutil, struct, subprocess, sys, tempfile, wave
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 REPO = os.path.dirname(HERE)
@@ -210,6 +210,48 @@ def main():
     tail = d2[-rate:]
     check("ESC: leáll a hang", max(tail) - min(tail) < 200)
     check("ESC: az IT-vektor visszaállt", res.split("isr=")[1].startswith("f5 3e 70"))
+    # 3. többszólamú motor (--mode poly)
+    subprocess.check_call([os.path.join(REPO, "build.sh"), mid, "--mode", "poly", "--decay", "4"])
+    shutil.copy(os.path.join(REPO, "build", "teszt.cas"), "/files/poly.cas")
+    wav3 = os.path.join(out, "poly.wav")
+    res = subprocess.check_output([exe, args.roms, "poly", "16", wav3, os.path.join(out, "poly_ports.txt")]).decode()
+    with wave.open(wav3) as w:
+        d3 = struct.unpack("<%dh" % w.getnframes(), w.readframes(w.getnframes()))
+    st = next((i for i in range(len(d3)) if abs(d3[i] - d3[0]) > 200), None)
+    check("poly: szól a hang", st is not None)
+    if st is not None:
+        cents = []
+        for k, n in ((0.1, 60), (0.6, 62), (3.6, 72)):          # C4, D4, C5
+            f = zero_cross_freq(d3[st + int(k * rate): st + int((k + 0.3) * rate)], rate)
+            cents.append(1200 * math.log2(f / midi2tvc.note_freq(n, 440.0)) if f else 999)
+        check("poly: a hangmagasság pontos (C4, D4, C5: ±5 cent)", all(abs(c) < 5 for c in cents),
+              ", ".join("%.1f" % c for c in cents))
+        env = [max(d3[i:i + rate // 200]) - min(d3[i:i + rate // 200])
+               for i in range(st, st + 5 * rate, rate // 200)]
+        ons = [i * 5 for i in range(1, len(env)) if env[i] > 200 and env[i - 1] <= 200]
+        check("poly: időzítés (a C5 3,5 s-nál, ±30 ms)", len(ons) >= 7 and abs(ons[6] - 3500) <= 30,
+              "%s ms" % (ons[6] if len(ons) >= 7 else ons))
+        # az első akkord (C2 + C-dúr): G4 (dallam), C2 (basszus), E4 egyszerre
+        seg = d3[st + int(4.2 * rate): st + int(5.2 * rate)]
+        mean = sum(seg) / len(seg)
+        def power(f):
+            c = sum((x - mean) * math.cos(2 * math.pi * f * i / rate) for i, x in enumerate(seg))
+            s_ = sum((x - mean) * math.sin(2 * math.pi * f * i / rate) for i, x in enumerate(seg))
+            return math.hypot(c, s_)
+        # a csúcs ±3 Hz-en belül (a tick alatti megállások kissé szétkenik)
+        p = {f: max(power(f + k * 0.5) for k in range(-6, 7)) for f in (65.41, 329.63, 392.0, 293.66)}
+        check("poly: akkord: C2, E4 és G4 egyszerre szól (D4 nem)",
+              min(p[65.41], p[329.63], p[392.0]) > 10 * p[293.66],
+              "C2 %.0f, E4 %.0f, G4 %.0f, D4 %.0f" % (p[65.41] / 1e3, p[329.63] / 1e3, p[392.0] / 1e3, p[293.66] / 1e3))
+        tail = d3[-rate:]
+        check("poly: a dal végén csend", max(tail) - min(tail) < 200)
+    check("poly: a rendszer IT-belépése érintetlen", res.split("isr=")[1].startswith("f5 3e 70"))
+    wav4 = os.path.join(out, "poly_esc.wav")
+    subprocess.check_output([exe, args.roms, "poly", "7", wav4, os.path.join(out, "poly_esc.txt"), "4"])
+    with wave.open(wav4) as w:
+        d4 = struct.unpack("<%dh" % w.getnframes(), w.readframes(w.getnframes()))
+    check("poly: ESC: leáll a hang", max(d4[-rate:]) - min(d4[-rate:]) < 200)
+
     print("eredmények: %s" % out)
     print("HIBÁK: %d" % bad if bad else "minden ellenőrzés rendben")
     return 1 if bad else 0

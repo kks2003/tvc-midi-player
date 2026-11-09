@@ -1,12 +1,19 @@
 # tvc-midi-player
 
 MIDI-lejátszó Videoton TV-Computerre. A PC-n futó `midi2tvc.py` a `.mid`
-fájlt tömör, képkockánkénti eseménylistává alakítja. A `player.asm` egy
-megszakításos Z80-lejátszó. A `build.sh` a kettőből egy betölthető, magától
-induló `.cas` fájlt készít.
+fájlt tömör, képkockánkénti eseménylistává alakítja. A `build.sh` ebből és
+a lejátszóból egy betölthető, magától induló `.cas` fájlt készít. Két
+lejátszó van:
+
+- **`player_poly.asm` (`--mode poly`): többszólamú.** 3 négyszög szólam
+  és egy zajcsatorna, szoftveres keveréssel a DAC-ként használt
+  hangerőregiszteren.
+- **`player.asm` (`--mode arp`, alap, vagy `--mode mono`): egycsatornás.**
+  A hardveres hangoszcillátort használja, akkordokat arpeggióval játszik.
 
 ```sh
-./build.sh dal.mid                     # -> build/dal.cas
+./build.sh dal.mid --mode poly --decay 4    # -> build/dal.cas, többszólamú
+./build.sh dal.mid                          # egycsatornás, arpeggio
 ./build.sh dal.mid --mode mono --decay 3 --transpose -12
 ```
 
@@ -23,6 +30,7 @@ a BASIC-nek.
 
 | Kapcsoló | Jelentés |
 | --- | --- |
+| `--mode poly` | többszólamú lejátszó (lásd lent); `--poly-volume` (alap 9) egy szólam legnagyobb hangereje, `--poly-knee` (alap 10) a keverőtábla térde |
 | `--mode arp` (alap) | akkordok arpeggióval: legfeljebb `--max-notes` (2–4, alap 3) hang, a legmagasabbak |
 | `--mode mono` | egyszólamú: `--prio high` (alap), `low` vagy `last` (a legutóbb leütött) |
 | `--arp-bass` | arp módban a legmélyebb hang (basszus) mindig szól, mellette a legmagasabbak (pl. `--max-notes 2`: dallam + basszus) |
@@ -77,7 +85,40 @@ aktuális hangja szól tovább.
 - Hangerő: `06h` b2–b5. A b0–b1 (videómód) és a b7 (nyomtató) változatlan
   marad. A lejátszó minden íráskor frissíti a ROM `0B12h` / `0B13h` tükrét is.
 
-## A lejátszó (`player.asm`)
+## A többszólamú lejátszó (`player_poly.asm`)
+
+- A `05h` b4 = 0 állással a hangoszcillátor nem szól, a `06h`
+  amplitúdóregiszter 4 bites DAC. A lejátszó megszakítás nélkül (DI), egy
+  állandó, 271 ciklusos minta-hurokban kever, ~11,3 kHz-cel:
+  - **3 négyszög szólam:** 16 bites fázisakkumulátor (HL, DE, IX). A
+    fázisnövekmény és a hangerő önmódosító operandus, így a hurokban nincs
+    memóriaolvasás.
+  - **Zajcsatorna:** 16 bites Galois-LFSR (HL').
+  - **Keverés:** a négy forrás összegét (0–60) egy 64 bájtos, 256 bájtra
+    igazított keverőtábla képezi le 0–15-re. A tábla a dallal jön; a
+    `--poly-knee` értékéig lineáris, fölötte lágyan telít.
+- **Időzítés:** a hurok minden mintánál olvassa az `59h` port kurzor-IT
+  bitjét (DI mellett is beáll). Képkockánként (49,76 Hz, a hardver időzít)
+  lefut egy tick: törli a jelzést (`07h`), figyeli az ESC/SPACE gombot,
+  feldolgozza az eseményeket, kezeli a lecsengést és a hangcsúszást, és
+  frissíti az operandusokat. Tick közben a fázisok állnak. Ezt a konverter
+  a fázisnövekmény-táblában kiegyenlíti (a tick átlagos idejét, ~1100
+  ciklust, az emulátorban mértem), így a hangmagasság néhány centen belül
+  pontos.
+- **Szólamkiosztás:** minden tickben a legmagasabb hang (dallam), a
+  legmélyebb (basszus), majd a következő legmagasabb kap szólamot. A
+  folytatódó hangok a helyükön maradnak.
+- **Dob:**
+  - A pergő, a cinek, a crash, a ride és a taps a zajcsatornán szól,
+    dobonként saját hangerővel, lecsengéssel és hosszal.
+  - A lábdob, a tamok és a kolomp csúszó hangként szól egy szólamon: a
+    lábdob kb. 147 → 45 Hz 5 tick alatt. Ilyenkor egy szabad szólamot, vagy
+    a középső (nem dallam, nem basszus) hang szólamát veszi el.
+  - A dobkészlet: `POLY_KIT` a `midi2tvc.py`-ban.
+- **Méret:** a lejátszó a 256 bájtos igazítással és a keverőtáblával kb. 1 KB, az 58 s-os, 8 sávos DuckTales a
+  dallal együtt kb. 4,9 KB.
+
+## Az egycsatornás lejátszó (`player.asm`)
 
 - A `.cas` egy kétsoros BASIC programot tartalmaz (`1 PRINT "cím"`,
   `2 X=USR(cím)`), amely mögött ott van a gépi kód és a dal. Mivel a
@@ -120,7 +161,10 @@ portírásokat. Végül ellenőrzi:
   felvételben, valamint azt, hogy a dallam a dob közben is halad,
 - a felvett hang frekvenciáját (C4: 261,45 Hz, a számított érték 261,46 Hz),
 - a dal végi és az ESC utáni csendet,
-- az IT-vektor visszaállítását.
+- az IT-vektor visszaállítását,
+- a többszólamú motort: a hangmagasságot (±5 cent), az időzítést, hogy egy
+  akkord három hangja egyszerre szól (spektrumból), a csendet a dal végén és
+  az ESC-et.
 
 Kell hozzá g++, gcc, sjasmplus, az Ep128web (az `ep128emu` almodullal), az
 ep128emu ROM-csomagja, és írási jog a `/files` könyvtárba, mert az Ep128web
@@ -128,7 +172,6 @@ FILE: eszköze ott keresi a fájlokat.
 
 ## Tervek
 
-- Több szólam DAC-módban (`05h` b4 = 0): szoftveres keverés pontosan időzített
-  ciklusban, a `5Bh` porttal szinkronizált hang-IT-vel vagy IT nélkül.
-- Időzítés a hang-IT-vel a képkocka-IT helyett, finomabb felbontással.
-- Hangszínek: a hangerő gyors váltogatásával (PWM-szerű) burkológörbék.
+- Poly: 4. szólam vagy kitöltési tényező (pulzusszélesség) szólamonként;
+  csatornánkénti szólam-hozzárendelés (`--voice 1=melody` stb.).
+- Poly: a tick munkájának szétosztása, hogy a fázisok ne álljanak meg.

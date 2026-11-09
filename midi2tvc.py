@@ -11,6 +11,11 @@ eseménylista.
   arp   akkordok arpeggióval: legfeljebb --max-notes hang, a lejátszó
         --arp-speed tickenként lép közöttük
 
+  poly  többszólamú (player_poly.asm): 3 négyszög szólam + zajcsatorna,
+        szoftveres keverés a DAC-módba kapcsolt hangerőregiszteren; a
+        szólamokat a legmagasabb, a legmélyebb, majd a következő legmagasabb
+        hang kapja
+
 Dob (10. MIDI csatorna, --drums synth, alap): a GM dobhangok szintetizált
 dobokká alakulnak (lábdob és tamok: lefelé csúszó hang; pergő, cin, crash:
 zaj a DAC-módba kapcsolt hangerőregiszteren). Egy dobütés 1..6 tickre
@@ -309,6 +314,173 @@ def drum_hits(notes, rate, curve):
     return hits
 
 
+# ---- többszólamú motor (player_poly.asm) ----------------------------------------
+CPU_CLOCK = 3125000.0
+POLY_LOOP_CYCLES = 271        # a player_poly.asm minta-hurka
+POLY_TICK_OVERHEAD = 1100     # a tick rutin átlagos ideje (ciklus): az emulátorban
+                              # mérve (a hangmagasságból, test/emu_test.py)
+POLY_VOICES = 3
+
+# poly dobkészlet: zaj: ("noise", hangerő, lecsengés tick/lépés, hossz tick)
+# csúszó hang: ("slide", kezdő hangjegy, vég Hz, hangerő, lecsengés, hossz tick)
+POLY_KIT = {
+    KICK:    ("slide", 50, 45, 15, 1, 5),
+    LOTOM:   ("slide", 55, 90, 13, 1, 6),
+    MIDTOM:  ("slide", 59, 120, 13, 1, 6),
+    HITOM:   ("slide", 63, 160, 13, 1, 6),
+    COWBELL: ("slide", 79, 780, 10, 1, 4),
+    SNARE:   ("noise", 12, 1, 8),
+    CLAP:    ("noise", 11, 1, 6),
+    HAT:     ("noise", 6, 1, 2),
+    OPENHAT: ("noise", 7, 2, 10),
+    CRASH:   ("noise", 10, 3, 30),
+    RIDE:    ("noise", 5, 2, 8),
+    RIM:     ("noise", 8, 1, 2),
+}
+
+
+def poly_rates():
+    """-> (effektív mintafrekvencia, tick/s).  A tick a képkocka-IT (49,76 Hz);
+    egy képkockában a tick idején kívül fut a minta-hurok, ebből jön a
+    hangmagassághoz szükséges effektív mintafrekvencia."""
+    frame = CPU_CLOCK / FRAME_RATE
+    samples = (frame - POLY_TICK_OVERHEAD) / POLY_LOOP_CYCLES
+    return samples * FRAME_RATE, FRAME_RATE
+
+
+def poly_freq_table(tuning, sr):
+    out = []
+    for n in range(128):
+        f = note_freq(n, tuning)
+        out.append(max(1, min(32767, int(round(f * 65536 / sr)))))
+    return out
+
+
+def poly_mix_table(knee, ceiling=15):
+    """A szólamok összege (0..60) -> 4 bites kimenet, a térd fölött lágy
+    telítéssel."""
+    out = []
+    for s in range(64):
+        if s <= knee:
+            v = s
+        else:
+            v = knee + (ceiling - knee) * (1 - math.exp(-(s - knee) / 12.0))
+        out.append(max(0, min(ceiling, int(round(v)))))
+    return out
+
+
+def convert_poly(notes, drums, args, sr, tick_rate, ftab):
+    ticks = build_ticks(notes, tick_rate)
+    total = max([t[1] for t in ticks] + [t + 8 for t in drums] + [1])
+    starts = {}
+    for t in ticks:
+        starts.setdefault(t[0], []).append(t)
+    vmax = args.poly_volume
+    vmin = max(1, min(vmax, int(round(args.min_volume * vmax / 15.0))))
+    out = bytearray()
+    pending = [0]
+    stats = {"notes": 0, "drums": len(drums), "voices_max": 0}
+
+    def emit(b):
+        encode_wait_poly(out, pending[0])
+        pending[0] = 0
+        out.extend(b)
+
+    active = {}
+    cur = [None] * POLY_VOICES        # (idx, note)
+    reserved = [0] * POLY_VOICES      # dob foglalja eddig a tickig
+    noise_off_at = None
+    for t in range(total + 1):
+        for k in [k for k, a in active.items() if a[1] <= t]:
+            del active[k]
+        for st, en, n, v, ch, idx in starts.get(t, ()):
+            active[idx] = (st, en, n, v)
+        # lejárt dobfoglalások: a szólam elhallgat
+        for v in range(POLY_VOICES):
+            if reserved[v] and reserved[v] <= t:
+                reserved[v] = 0
+                emit(bytes((0xB0 + v,)))
+                cur[v] = None
+        if noise_off_at is not None and noise_off_at <= t:
+            emit(bytes((0xB4, 0x00)))
+            noise_off_at = None
+        # a hangok sorrendje: legmagasabb, legmélyebb, majd a többi lefelé
+        uniq = {}
+        for idx, (st, en, n, v) in active.items():
+            if n not in uniq or st > uniq[n][0]:
+                uniq[n] = (st, idx, v)
+        ordered = sorted(uniq, reverse=True)
+        prio = ordered[:1] + ordered[-1:] + ordered[1:-1] if len(ordered) > 1 else ordered
+        # dob ezen a ticken
+        if t in drums:
+            k, att = drums[t]
+            kit = POLY_KIT.get(k)
+            if kit and kit[0] == "noise":
+                _, vol, dec, dur = kit
+                vol = max(1, vol - att)
+                emit(bytes((0xB4, (vol << 4) | dec)))
+                noise_off_at = t + dur
+            elif kit:
+                _, note, end_hz, vol, dec, dur = kit
+                # szabad szólam, különben a középső (nem dallam, nem basszus)
+                keep = set(prio[:2])
+                cand = [v for v in range(POLY_VOICES) if not reserved[v] and cur[v] is None]
+                cand += [v for v in range(POLY_VOICES) if not reserved[v] and cur[v] is not None
+                         and cur[v][1] not in keep]
+                cand += [v for v in range(POLY_VOICES) if not reserved[v]
+                         and cur[v] is not None and cur[v][1] == prio[-1:][0]] if prio else []
+                if cand:
+                    v = cand[0]
+                    f0 = ftab[note]
+                    f1 = int(round(end_hz * 65536 / sr))
+                    slide = int(round((f1 - f0) / float(dur))) & 0xFFFF
+                    vol = max(1, vol - att)
+                    emit(bytes((0xB8 + v, note, (vol << 4) | dec, slide & 0xFF, slide >> 8)))
+                    reserved[v] = t + dur
+                    cur[v] = None
+        free = [v for v in range(POLY_VOICES) if not reserved[v]]
+        want = prio[:len(free)]
+        want_idx = {uniq[n][1]: n for n in want}
+        stats["voices_max"] = max(stats["voices_max"], len(want))
+        # a megmaradó hangok a helyükön maradnak
+        new_cur = {}
+        for v in free:
+            if cur[v] is not None and cur[v][0] in want_idx:
+                new_cur[v] = cur[v]
+        placed = {c[0] for c in new_cur.values()}
+        empty = [v for v in free if v not in new_cur]
+        for idx, n in want_idx.items():
+            if idx in placed:
+                continue
+            v = empty.pop(0)
+            vel = active[idx][3]
+            vol = velocity_to_volume(vel, args.curve, vmin, vmax)
+            emit(bytes((0x80 + 16 * v + vol, n)))
+            stats["notes"] += 1
+            new_cur[v] = (idx, n)
+        for v in free:
+            if v not in new_cur and cur[v] is not None:
+                emit(bytes((0xB0 + v,)))
+            cur[v] = new_cur.get(v)
+        pending[0] += 1
+    encode_wait_poly(out, pending[0])
+    out += bytes([0xB0, 0xB1, 0xB2, 0xB4, 0x00])
+    if args.loop:
+        out.append(0xC0 + 0x0F)
+    out.append(0xFF)
+    return bytes(out), total, stats
+
+
+def encode_wait_poly(out, n):
+    while n > 0:
+        if n <= 63:
+            out.append(0xBF + n)
+            return
+        k = min(n, 65535)
+        out += bytes((0xBF, k & 0xFF, k >> 8))
+        n -= k
+
+
 def velocity_to_volume(vel, curve, vmin, vmax):
     """MIDI erősség (0..127, a CC7/CC11 már benne) -> 1..15."""
     x = max(0.0, min(1.0, vel / 127.0)) ** curve
@@ -427,7 +599,12 @@ def main():
     ap.add_argument("-o", "--output", default="build/song.bin", help="kimeneti adatfájl")
     ap.add_argument("--title-out", help="a BASIC PRINT sor 32 karakteres címe ide kerül")
     ap.add_argument("--title", help="cím (alapból a fájlnév)")
-    ap.add_argument("--mode", choices=("mono", "arp"), default="arp")
+    ap.add_argument("--mode", choices=("mono", "arp", "poly"), default="arp",
+                    help="poly: többszólamú motor (a build.sh a player_poly.asm-et fordítja)")
+    ap.add_argument("--poly-volume", type=int, default=9,
+                    help="poly: egy szólam legnagyobb hangereje (alap: 9)")
+    ap.add_argument("--poly-knee", type=int, default=10,
+                    help="poly: a keverőtábla eddig lineáris, fölötte lágyan telít (alap: 10)")
     ap.add_argument("--prio", choices=("high", "low", "last"), default="high",
                     help="mono módban melyik hang szóljon (alap: a legmagasabb)")
     ap.add_argument("--max-notes", type=int, default=3, choices=(2, 3, 4),
@@ -478,6 +655,9 @@ def main():
                           args.rate, args.curve)
     if not notes and not drums:
         sys.exit("a kiválasztott csatornákon nincs hang")
+    if args.mode == "poly":
+        write_poly(args, notes, drums)
+        return
     body, total, stats = convert(notes, args, drums)
 
     flags = 1 if args.loop else 0
@@ -492,6 +672,12 @@ def main():
     os.makedirs(os.path.dirname(os.path.abspath(args.output)), exist_ok=True)
     with open(args.output, "wb") as f:
         f.write(data)
+    write_title(args)
+
+    report(args, notes, total, args.rate, stats, len(data))
+
+
+def write_title(args):
     if args.title_out:
         title = args.title if args.title is not None else \
             os.path.splitext(os.path.basename(args.midi))[0]
@@ -499,19 +685,47 @@ def main():
         with open(args.title_out, "wb") as f:
             f.write(t[:32].ljust(32).encode("ascii"))
 
+
+def write_poly(args, notes, drums_sec):
+    sr, tick_rate = poly_rates()
+    # a dobütések a poly tick-rácsra
+    drums = {}
+    for (t, hit) in drums_sec.items():
+        tt = int(round(t / args.rate * tick_rate))
+        old = drums.get(tt)
+        if old is None or DRUM_PRIORITY.index(hit[0]) < DRUM_PRIORITY.index(old[0]):
+            drums[tt] = hit
+    ftab = poly_freq_table(args.tuning, sr)
+    body, total, stats = convert_poly(notes, drums, args, sr, tick_rate, ftab)
+    header = struct.pack("<BBBBHH", 1 if args.loop else 0, args.decay,
+                         max(0, min(15, args.decay_floor)), 0, 0, 0)
+    data = header + bytes(poly_mix_table(args.poly_knee)) + \
+        b"".join(struct.pack("<H", f) for f in ftab) + body
+    os.makedirs(os.path.dirname(os.path.abspath(args.output)), exist_ok=True)
+    with open(args.output, "wb") as f:
+        f.write(data)
+    write_title(args)
+    print("poly: %.0f Hz mintavétel, %.2f tick/s, legfeljebb %d szólam egyszerre"
+          % (sr, tick_rate, stats["voices_max"]))
+    stats.setdefault("chords", 0)
+    stats.setdefault("rests", 0)
+    report(args, notes, total, tick_rate, stats, len(data))
+
+
+def report(args, notes, total, rate, stats, size):
     used = sorted({n[2] for n in notes})
-    secs = total / args.rate
+    secs = total / rate
     print("%s: %d hang, %d:%04.1f, %d tick; %d hang, %d akkord, %d szünet, %d dobütés; %d bájt"
           % (os.path.basename(args.midi), len(notes), secs // 60, secs % 60, total,
-             stats["notes"], stats["chords"], stats["rests"], stats["drums"], len(data)))
+             stats["notes"], stats["chords"], stats["rests"], stats["drums"], size))
     lo, hi = (used[0], used[-1]) if used else (60, 60)
     if used:
         print("hangterjedelem: MIDI %d..%d (%.1f..%.1f Hz)"
               % (lo, hi, note_freq(lo, args.tuning), note_freq(hi, args.tuning)))
-    if used and note_freq(lo, args.tuning) < TVC_CLOCK / 4096:
+    if used and args.mode != "poly" and note_freq(lo, args.tuning) < TVC_CLOCK / 4096:
         print("figyelem: a 47,7 Hz alatti hangok egy oktávval feljebb szólnak")
-    if len(data) > args.max_size:
-        print("figyelem: %d bájt, a 32k-s gépen kevés lehet a hely" % len(data))
+    if size > args.max_size:
+        print("figyelem: %d bájt, a 32k-s gépen kevés lehet a hely" % size)
 
 
 if __name__ == "__main__":
