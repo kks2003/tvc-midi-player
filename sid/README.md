@@ -23,7 +23,11 @@ A gépen: a `sidplay.cas` és a `.sid` fájlok ugyanarra a meghajtóra
 - `commando,3`: a 3. dal,
 - üres sor (Enter): vissza a BASIC-be.
 
-Lejátszás közben **ESC** vagy **SPACE**: vissza a fájllistához.
+Lejátszás közben:
+
+- **1-9**, **0**: az 1-9., illetve a 10. dal,
+- **jobbra / balra nyíl**: a következő / előző dal,
+- **ESC** vagy **SPACE**: vissza a fájllistához.
 
 Kell: Python 3, [sjasmplus](https://github.com/z00m128/sjasmplus). A gépen:
 TVC 64k (a U3 RAM-ot is használja) és TVC256k++ kártya (az 1., 2., 3. vagy
@@ -47,11 +51,24 @@ mérete a HIMEM-ig tart (kb. 40 KB).
   IT-vektorból (`$0314` vagy `$FFFE`); a kernal IT-kilépési pontjai
   (`$EA31`, `$EA81`, `$FEBC`) kis csonkok.
 
-## Korlátok (első változat)
+## Tempó
+
+A lejátszót a TVC hanggenerátorának IT-je hívja (195312,5 / (4096 - n) Hz),
+nem a képkocka-IT. A kettő közös állapotbitet használ, ezért lejátszás
+közben a kurzor-IT tiltva van (CRTC R10 = 23h, ahogy a ROM magnórutinja is
+csinálja), kilépéskor visszaáll.
+
+- A fejléc `speed` bitje 0 (VBI): 50,12 Hz, a PAL C64 képkockája.
+- A `speed` bit 1 (CIA): a CIA1 A időzítője szerint, 985248 / (T + 1) Hz
+  (ha az init nem írta, a kernal 60 Hz-e). Ha a zene futás közben átírja az
+  időzítőt, a tempó követi. 47,7 Hz alatt az IT kétszer (háromszor...)
+  gyorsabb, és minden 2. (3. ...) hív.
+
+Emulátorban mérve: VBI 50,12 Hz, CIA T = 8192 mellett 120 Hz (elvárt 120,3).
+
+## Korlátok
 
 - Csak PSID-szerű zenék; az RSID-k (CIA/VIC IT, kernal hívások) általában nem.
-- A tempó mindig a TVC képkockája (~49,7 Hz, a PAL C64-é 50,1 Hz); a
-  CIA-időzítésű és a többsebességes (2x-4x) zenék még nem.
 - A digis (mintás, `$D418`-as) zenék és a 2SID/3SID nem.
 - Ha a lejátszórutin egy képkockánál tovább fut, a zene lassul.
 
