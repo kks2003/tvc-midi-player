@@ -34,6 +34,16 @@ CHUNK       equ 1530            ; legfeljebb 6*256-2 bájt olvasásonként
 PAGE_RUN    equ 0B0h            ; U0 U1 U2 U3 (a ROM IT-je SYS-re vált és visszaállítja)
 KEYMASK     equ 28h             ; 7. sor: b3 = ESC, b5 = SPACE
 
+V_PORT05    equ 0B12h           ; a 05h port tükre (b5: hang-IT, b4: hangjel)
+P_PITCHLO   equ 04h
+P_PITCHHI   equ 05h
+P_ITCLR     equ 07h
+P_TGRESET   equ 5Bh             ; olvasás: a hanggenerátor alaphelyzetbe
+P_CRTCSEL   equ 70h
+P_CRTCDAT   equ 71h
+VBI_X       equ 3897            ; 195312,5 / 50,1245 Hz (PAL C64 képkocka)
+CIA_DEFAULT equ 4025h           ; a kernal CIA1 időzítője (~60 Hz)
+
 REG_VSID    equ 0E0h
 SID_REGS    equ 25
 
@@ -174,8 +184,13 @@ main:
             call parse_name
             call load_file
             jr c, .loop
-            call play_file
-            jr .loop
+.play:      call play_file
+            ld a, l
+            cp 5                    ; dalváltás: újra beolvassuk a fájlt
+            jr nz, .loop
+            call load_file
+            jr c, .loop
+            jr .play
 .quit:      ld hl, 0
             ret
 
@@ -283,6 +298,8 @@ play_file:
             ld hl, s_keys
             call prstr
 
+            ld a, (V_PORT05)
+            ld (saved_p05), a
             ld a, (V_PAGING)
             ld (saved_paging), a
             di
@@ -324,6 +341,9 @@ play_file:
             ld a, 37h
             ld (ZPG + 1), a
             ld hl, (init_addr)
+            xor a                   ; a CIA1 A időzítőjét az init írhatja
+            ld (cia_lo), a
+            ld (cia_hi), a
             ld a, 150               ; legfeljebb 3 másodperc
             call call_jsr
 
@@ -360,9 +380,17 @@ play_file:
             jr .mode
 .jsrmode:   xor a
 .mode:      ld (play_mode), a
+            call timer_start
+            xor a
+            ld (cia_dirty), a
 
-; ---- képkockánként a lejátszó --------------------------------------------
+; ---- időzítő-IT-nként a lejátszó (VBI: 50,12 Hz, CIA: a zene tempója) ------
 .frame:     halt
+            ld hl, it_cnt           ; minden it_div. IT-re
+            dec (hl)
+            jr nz, .frame
+            ld a, (it_div)
+            ld (hl), a
             ld a, REG_VSID + 1Bh    ; OSC3, ENV3 az árnyéklapra
 .psel3:      out (0), a
 .pdat3:      in a, (0)
@@ -372,14 +400,35 @@ play_file:
             ld hl, (play_addr)
             or a
             jr nz, .irq
-            ld a, 3
+            ld a, 8
             call call_jsr
             jr .keys
 .irq:       call call_irq
-.keys:      call read_keys
+.keys:      ld a, (cia_dirty)       ; a zene átírta a CIA időzítőt
+            or a
+            call nz, timer_update
+            call read_keys
             cp KEYMASK
+            jr nz, .esc
+            call read_song_key      ; számbillentyű / nyilak: másik dal
+            or a
             jr z, .frame
+            ld hl, songs
+            cp (hl)
+            jr z, .sok
+            jr nc, .frame
+.sok:       ld hl, song
+            cp (hl)
+            jr z, .frame
+            ld (song_req), a
             call stop_all
+.krel:      halt                    ; megvárjuk, hogy elengedjék
+            call read_song_key
+            or a
+            jr nz, .krel
+            ld hl, 5
+            ret
+.esc:       call stop_all
 .rel:       halt                    ; megvárjuk, hogy elengedjék
             call read_keys
             cp KEYMASK
@@ -392,7 +441,188 @@ stop_all:   call sid_reset
             ld a, (saved_paging)
             ld (V_PAGING), a
             out (P_PAGING), a
+            ld a, (timer_on)        ; a hang-IT ki, a kurzor-IT vissza
+            or a
+            jr z, .t
+            xor a
+            ld (timer_on), a
+            ld a, (saved_p05)
+            ld (V_PORT05), a
+            out (P_PITCHHI), a
+            ld a, 0Ah
+            out (P_CRTCSEL), a
+            ld a, 03h
+            out (P_CRTCDAT), a
+.t:         ei
+            ret
+
+; ---- időzítő: a hanggenerátor IT-je (195312,5 / (4096 - n) Hz) ---------------
+; A képkocka-IT (a CRTC kurzor-IT-je) közös állapotbitet használ a hang-IT-vel,
+; ezért közben tiltva van (CRTC R10 = 23h, mint a ROM magnórutinjában).
+; A PSID fejléc speed mezőjének a dalhoz tartozó bitje: 0 = VBI (PAL 50,12 Hz),
+; 1 = a CIA1 A időzítője (985248 / (T + 1) Hz; ha az init nem írta: 60 Hz).
+timer_start:
+            ld a, (song)            ; bit = dal - 1 (32 fölött a 31.)
+            dec a
+            cp 32
+            jr c, .b
+            ld a, 31
+.b:         ld c, a
+            srl a
+            srl a
+            srl a
+            ld e, a
+            ld a, 15h
+            sub e
+            ld e, a
+            ld d, 0
+            ld hl, sidbuf
+            add hl, de
+            ld a, c
+            and 7
+            inc a
+            ld b, a
+            ld a, (hl)
+.s:         rrca
+            djnz .s
+            ld a, 0
+            rla
+            ld (cia_mode), a
+            ld a, 1
+            ld (timer_on), a
+timer_update:
+            xor a
+            ld (cia_dirty), a
+            ld a, (cia_mode)
+            or a
+            ld hl, VBI_X
+            jr z, .x
+            ld hl, (cia_lo)         ; x = (T + 1) * 12992 / 65536
+            ld a, h
+            or l
+            jr nz, .t
+            ld hl, CIA_DEFAULT
+.t:         inc hl
+            ld de, 12992
+            call mul16              ; DEHL = HL * DE
+            ex de, hl               ; HL = a felső szó
+.x:         ld c, 1                 ; IT-osztó: x / k <= 4090
+.k:         push hl
+            push bc
+            call div16
+            ld de, 4091
+            or a
+            sbc hl, de
+            pop bc
+            pop hl
+            jr c, .kok
+            inc c
+            jr .k
+.kok:       ld a, c
+            ld (it_div), a
+            ld (it_cnt), a
+            call div16              ; HL = x / k
+            ld a, h
+            or a
+            jr nz, .big
+            ld a, l
+            cp 2
+            jr nc, .big
+            ld hl, 2
+.big:       ex de, hl               ; n = 4096 - x / k
+            ld hl, 4096
+            or a
+            sbc hl, de
+            di
+            ld a, l
+            out (P_PITCHLO), a
+            ld a, (saved_p05)
+            and 0C0h                ; magnómotorok
+            or 20h                  ; hang-IT, hangjel ki (b4 = 0)
+            or h
+            ld (V_PORT05), a
+            out (P_PITCHHI), a
+            ld a, 0Ah               ; a kurzor-IT tiltása
+            out (P_CRTCSEL), a
+            ld a, 23h
+            out (P_CRTCDAT), a
+            in a, (P_TGRESET)
+            out (P_ITCLR), a
             ei
+            ret
+
+; DEHL = HL * DE (előjel nélkül)
+mul16:      ld b, h
+            ld c, l
+            ld hl, 0
+            ld a, 16
+.l:         add hl, hl
+            ex de, hl
+            adc hl, hl
+            ex de, hl
+            jr nc, .n
+            add hl, bc
+            jr nc, .n
+            inc de
+.n:         dec a
+            jr nz, .l
+            ret
+
+; A = a lenyomott dalválasztó billentyű szerinti dal (0: nincs):
+; 1-9, 0 = 10. dal, jobbra/balra nyíl: következő/előző
+read_song_key:
+            ld c, 0
+            call read_row
+            ld hl, row0map
+            call .scan
+            ret nz
+            ld c, 1
+            call read_row
+            ld hl, row1map
+            call .scan
+            ret nz
+            ld c, 8
+            call read_row
+            ld b, a
+            ld a, (song)
+            bit 5, b                ; jobbra
+            jr z, .next
+            bit 6, b                ; balra
+            jr z, .prev
+            xor a
+            ret
+.next:      inc a
+            ret
+.prev:      dec a
+            ret
+.scan:      cpl
+            ld b, 8
+.l:         rrca
+            jr nc, .n
+            ld e, a
+            ld a, (hl)
+            or a
+            ret nz
+            ld a, e
+.n:         inc hl
+            djnz .l
+            xor a
+            ret
+row0map:    db 5, 3, 2, 0, 6, 0, 1, 4       ; a 0. sor bitjei
+row1map:    db 0, 8, 9, 0, 0, 0, 10, 7      ; az 1. sor bitjei
+
+; A = a C. billentyűsor (0 = lenyomva)
+read_row:   di
+            ld a, (V_PORT03)
+            and 0F0h
+            or c
+            out (P_KBDROW), a
+            in a, (P_KBDIN)
+            ld b, a
+            ld a, (V_PORT03)
+            out (P_KBDROW), a
+            ei
+            ld a, b
             ret
 
 ; A = a billentyűzet 7. sorának ESC/SPACE bitjei
@@ -697,7 +927,7 @@ call_jsr:   call set_wd
             ld (rS), a
             jr emu_run
 ; IT-ként: HL = cím; play_mode 1: PC, P; 2: PC, P, A, X, Y (kernal)
-call_irq:   ld a, 3
+call_irq:   ld a, 8
             call set_wd
             ld a, (rS)
             ld (stop_s), a
@@ -809,6 +1039,23 @@ wslow_v:    ld h, a                 ; H = az írandó érték
             jr c, ws_ram
             cp 0E0h
             jr nc, ws_ram
+            cp 0DCh                 ; CIA1 A időzítő ($DC04/$DC05): a tempó
+            jr nz, .nocia
+            ld a, c
+            and 0Fh
+            cp 4
+            jr z, .c4
+            cp 5
+            jr nz, ws_scratch
+            ld a, h
+            ld (cia_hi), a
+            jr .cd
+.c4:        ld a, h
+            ld (cia_lo), a
+.cd:        ld a, 1
+            ld (cia_dirty), a
+            jr ws_scratch
+.nocia:     ld a, l
             call is_iopage
             jr nz, ws_scratch
             ld a, c
@@ -1190,6 +1437,15 @@ s_sep:      db "  ", 0
 s_dot:      db 2, "./"
 s_ext:      db ".sid", 0
 card_base:  db 0
+saved_p05:  db 0
+timer_on:   db 0
+cia_mode:   db 0
+cia_dirty:  db 0
+cia_lo:     db 0
+cia_hi:     db 0
+            assert cia_hi == cia_lo + 1
+it_div:     db 1
+it_cnt:     db 1
 card_slot6: db 0
 buf_limit:  dw 0
 sidend:     dw 0
@@ -1203,7 +1459,8 @@ entbuf:     ds 64
 s_dash:     db "-$", 0
 s_song:     db "  dal: ", 0
 s_slash:    db "/", 0
-s_keys:     db 13, 10, "ESC/SPACE: kilepes", 13, 10, 0
+s_keys:     db 13, 10, "1-9,0: dal  <- ->: elozo/kov.", 13, 10
+            db "ESC/SPACE: vissza a listahoz", 13, 10, 0
 
 saved_sp:   dw 0
 saved_paging: db 0
