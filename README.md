@@ -25,6 +25,7 @@ a BASIC-nek.
 | --- | --- |
 | `--mode arp` (alap) | akkordok arpeggióval: legfeljebb `--max-notes` (2–4, alap 3) hang, a legmagasabbak |
 | `--mode mono` | egyszólamú: `--prio high` (alap), `low` vagy `last` (a legutóbb leütött) |
+| `--arp-bass` | arp módban a legmélyebb hang (basszus) mindig szól, mellette a legmagasabbak (pl. `--max-notes 2`: dallam + basszus) |
 | `--arp-speed N` | arpeggio: N tickenként lép (alap 1, azaz ~50 Hz) |
 | `--channels 1,2` | csak ezek a MIDI csatornák (alapból mind) |
 | `--drums synth` (alap) | a 10. csatorna szintetizált dobként szól (lásd lent); `pitched`: dallamhangként, `off`: kimarad |

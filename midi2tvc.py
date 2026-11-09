@@ -326,7 +326,7 @@ def build_ticks(notes, rate):
     return out
 
 
-def choose(active, mode, prio, max_notes):
+def choose(active, mode, prio, max_notes, keep_bass=False):
     """Az aktív hangokból a megszólalók kiválasztása.
     active: [(note, vel, start_tick, idx)] -> [(note, vel, idx)]"""
     if not active:
@@ -344,7 +344,11 @@ def choose(active, mode, prio, max_notes):
     for n, v, st, idx in active:
         if n not in uniq or st > uniq[n][2]:
             uniq[n] = (n, v, st, idx)
-    pick = sorted(uniq.values(), key=lambda a: -a[0])[:max_notes]
+    ordered = sorted(uniq.values(), key=lambda a: -a[0])
+    pick = ordered[:max_notes]
+    if keep_bass and len(ordered) > max_notes:
+        # a legmélyebb hang (basszus) mindig szóljon, mellé a legmagasabbak
+        pick = ordered[:max_notes - 1] + [ordered[-1]]
     pick.sort(key=lambda a: a[0])
     return [(n, v, idx) for n, v, st, idx in pick]
 
@@ -378,7 +382,7 @@ def convert(notes, args, drums=None):
         for st, en, n, v, ch, idx in starts.get(t, ()):
             active[idx] = (st, en, n, v)
         sel = choose([(a[2], a[3], a[0], i) for i, a in active.items()],
-                     args.mode, args.prio, args.max_notes)
+                     args.mode, args.prio, args.max_notes, args.arp_bass)
         key = (tuple(s[0] for s in sel), frozenset(s[2] for s in sel))
         if key != prev:
             new_attack = prev is None or any(s[2] not in prev[1] for s in sel)
@@ -428,6 +432,8 @@ def main():
                     help="mono módban melyik hang szóljon (alap: a legmagasabb)")
     ap.add_argument("--max-notes", type=int, default=3, choices=(2, 3, 4),
                     help="arp módban legfeljebb ennyi hang (alap: 3)")
+    ap.add_argument("--arp-bass", action="store_true",
+                    help="arp módban a legmélyebb hang (basszus) mindig benne van")
     ap.add_argument("--arp-speed", type=int, default=1,
                     help="arpeggio: ennyi tickenként lép (alap: 1 = ~50 Hz)")
     ap.add_argument("--channels", help="csak ezek a MIDI csatornák (1..16, vesszővel)")
