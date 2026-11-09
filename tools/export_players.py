@@ -5,7 +5,8 @@ Mindkét lejátszót üres dallal fordítja le (sjasmplus). A .cas-ból a BASIC
 programtól a dal elejéig tartó rész kerül ki ("code"), mert ez nem függ a
 daltól; a böngésző a végére teszi a dalt, és elé a .cas fejléceket
 (midi2tvc.js: buildCas).  A cím helyét két különböző címmel fordítva, a
-kimenetek különbségéből keresi meg.
+kimenetek különbségéből keresi meg.  Az assembly forrásokat is beleteszi
+(a weboldal forráscsomagjához).
 
     python3 tools/export_players.py      # a repó gyökeréből
 """
@@ -36,13 +37,18 @@ def main():
         prog_len = a[130] | (a[131] << 8)
         assert prog_len == len(code), (prog_len, len(code))
         result[key] = {"source": asm, "code": list(code), "title_offset": diff[0] - 144}
+    # a forráscsomaghoz (a weboldal "Forrás letöltése" gombja)
+    result["sources"] = {name: open(os.path.join(ROOT, name), encoding="utf-8").read()
+                         for name in ("player.asm", "player_poly.asm", "cas.inc")}
     out = os.path.join(ROOT, "web", "players.js")
     with open(out, "w") as f:
         f.write("// generálta: tools/export_players.py (ne szerkeszd kézzel)\n")
         f.write("// a lejátszók gépi kódja a BASIC programtól a dal elejéig\n")
-        f.write("globalThis.TVC_PLAYERS = " + json.dumps(result, separators=(",", ":")) + ";\n")
+        f.write("globalThis.TVC_PLAYERS = " + json.dumps(result, separators=(",", ":"), ensure_ascii=False) + ";\n")
         f.write("if (typeof module !== 'undefined') module.exports = globalThis.TVC_PLAYERS;\n")
     for k, v in result.items():
+        if k == "sources":
+            continue
         print("%s: %d bájt (%s), cím: +%d" % (k, len(v["code"]), v["source"], v["title_offset"]))
     print("kész:", os.path.relpath(out, ROOT))
 

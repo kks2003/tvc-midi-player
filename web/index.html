@@ -268,6 +268,7 @@ footer code, .hint code { font-family: var(--font-mono); font-size: 12.5px; }
         <pre class="basic" id="basic"></pre>
         <div class="actions">
           <button id="dlBtn" class="primary" type="button" disabled>.cas letöltése</button>
+          <button id="srcBtn" type="button" disabled>Forrás letöltése (.zip)</button>
           <div class="field" style="min-width: 0">
             <select id="machine" aria-label="Gép az emulátorban">
               <option value="tvc64p-22" selected>TVC 64k+ · BASIC 2.2</option>
@@ -279,6 +280,7 @@ footer code, .hint code { font-family: var(--font-mono); font-size: 12.5px; }
         </div>
         <div class="status" id="status"></div>
         <p class="note">Az Ep128web a linkben kapja meg a programot, betölti és elindítja. Lejátszás közben ESC vagy SPACE állítja le. A lejátszót valódi TVC 64k+ / BASIC 2.2 ROM-mal teszteltük.</p>
+        <p class="note">A forráscsomagban a lejátszó assembly forrása, a dal adatai, az eredeti MIDI és a kész .cas van; a <code>build.sh</code> sjasmplus-szal bájtra ugyanezt a .cas-t fordítja újra, a README pedig megadja az egyenértékű <code>midi2tvc.py</code> parancssort.</p>
       </section>
     </div>
   </div>
@@ -459,6 +461,7 @@ footer code, .hint code { font-family: var(--font-mono); font-size: 12.5px; }
   }
   function setOutputsEnabled(on) {
     $('dlBtn').disabled = !on;
+    $('srcBtn').disabled = !on;
     $('playBtn').disabled = !on;
     $('emuLink').setAttribute('aria-disabled', on ? 'false' : 'true');
   }
@@ -598,58 +601,49 @@ footer code, .hint code { font-family: var(--font-mono); font-size: 12.5px; }
   });
 
   // ---- kimenet -----------------------------------------------------------------
-  const casName = () => (fileBase.replace(/[^A-Za-z0-9_-]+/g, '').slice(0, 12) || 'dal').toLowerCase() + '.cas';
-  async function download() {
-    if (!casBytes) return;
+  const baseName = () => (fileBase.replace(/[^A-Za-z0-9_-]+/g, '').slice(0, 12) || 'dal').toLowerCase();
+  const casName = () => baseName() + '.cas';
+  // fájl mentése: az artifact-nézetben a downloads képességgel (ott .cas
+  // nem, .zip igen), különben hagyományos letöltéssel
+  async function saveFile(filename, data, zipFallbackName) {
     let dl = null;
     if (window.claude && typeof window.claude.use === 'function') {
       try { dl = await window.claude.use('downloads'); } catch (e) { dl = null; }
     }
     if (dl) {
-      // az artifact-nézet .cas-t nem ad ki, .zip-et igen (az Ep128web azt is betölti)
-      const name = casName();
+      let fname = filename, payload = data;
+      if (!/\.zip$/.test(filename)) {          // .cas -> .zip, benne a .cas
+        fname = zipFallbackName;
+        payload = M.zipFiles([[filename, data]]);
+      }
       try {
-        await dl.save({ filename: name.replace(/\.cas$/, '.zip'), data: zipStore(name, casBytes) });
-        setStatus('Mentve: ' + name.replace(/\.cas$/, '.zip') + ' (benne: ' + name + ').');
+        await dl.save({ filename: fname, data: new Blob([payload]) });
+        setStatus('Mentve: ' + fname + (fname !== filename ? ' (benne: ' + filename + ')' : '') + '.');
       } catch (e) {
         if (e && e.code === 'declined') setStatus('A mentés elmaradt.');
         else setStatus('A mentés nem sikerült (' + ((e && e.code) || 'hiba') + ').', true);
       }
       return;
     }
-    const url = URL.createObjectURL(new Blob([casBytes], { type: 'application/octet-stream' }));
+    const url = URL.createObjectURL(new Blob([data], { type: 'application/octet-stream' }));
     const a = document.createElement('a');
-    a.href = url; a.download = casName();
+    a.href = url; a.download = filename;
     document.body.appendChild(a); a.click(); a.remove();
     setTimeout(() => URL.revokeObjectURL(url), 5000);
-    setStatus('Letöltve: ' + casName() + '.');
+    setStatus('Letöltve: ' + filename + '.');
   }
-  $('dlBtn').addEventListener('click', download);
-
-  // tömörítetlen ZIP egyetlen fájllal
-  function crc32(u8) {
-    let c, crc = 0xFFFFFFFF;
-    for (let i = 0; i < u8.length; i++) {
-      c = (crc ^ u8[i]) & 0xFF;
-      for (let k = 0; k < 8; k++) c = c & 1 ? (c >>> 1) ^ 0xEDB88320 : c >>> 1;
-      crc = (crc >>> 8) ^ c;
-    }
-    return (crc ^ 0xFFFFFFFF) >>> 0;
-  }
-  function zipStore(name, data) {
-    const nm = new TextEncoder().encode(name), crc = crc32(data), n = data.length;
-    const lh = new DataView(new ArrayBuffer(30));
-    lh.setUint32(0, 0x04034b50, true); lh.setUint16(4, 20, true); lh.setUint32(14, crc, true);
-    lh.setUint32(18, n, true); lh.setUint32(22, n, true); lh.setUint16(26, nm.length, true);
-    const ch = new DataView(new ArrayBuffer(46));
-    ch.setUint32(0, 0x02014b50, true); ch.setUint16(4, 20, true); ch.setUint16(6, 20, true);
-    ch.setUint32(16, crc, true); ch.setUint32(20, n, true); ch.setUint32(24, n, true); ch.setUint16(28, nm.length, true);
-    const cdOff = 30 + nm.length + n, cdLen = 46 + nm.length;
-    const end = new DataView(new ArrayBuffer(22));
-    end.setUint32(0, 0x06054b50, true); end.setUint16(8, 1, true); end.setUint16(10, 1, true);
-    end.setUint32(12, cdLen, true); end.setUint32(16, cdOff, true);
-    return new Blob([lh, nm, data, ch, nm, end]);
-  }
+  $('dlBtn').addEventListener('click', () => {
+    if (casBytes) saveFile(casName(), casBytes, baseName() + '.zip');
+  });
+  $('srcBtn').addEventListener('click', () => {
+    if (!casBytes || !result) return;
+    const name = baseName();
+    const files = M.sourcePackage({
+      players: PLAYERS, result, midiBytes, midiName: name + '.mid', name,
+      title: $('title').value || fileBase, casBytes,
+    });
+    saveFile(name + '-forras.zip', M.zipFiles(files, /\.sh$/), name + '-forras.zip');
+  });
 
   // Ep128web: #m=gép&f=a fájl (deflate-raw, base64url)&n=név
   let linkSeq = 0;

@@ -595,10 +595,129 @@
     return cas;
   }
 
+  // ---- forráscsomag -----------------------------------------------------------
+  // a beállításokkal egyenértékű build.sh / midi2tvc.py kapcsolók
+  const CLI = [
+    ['mode', '--mode'], ['prio', '--prio'], ['maxNotes', '--max-notes'], ['arpBass', '--arp-bass'],
+    ['arpSpeed', '--arp-speed'], ['polyVolume', '--poly-volume'], ['polyKnee', '--poly-knee'],
+    ['channels', '--channels'], ['drums', '--drums'], ['transpose', '--transpose'], ['tuning', '--tuning'],
+    ['speed', '--speed'], ['decay', '--decay'], ['decayFloor', '--decay-floor'], ['curve', '--curve'],
+    ['minVolume', '--min-volume'], ['maxVolume', '--max-volume'], ['loop', '--loop'],
+  ];
+  function cliArgs(opts) {
+    const o = Object.assign({}, DEFAULTS, opts || {});
+    const out = [];
+    for (const [k, flag] of CLI) {
+      const v = o[k];
+      if (k === 'channels') { if (v && v.length) out.push(flag, v.join(',')); continue; }
+      if (typeof v === 'boolean') { if (v) out.push(flag); continue; }
+      if (v !== DEFAULTS[k]) out.push(flag, String(v));
+    }
+    return out;
+  }
+  const shQuote = (s) => /^[A-Za-z0-9_.,\/:=+-]+$/.test(s) ? s : "'" + String(s).replace(/'/g, "'\\''") + "'";
+  const enc = (s) => new TextEncoder().encode(s);
+
+  // -> [[útvonal, Uint8Array]]: a lejátszó forrása, a dal adatai, a MIDI, a
+  // kész .cas, build.sh és README.txt; a build.sh-val bájtra ugyanez a .cas
+  // fordul újra (sjasmplus)
+  function sourcePackage(p) {
+    const { players, result, midiBytes, midiName, title, casBytes, name } = p;
+    const asm = result.mode === 'poly' ? 'player_poly.asm' : 'player.asm';
+    const args = cliArgs(result.options);
+    const tb = titleBytes(title);
+    const cmd = ['./build.sh', midiName].concat(args, ['--title', String.fromCharCode(...tb).trimEnd()]).map(shQuote).join(' ');
+    const build = '#!/bin/sh\n' +
+      '# a ' + name + '.cas újrafordítása a forrásból (kell: sjasmplus)\n' +
+      'set -e\ncd "$(dirname "$0")"\nmkdir -p build\n' +
+      'sjasmplus --nologo --msg=war --raw=build/' + name + '.cas --sym=build/' + name + '.sym ' + asm + '\n' +
+      'if cmp -s build/' + name + '.cas ' + name + '.cas; then echo "kész: build/' + name + '.cas (azonos a csomagban lévővel)"; ' +
+      'else echo "kész: build/' + name + '.cas (ELTÉR a csomagban lévőtől)"; fi\n';
+    const pad = (t) => t + ' '.repeat(Math.max(1, 20 - t.length));
+    const mode = { poly: 'többszólamú (player_poly.asm)', arp: 'egycsatornás, arpeggio (player.asm)', mono: 'egycsatornás, egyszólamú (player.asm)' }[result.mode];
+    const readme = [
+      name + ' - TVC MIDI-lejátszó forráscsomag',
+      '',
+      'Forrás:    ' + midiName,
+      'Lejátszó:  ' + mode,
+      'Hossz:     ' + (result.total / result.rate).toFixed(1) + ' s, ' + result.song.length + ' bájt dal, ' + casBytes.length + ' bájt .cas',
+      '',
+      'Fájlok',
+      '  ' + pad(name + '.cas') + 'a kész program (TVC: LOAD, magától indul)',
+      '  ' + pad(midiName) + 'az eredeti MIDI',
+      '  ' + pad(asm) + 'a lejátszó assembly forrása (sjasmplus)',
+      '  cas.inc             a .cas fejléc és a BASIC indító sorok',
+      '  build/song.bin      a dal adatai (formátum: a ' + asm + ' eleje)',
+      '  build/title.bin     a cím (32 bájt, a BASIC PRINT sorban)',
+      '  build.sh            újrafordítás: ./build.sh -> build/' + name + '.cas',
+      '',
+      'A dal adatai a tvc-midi-player repó midi2tvc.py konverterével, ugyanezekkel',
+      'a beállításokkal így készíthetők el a MIDI-ből (a repó gyökeréből):',
+      '',
+      '  ' + cmd,
+      '',
+    ].join('\n');
+    return [
+      [name + '/' + name + '.cas', casBytes],
+      [name + '/' + midiName, midiBytes],
+      [name + '/' + asm, enc(players.sources[asm])],
+      [name + '/cas.inc', enc(players.sources['cas.inc'])],
+      [name + '/build/song.bin', result.song],
+      [name + '/build/title.bin', tb],
+      [name + '/build.sh', enc(build)],
+      [name + '/README.txt', enc(readme)],
+    ];
+  }
+
+  // tömörítetlen (stored) ZIP; files: [[útvonal, Uint8Array], ...]
+  function crc32(u8) {
+    let crc = 0xFFFFFFFF;
+    for (let i = 0; i < u8.length; i++) {
+      let c = (crc ^ u8[i]) & 0xFF;
+      for (let k = 0; k < 8; k++) c = c & 1 ? (c >>> 1) ^ 0xEDB88320 : c >>> 1;
+      crc = (crc >>> 8) ^ c;
+    }
+    return (crc ^ 0xFFFFFFFF) >>> 0;
+  }
+  function zipFiles(files, unixExec) {
+    const parts = [], central = [];
+    let off = 0;
+    const date = ((2026 - 1980) << 9) | (1 << 5) | 1;      // rögzített dátum: azonos csomag
+    for (const [path, data] of files) {
+      const nm = enc(path), crc = crc32(data), n = data.length;
+      const lh = new DataView(new ArrayBuffer(30));
+      lh.setUint32(0, 0x04034b50, true); lh.setUint16(4, 20, true); lh.setUint16(6, 0x0800, true);
+      lh.setUint16(12, date, true);
+      lh.setUint32(14, crc, true); lh.setUint32(18, n, true); lh.setUint32(22, n, true); lh.setUint16(26, nm.length, true);
+      const ch = new DataView(new ArrayBuffer(46));
+      ch.setUint32(0, 0x02014b50, true); ch.setUint16(4, (3 << 8) | 20, true); ch.setUint16(6, 20, true);
+      ch.setUint16(8, 0x0800, true); ch.setUint16(14, date, true);
+      ch.setUint32(16, crc, true); ch.setUint32(20, n, true); ch.setUint32(24, n, true); ch.setUint16(28, nm.length, true);
+      const mode = (unixExec && unixExec.test(path)) ? 0o100755 : 0o100644;
+      ch.setUint32(38, (mode << 16) >>> 0, true);
+      ch.setUint32(42, off, true);
+      parts.push(new Uint8Array(lh.buffer), nm, data);
+      central.push(new Uint8Array(ch.buffer), nm);
+      off += 30 + nm.length + n;
+    }
+    let cdLen = 0;
+    for (const c of central) cdLen += c.length;
+    const end = new DataView(new ArrayBuffer(22));
+    end.setUint32(0, 0x06054b50, true); end.setUint16(8, files.length, true); end.setUint16(10, files.length, true);
+    end.setUint32(12, cdLen, true); end.setUint32(16, off, true);
+    const all = parts.concat(central, [new Uint8Array(end.buffer)]);
+    let n = 0;
+    for (const a of all) n += a.length;
+    const out = new Uint8Array(n);
+    let p2 = 0;
+    for (const a of all) { out.set(a, p2); p2 += a.length; }
+    return out;
+  }
+
   const api = {
     TVC_CLOCK, FRAME_RATE, CPU_CLOCK, POLY_LOOP_CYCLES, POLY_VOICES, DRUM_CHANNEL, DRUM_KIT, POLY_KIT, DEFAULTS,
     pyRound, parseMidi, collectNotes, pitchTable, polyFreqTable, polyMixTable, polyRates, noteFreq,
-    convertMidi, buildCas, titleBytes,
+    convertMidi, buildCas, titleBytes, cliArgs, sourcePackage, zipFiles,
   };
   if (typeof module !== 'undefined' && module.exports) module.exports = api;
   else root.Midi2Tvc = api;

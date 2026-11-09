@@ -1,11 +1,13 @@
 #!/usr/bin/env python3
 """A webes konverter (web/midi2tvc.js) és a Python változat bájtra azonos
 kimenetének ellenőrzése: ugyanazokkal a beállításokkal a build.sh és a
-node is elkészíti a .cas fájlt.  Kell: node, sjasmplus.
+node is elkészíti a .cas fájlt.  A weboldal forráscsomagját is ellenőrzi:
+a csomag build.sh-ja és a README-ben megadott parancssor is ugyanezt a
+.cas-t adja.  Kell: node, sjasmplus.
 
     python3 test/web_parity.py [további.mid ...]
 """
-import json, os, shutil, subprocess, sys, tempfile
+import json, os, shlex, shutil, subprocess, sys, tempfile, zipfile
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 REPO = os.path.dirname(HERE)
@@ -37,6 +39,10 @@ const job = JSON.parse(fs.readFileSync(process.argv[3], 'utf8'));
 const r = M.convertMidi(new Uint8Array(fs.readFileSync(job.midi)), job.opts);
 const cas = M.buildCas(r.mode === 'poly' ? P.poly : P.mono, r.song, job.title);
 fs.writeFileSync(job.out, cas);
+const name = 'par';
+const files = M.sourcePackage({ players: P, result: r, midiBytes: new Uint8Array(fs.readFileSync(job.midi)),
+  midiName: name + '.mid', name, title: job.title, casBytes: cas });
+fs.writeFileSync(job.zip, M.zipFiles(files, /\.sh$/));
 """
 
 
@@ -60,11 +66,33 @@ def main():
             want = open(os.path.join(REPO, "build", name + ".cas"), "rb").read()
             job = os.path.join(tmp, "job.json")
             out = os.path.join(tmp, "js.cas")
-            json.dump({"midi": src, "opts": opts, "title": name, "out": out}, open(job, "w"))
+            zpath = os.path.join(tmp, "src.zip")
+            json.dump({"midi": src, "opts": opts, "title": name, "out": out, "zip": zpath}, open(job, "w"))
             subprocess.check_call(["node", runner, REPO, job])
             got = open(out, "rb").read()
             n += 1
             ok = got == want
+            # a forráscsomag: a saját build.sh-ja és a README parancssora
+            pkg = os.path.join(tmp, "pkg")
+            shutil.rmtree(pkg, ignore_errors=True)
+            with zipfile.ZipFile(zpath) as z:
+                assert z.testzip() is None
+                z.extractall(pkg)
+            os.chmod(os.path.join(pkg, name, "build.sh"), 0o755)
+            subprocess.check_call([os.path.join(pkg, name, "build.sh")], stdout=subprocess.DEVNULL,
+                                  stderr=subprocess.DEVNULL)
+            rebuilt = open(os.path.join(pkg, name, "build", name + ".cas"), "rb").read()
+            if rebuilt != want:
+                ok = False
+                print("  a forráscsomag build.sh-ja eltérő .cas-t fordít")
+            readme = open(os.path.join(pkg, name, "README.txt"), encoding="utf-8").read()
+            cmd = shlex.split([l for l in readme.splitlines() if l.strip().startswith("./build.sh")][0])
+            midi_copy = os.path.join(tmp, cmd[1])
+            shutil.copy(os.path.join(pkg, name, cmd[1]), midi_copy)
+            subprocess.check_call([os.path.join(REPO, "build.sh"), midi_copy] + cmd[2:], stdout=subprocess.DEVNULL)
+            if open(os.path.join(REPO, "build", name + ".cas"), "rb").read() != want:
+                ok = False
+                print("  a README parancssora eltérő .cas-t ad: %s" % " ".join(cmd))
             if not ok:
                 bad += 1
                 first = next((i for i in range(min(len(got), len(want))) if got[i] != want[i]), None)
