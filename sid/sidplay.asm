@@ -1,20 +1,21 @@
 ; ============================================================================
 ; sidplay.asm - C64 SID-zene lejátszó Videoton TVC 64k + TVC256k++ kártyára
-; (sjasmplus). Az eredeti .sid (PSID) fájl változatlanul kerül a programba
-; (build.sh), a TVC futás közben dolgozza fel a fejlécét, és a benne lévő
-; 6502-es lejátszórutint egy Z80-as 6502-emulátorral (cpu6502.asm) futtatja.
+; (sjasmplus). A lejátszó egyszer töltődik be (sidplay.cas), utána a kártya
+; aktuális meghajtójáról (pendrive, PSRAM, flash) közvetlenül az eredeti .sid
+; fájlt olvassa be, átalakítás nélkül. A fejlécet a TVC dolgozza fel, a zene
+; 6502-es lejátszórutinját egy Z80-as 6502-emulátor (cpu6502.asm) futtatja.
 ; A SID-regiszterek írása a kártya vSID-jére megy ($E0..$F8 regiszterek).
 ;
 ; Kell: TVC 64k (a U3 RAM is), TVC256k++ kártya az 1..3. vagy 0. slotban.
 ;
 ; Memória: a 6502 64 KB-os címtere 256 bájtos lapokban, igény szerint
-; foglalva: a U3 ($C000-$FFFF), a program fölötti szabad RAM a BASIC verem
+; foglalva: a U3 ($C000-$FFFF), a beolvasott fájl fölötti szabad RAM a HIMEM
 ; alá, végül a .sid fájl helye (a lapokba másolás után).
 ; A $D000-$DFFF tartomány I/O: a $D400-$D7FF írása a SID-be megy, az olvasás
 ; egy árnyéklapról jön (OSC3/ENV3 képkockánként frissítve a kártyáról).
 ;
-; Visszatérési érték (X=USR(...)): 0 rendben (ESC/SPACE), 1 nincs kártya,
-; 2 nem PSID/RSID fájl, 3 nincs elég memória, 4 nincs lejátszócím.
+; Fájlnév megadása: "zene" (a .sid kiterjesztést hozzáteszi), "zene.sid",
+; vagy "zene,3" (a 3. dal). Üres sor: vissza a BASIC-be.
 ; ============================================================================
 
 P_PAGING    equ 02h
@@ -23,6 +24,13 @@ P_KBDIN     equ 58h
 V_PAGING    equ 0003h
 V_PORT03    equ 0B11h
 V_TIME      equ 0B1Dh
+V_HIMEM     equ 0B19h
+IO_PARAM    equ 0D900h          ; a kártya IO RAM-ja a slot IOMEM-jében
+IO_RESULT   equ 0DA00h
+IO_ATTR     equ 0DB00h
+REG_MSC     equ 0D6h            ; REG_USB_MSC_CMD
+REG_DRIVE   equ 0C5h
+CHUNK       equ 1530            ; legfeljebb 6*256-2 bájt olvasásonként
 PAGE_RUN    equ 0B0h            ; U0 U1 U2 U3 (a ROM IT-je SYS-re vált és visszaállítja)
 KEYMASK     equ 28h             ; 7. sor: b3 = ESC, b5 = SPACE
 
@@ -132,24 +140,55 @@ main:
 .found:     ld a, c
             ld (sid_reset.psel1 + 1), a       ; a portcímek a kódba
             ld (wslow_v.psel2 + 1), a
-            ld (main.psel3 + 1), a
+            ld (play_file.psel3 + 1), a
             inc a
             ld (sid_reset.pdat1 + 1), a
             ld (wslow_v.pdat2 + 1), a
-            ld (main.pdat3 + 1), a
+            ld (play_file.pdat3 + 1), a
             inc a
             ld c, a
             xor a
             out (c), a              ; nincs automatikus léptetés
+            ld a, c
+            sub 2
+            ld (card_base), a
+            sub 10h                 ; slot * 10h -> slot * 40h (a 03h port 6-7. bitje)
+            add a, a
+            add a, a
+            ld (card_slot6), a
+            ld a, (V_HIMEM + 1)     ; a beolvasási puffer vége: a HIMEM alatt
+            cp 0C0h
+            jr c, .him
+            ld a, 0C0h
+.him:       dec a
+            ld (buf_limit + 1), a
+            xor a
+            ld (buf_limit), a
+            ld hl, s_title
+            call prstr
+.loop:      call list_dir
+            ld hl, s_prompt
+            call prstr
+            call read_line
+            jr z, .quit
+            call parse_name
+            call load_file
+            jr c, .loop
+            call play_file
+            jr .loop
+.quit:      ld hl, 0
+            ret
 
+; ---- egy beolvasott .sid lejátszása (sidbuf .. sidend) ----------------------
+play_file:
             ; PSID fejléc (nagy-endián mezők)
-            ld a, (sidfile + 1)
+            ld a, (sidbuf + 1)
             cp 'S'
             jr nz, .badfile
-            ld a, (sidfile + 2)
+            ld a, (sidbuf + 2)
             cp 'I'
             jr nz, .badfile
-            ld a, (sidfile + 3)
+            ld a, (sidbuf + 3)
             cp 'D'
             jr z, .okfile
 .badfile:   ld hl, s_badfile
@@ -157,19 +196,23 @@ main:
             ld hl, 2
             ret
 .okfile:
+            ld hl, s_name
+            call prstr
+            ld hl, sidbuf + 16h
+            call prfield
             ld hl, s_author
             call prstr
-            ld hl, sidfile + 36h
+            ld hl, sidbuf + 36h
             call prfield
             ld hl, s_rel
             call prstr
-            ld hl, sidfile + 56h
+            ld hl, sidbuf + 56h
             call prfield
 
-            ld ix, sidfile
+            ld ix, sidbuf
             ld h, (ix + 6)
             ld l, (ix + 7)
-            ld de, sidfile
+            ld de, sidbuf
             add hl, de              ; HL = az adatok eleje
             ld d, (ix + 8)
             ld e, (ix + 9)          ; DE = betöltési cím
@@ -183,7 +226,7 @@ main:
 .hasload:   ld (data_ptr), hl
             ld (load_addr), de
             ex de, hl
-            ld hl, sidend
+            ld hl, (sidend)
             or a
             sbc hl, de
             ld (data_len), hl
@@ -204,6 +247,15 @@ main:
             jr nz, .hassong
             inc a
 .hassong:   ld (song), a
+            ld a, (song_req)        ; a fájlnév után megadott dal
+            or a
+            jr z, .nosongreq
+            ld hl, songs
+            cp (hl)
+            jr z, .songok
+            jr nc, .nosongreq
+.songok:    ld (song), a
+.nosongreq:
 
             ld hl, s_info
             call prstr
@@ -428,11 +480,11 @@ mem_init:
             inc hl
             ld (hl), 0FFh
             inc hl
-            ld a, (prog_end_page)
+            ld a, (sidend + 1)
+            inc a
             ld (hl), a
             inc hl
-            ld a, (saved_sp + 1)
-            sub 2
+            ld a, (buf_limit + 1)
             ld (hl), a
             dec hl
             cp (hl)                 ; üres tartomány?
@@ -443,11 +495,11 @@ mem_init:
             dec hl
 .r2:        inc hl
             inc hl
-            ld a, (sidfile_page)
+            ld a, sidbuf >> 8
             ld (hl), a
             inc hl
-            ld a, (prog_end_page)
-            sub 2
+            ld a, (sidend + 1)
+            dec a
             ld (hl), a
             inc hl
             ld (hl), 0              ; a lista vége
@@ -788,6 +840,334 @@ ws_ram:     ld a, l
             pop bc
             ret
 
+; ---- a kártya fájlkezelése (REG_USB_MSC_CMD, paraméterek az IO RAM-ban) -------
+; az IO RAM ($D800-$DFFF) a kártya slotjának IOMEM-jében: U3 = IOMEM, a 03h
+; port 6-7. bitje a slot; közben tiltott IT
+io_on:      di
+            push bc
+            ld a, (V_PAGING)
+            or 0C0h
+            out (P_PAGING), a
+            ld a, (V_PORT03)
+            and 3Fh
+            ld b, a
+            ld a, (card_slot6)
+            or b
+            out (P_KBDROW), a
+            pop bc
+            ret
+io_off:     ld a, (V_PAGING)
+            out (P_PAGING), a
+            ld a, (V_PORT03)
+            out (P_KBDROW), a
+            ei
+            ret
+
+; A = parancs; a kártya a regisztert 0-ra (kész) vagy hibakód + 80h-ra állítja
+; ki: A = 0 és Z = 1, ha sikerült
+card_cmd:   push bc
+            ld b, a
+            ld a, (card_base)
+            ld c, a
+            ld a, REG_MSC
+            out (c), a
+            inc c
+            out (c), b
+            dec c
+.p:         ld a, REG_MSC
+            out (c), a
+            inc c
+            in a, (c)
+            dec c
+            or a
+            jr z, .ok
+            cp 80h
+            jr c, .p
+.ok:        pop bc
+            or a
+            ret
+
+; HL -> az IO RAM paraméterterülete (4 bájtos fájl/könyvtár azonosító)
+put_handle: call io_on
+            ld de, IO_PARAM
+            ld bc, 4
+            ldir
+            jp io_off
+
+; az aktuális könyvtár .sid fájljainak kiírása
+list_dir:   call io_on
+            ld hl, s_dot
+            ld de, IO_PARAM
+            ld bc, 3
+            ldir
+            call io_off
+            ld a, 05h               ; MSC_OPENDIR
+            call card_cmd
+            ret nz
+            call io_on
+            ld hl, IO_RESULT
+            ld de, dirh
+            ld bc, 4
+            ldir
+            call io_off
+            ld hl, s_files
+            call prstr
+.next:      ld hl, dirh
+            call put_handle
+            ld a, 07h               ; MSC_READDIR
+            call card_cmd
+            jr nz, .close
+            call io_on
+            ld a, (IO_RESULT)
+            or a
+            jr z, .end
+            cp 63
+            jr c, .len
+            ld a, 63
+.len:       ld c, a
+            ld b, 0
+            ld hl, IO_RESULT + 1
+            ld de, entbuf
+            ldir
+            xor a
+            ld (de), a
+            ld a, (IO_ATTR)
+            ld b, a
+            call io_off
+            bit 4, b                ; könyvtár
+            jr nz, .next
+            ld hl, entbuf
+            call is_sid
+            jr nz, .next
+            ld hl, entbuf
+            call prstr
+            ld hl, s_sep
+            call prstr
+            jr .next
+.end:       call io_off
+.close:     ld hl, dirh
+            call put_handle
+            ld a, 06h               ; MSC_CLOSEDIR
+            call card_cmd
+            ld hl, s_crlf
+            jp prstr
+
+; Z = 1, ha a HL-en kezdődő (0-végű) név ".sid"-re végződik (kisbetű/nagybetű)
+is_sid:     ld b, 0
+.len:       ld a, (hl)
+            or a
+            jr z, .e
+            inc hl
+            inc b
+            jr .len
+.e:         ld a, b
+            cp 5
+            jr c, .no
+            ld de, -4
+            add hl, de
+            ld de, s_ext
+            ld b, 4
+.c:         ld a, (hl)
+            cp 'A'
+            jr c, .lc
+            cp 'Z' + 1
+            jr nc, .lc
+            or 20h
+.lc:        ex de, hl
+            cp (hl)
+            ex de, hl
+            ret nz
+            inc hl
+            inc de
+            djnz .c
+            ret                     ; Z = 1
+.no:        or 1
+            ret
+
+; egy sor beolvasása a namebuf-ba (ROM: RST 30h / A1h = EDITOR karakter be)
+; Z = 1: üres sor
+read_line:  ld hl, namebuf
+            ld b, 0
+.l:         push hl
+            push bc
+            rst 30h
+            db 0A1h
+            ld a, c
+            pop bc
+            pop hl
+            cp 13
+            jr z, .e
+            cp 20h
+            jr c, .l
+            ld e, a
+            ld a, b
+            cp 40
+            jr nc, .l
+            ld (hl), e
+            inc hl
+            inc b
+            jr .l
+.e:         ld (hl), 0
+            ld a, b
+            or a
+            ret
+
+; a név végéről a szóközök, ",dal" -> song_req, kiterjesztés nélkül + ".sid"
+parse_name: xor a
+            ld (song_req), a
+            ld hl, namebuf
+            ld c, 0                 ; volt-e pont
+.f:         ld a, (hl)
+            or a
+            jr z, .end
+            cp ','
+            jr z, .num
+            cp ' '
+            jr z, .cut
+            cp '.'
+            jr nz, .n
+            inc c
+.n:         inc hl
+            jr .f
+.cut:       ld (hl), 0
+.skip:      inc hl                  ; a szóköz után jöhet még ",dal"
+            ld a, (hl)
+            or a
+            jr z, .end0
+            cp ','
+            jr nz, .skip
+.num:       ld (hl), 0
+            inc hl
+            ld b, 0
+.d:         ld a, (hl)
+            sub '0'
+            jr c, .dn
+            cp 10
+            jr nc, .dn
+            ld e, a
+            ld a, b
+            add a, a
+            add a, a
+            add a, b
+            add a, a
+            add a, e
+            ld b, a
+            inc hl
+            jr .d
+.dn:        ld a, b
+            ld (song_req), a
+.end0:
+.end:       ld a, c
+            or a
+            jr nz, .len
+            ld hl, namebuf          ; nincs pont: + ".sid"
+            xor a
+            ld bc, 0
+            cpir
+            dec hl
+            ex de, hl
+            ld hl, s_ext
+            ld bc, 5
+            ldir
+.len:       ld hl, namebuf
+            ld b, 0
+.l:         ld a, (hl)
+            or a
+            jr z, .le
+            inc hl
+            inc b
+            jr .l
+.le:        ld a, b
+            ld (name_len), a
+            ret
+
+; a namebuf nevű fájl beolvasása a sidbuf-ba; Cy = 1: hiba (kiírva)
+load_file:  call io_on
+            ld hl, IO_PARAM
+            ld (hl), 01h            ; FA_READ
+            inc hl
+            ld (hl), 0
+            inc hl
+            ld a, (name_len)
+            ld (hl), a
+            inc hl
+            ex de, hl
+            ld hl, namebuf
+            ld c, a
+            ld b, 0
+            ldir
+            call io_off
+            ld a, 01h               ; MSC_FOPENFILE
+            call card_cmd
+            jr z, .opened
+            ld hl, s_notfound
+            call prstr
+            scf
+            ret
+.opened:    call io_on
+            ld hl, IO_RESULT
+            ld de, fileh
+            ld bc, 4
+            ldir
+            call io_off
+            ld hl, sidbuf
+            ld (dest), hl
+.rd:        ld hl, fileh
+            call put_handle
+            call io_on
+            ld hl, CHUNK
+            ld (IO_PARAM + 4), hl
+            call io_off
+            ld a, 03h               ; MSC_FREAD (a fájl végén hibát is adhat)
+            call card_cmd
+            jr nz, .eof
+            call io_on
+            ld bc, (IO_RESULT)
+            ld a, b
+            or c
+            jr z, .eofio
+            ld hl, (dest)
+            add hl, bc
+            ex de, hl
+            ld hl, (buf_limit)
+            or a
+            sbc hl, de
+            jr c, .big
+            ld hl, IO_RESULT + 2
+            ld de, (dest)
+            push bc
+            ldir
+            pop bc
+            ld (dest), de
+            call io_off
+            ld hl, CHUNK
+            or a
+            sbc hl, bc
+            jr z, .rd               ; teljes darab: van még
+            jr .eof
+.big:       call io_off
+            call .close
+            ld hl, s_toolarge
+            call prstr
+            scf
+            ret
+.eofio:     call io_off
+.eof:       call .close
+            ld hl, (dest)
+            ld (sidend), hl
+            ld de, sidbuf + 7Ch     ; legalább egy fejléc
+            or a
+            sbc hl, de
+            ret nc
+            ld hl, s_badfile
+            call prstr
+            scf
+            ret
+.close:     ld hl, fileh
+            call put_handle
+            ld a, 02h               ; MSC_FCLOSEFILE
+            jp card_cmd
+
             include "cpu6502.asm"
 
 ; ---- adatok ----------------------------------------------------------------
@@ -799,7 +1179,27 @@ s_nomem:    db "Nincs eleg memoria!", 13, 10, 0
 s_noplay:   db "Nincs lejatszo cim!", 13, 10, 0
 s_author:   db "Szerzo: ", 0
 s_rel:      db "Kiadva: ", 0
-s_info:     db "Cim: $", 0
+s_info:     db "Betoltes: $", 0
+s_name:     db "Nev:    ", 0
+s_title:    db 13, 10, "SID lejatszo - TVC256k++", 13, 10, 0
+s_files:    db "SID fajlok: ", 0
+s_prompt:   db 13, 10, "Fajlnev (,dal) - Enter: kilepes", 13, 10, 0
+s_notfound: db "Nincs ilyen fajl!", 13, 10, 0
+s_toolarge: db "Tul nagy fajl!", 13, 10, 0
+s_sep:      db "  ", 0
+s_dot:      db 2, "./"
+s_ext:      db ".sid", 0
+card_base:  db 0
+card_slot6: db 0
+buf_limit:  dw 0
+sidend:     dw 0
+song_req:   db 0
+dirh:       ds 4
+fileh:      ds 4
+dest:       dw 0
+name_len:   db 0
+namebuf:    ds 48
+entbuf:     ds 64
 s_dash:     db "-$", 0
 s_song:     db "  dal: ", 0
 s_slash:    db "/", 0
@@ -842,8 +1242,6 @@ pcl:        db 0
 pch:        db 0
             assert pcl + 1 == pch
 SCRATCH:    db 0
-prog_end_page: db (prog_end >> 8) + 1
-sidfile_page:  db (sidfile >> 8) + 1
 
             ds 256
 stack_top:
@@ -856,6 +1254,5 @@ STKPG:      ds 256
 ZEROPG:     ds 256
 IOSH:       ds 256
 
-sidfile:    incbin "build/tune.sid"
-sidend:
 prog_end:
+sidbuf:                             ; ide olvassuk a .sid fájlt (a HIMEM-ig)

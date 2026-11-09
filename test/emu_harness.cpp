@@ -129,13 +129,20 @@ int main(int argc, char **argv)
   }
   ep_reset(1);
   runMs(4000);
-  key(0x3E); runMs(3000);
-  // CARD_FILE=név,útvonal: a fájl a kártya PSRAM-meghajtójára, a LOAD a kártyáról tölt
+  key(0x3E); runMs(3000);                  // a bekapcsolási kép után Enter; az első leütés elveszhet, ezért " load"
+  // CARD_FILE=név,útvonal[;név,útvonal...]: fájlok a kártya PSRAM-meghajtójára, a LOAD a kártyáról tölt
   if (const char *cf = std::getenv("CARD_FILE")) {
-    std::string a(cf); size_t c = a.find(',');
-    if (ep_tvc_card_put_file(a.substr(0, c).c_str(), a.substr(c + 1).c_str()) != 0) { std::fprintf(stderr, "card file: %s\n", ep_last_error()); return 1; }
+    std::string all(cf);
+    for (size_t p = 0; p < all.size(); ) {
+      size_t q = all.find(';', p);
+      std::string a = all.substr(p, q == std::string::npos ? std::string::npos : q - p);
+      size_t c = a.find(',');
+      if (ep_tvc_card_put_file(a.substr(0, c).c_str(), a.substr(c + 1).c_str()) != 0) { std::fprintf(stderr, "card file: %s\n", ep_last_error()); return 1; }
+      if (q == std::string::npos) break;
+      p = q + 1;
+    }
     ep_write_memory(0x0B05, 0x80 | cardSlot); ep_write_memory(0x0B0D, 0x80 | cardSlot);
-  }                  // a bekapcsolási kép után Enter; az első leütés elveszhet, ezért " load"
+  }
   std::printf("isr0=");                     // az IT-belépő a betöltés előtt
   for (int a = 0x38; a < 0x40; a++) std::printf("%02x ", ep_read_memory(a));
   std::printf("\n");
