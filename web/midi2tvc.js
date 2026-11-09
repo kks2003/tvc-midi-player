@@ -508,7 +508,7 @@
   const DEFAULTS = {
     mode: 'arp', prio: 'high', maxNotes: 3, arpBass: false, arpSpeed: 1, polyVolume: 9, polyKnee: 10,
     channels: null, drums: 'synth', transpose: 0, tuning: 440.0, speed: 1.0, rate: FRAME_RATE,
-    decay: 0, decayFloor: 6, curve: 0.7, minVolume: 6, maxVolume: 15, loop: false,
+    decay: 0, decayFloor: 6, curve: 0.7, minVolume: 6, maxVolume: 15, loop: false, background: false,
   };
 
   // midi: Uint8Array vagy parseMidi() eredménye; opts: mint a parancssor.
@@ -549,7 +549,7 @@
     } else {
       const r = convert(notes, o, drums);
       const kitOffset = drums.size ? 8 + 256 + r.body.length : 0;
-      const data = [o.loop ? 1 : 0, o.arpSpeed, o.decay, floor, 0, 0, kitOffset & 0xFF, kitOffset >> 8];
+      const data = [(o.loop ? 1 : 0) | (o.background ? 2 : 0), o.arpSpeed, o.decay, floor, 0, 0, kitOffset & 0xFF, kitOffset >> 8];
       for (const p of pitchTable(o.tuning)) data.push(p & 0xFF, p >> 8);
       let all = data.concat(r.body);
       if (drums.size) all = all.concat(buildKit(kitOffset));
@@ -558,6 +558,8 @@
       rate = o.rate;
     }
     const warnings = [];
+    if (o.mode === 'poly' && o.background)
+      warnings.push('a háttér-mód csak az egycsatornás lejátszóval működik (a poly a teljes CPU-t használja)');
     const used = [...new Set(notes.map((n) => n[2]))].sort((a, b) => a - b);
     if (used.length && o.mode !== 'poly' && noteFreq(used[0], o.tuning) < TVC_CLOCK / 4096)
       warnings.push('a 47,7 Hz alatti hangok egy oktávval feljebb szólnak');
@@ -578,8 +580,13 @@
   }
   function buildCas(player, song, title) {
     const code = Uint8Array.from(player.code);
+    const suffix = Uint8Array.from(player.suffix || []);
     code.set(titleBytes(title), player.title_offset);
-    const progLen = code.length + song.length;
+    if (player.song_len_offset !== null && player.song_len_offset !== undefined) {
+      code[player.song_len_offset] = song.length & 0xFF;
+      code[player.song_len_offset + 1] = song.length >> 8;
+    }
+    const progLen = code.length + song.length + suffix.length;
     const total = 16 + progLen;
     const blocks = Math.ceil(total / 128);
     const cas = new Uint8Array(128 + total);
@@ -592,6 +599,7 @@
     cas[132] = 0xFF;                        // autorun
     cas.set(code, 144);
     cas.set(song, 144 + code.length);
+    cas.set(suffix, 144 + code.length + song.length);
     return cas;
   }
 
@@ -603,6 +611,7 @@
     ['channels', '--channels'], ['drums', '--drums'], ['transpose', '--transpose'], ['tuning', '--tuning'],
     ['speed', '--speed'], ['decay', '--decay'], ['decayFloor', '--decay-floor'], ['curve', '--curve'],
     ['minVolume', '--min-volume'], ['maxVolume', '--max-volume'], ['loop', '--loop'],
+    ['background', '--background'],
   ];
   function cliArgs(opts) {
     const o = Object.assign({}, DEFAULTS, opts || {});

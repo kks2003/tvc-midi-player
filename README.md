@@ -70,6 +70,7 @@ Helyben a `web/index.html` közvetlenül megnyitható (`file://` is jó).
 | `--decay N`, `--decay-floor V` | lecsengés: N tickenként eggyel halkul, legfeljebb V-ig |
 | `--curve`, `--min-volume`, `--max-volume` | MIDI erősség (velocity × CC7 × CC11) leképezése a 4 bites hangerőre |
 | `--loop` | a dal végtelenítve szól |
+| `--background` | egycsatornás lejátszó: háttérben szól, a BASIC közben fut (lásd lent) |
 | `--title` | a betöltés után kiírt cím (alapból a fájlnév) |
 
 A konverter kezeli a tempóváltásokat, a kitartó pedált (CC64), a CC7/CC11
@@ -155,16 +156,72 @@ aktuális hangja szól tovább.
   elindul. A BASIC a záró `00` után kezdi a szimbólumtáblát, ezért a gépi kód
   előtt 64 bájt üresen marad.
 - Időzítés: a ROM kurzor-IT-je, képkockánként egyszer (~49,7 Hz). A `0038h`
-  RAM-beli belépési pontja (`PUSH AF / LD A,70h / OUT (02h),A / JP C412h`)
-  első 3 bájtja a lejátszás idejére `JP irq` lesz. A saját kezelő a
-  `59h` port b4 bitjét nézi, lejátszik egy ticket, majd az elmentett eredeti
-  8 bájton keresztül lefut a ROM-kezelő is (az törli az IT-t a `07h`-val,
-  olvassa a billentyűzetet, növeli a TIME-ot). Kilépéskor a 3 bájt visszakerül.
-- A hangot a megszakítás írja. A főprogram `HALT`-tal vár, és az ESC/SPACE
-  gombot közvetlenül a billentyűzetmátrixból olvassa (7. sor, `03h`/`58h`).
-- Memória: a program `19EFh`-tól kezdődik, a lejátszó kódja kb. 750 bájt, utána jön a dal.
-  A konverter 20 000 bájt fölött figyelmeztet (a 32k-s gépen kb. eddig biztos
-  a hely).
+  RAM-beli belépési pontja `PUSH AF / LD A,70h / OUT (02h),A / JP C405h` (BASIC 2.2; az 1.2-es ROM-listában C412h); a
+  lejátszó a `JP` célját (`003Eh`) írja át a saját kezelőjére. Így az a ROM
+  lapozása (U0 U1 U2 SYS) után fut, akkor is, ha a megszakított program
+  éppen a videó-RAM-ot lapozta be. A kezelő a `59h` port b4 bitjét nézi,
+  lejátszik egy ticket, majd a ROM-kezelőre ugrik (az törli az IT-t a
+  `07h`-val, olvassa a billentyűzetet, növeli a TIME-ot). Leálláskor az
+  eredeti cím visszakerül.
+- Memória: a program `19EFh`-tól kezdődik, a lejátszó kódja kb. 1,2 KB
+  (ebből kb. 0,5 KB a háttér-mód betöltője), utána jön a dal, a végén a
+  relokációs tábla (212 bájt). A konverter 20 000 bájt fölött figyelmeztet (a
+  32k-s gépen kb. eddig biztos a hely).
+
+### Előtér és háttér
+
+Belépési pontok (BASIC: `X=USR(cím)`):
+
+| Cím | Mit csinál |
+| --- | --- |
+| `6759` | a dal fejléce szerint (`--background`) előtérben vagy háttérben; az autorun ezt hívja |
+| `6762` | előtérben: a dal végéig vagy ESC/SPACE-ig, utána visszatér |
+| `6765` | háttérben: azonnal visszatér, a zene szól |
+
+- **Előtérben** a főprogram `HALT`-tal vár, és az ESC/SPACE gombot
+  közvetlenül a billentyűzetmátrixból olvassa (7. sor, `03h`/`58h`).
+- **Háttérben:**
+  - A lejátszó a megszakításos részét és a dalt a memória tetejére
+    másolja. Ehhez a `HIMEM`-et (`0B19h`) lejjebb teszi, ugyanúgy, mint a
+    ROM `HI-MEM-SET` rutinja (`C4B7h`). A BASIC a vermét és a változóit a
+    `HIMEM` alá teszi, így a zene alatt új programot lehet begépelni,
+    futtatni vagy betölteni.
+  - A másolatot a relokációs tábla szerint javítja (sjasmplus
+    `RELOCATE_START`/`RELOCATE_TABLE`). A ROM USRTAB-jába beírja:
+    **`EXT 0`** leállítja, **`EXT 1`** elölről indítja.
+  - A futó BASIC verme miatt 512 bájtot üresen hagy a blokk fölött.
+  - Ha újra elindítod, és az új dal elfér a régi helyén, oda kerül; ha
+    nincs elég hely (32k-s gép, hosszú dal), előtérben szól.
+  - A program közben ne használja a `SOUND`-ot, és ne tiltsa le a
+    megszakításokat.
+
+Például egy `--background` kapcsolóval készült `zene.cas`-szal:
+
+```basic
+LOAD "zene"            a betöltés után a zene magától indul a háttérben
+NEW                    a zene szól tovább, a BASIC területe üres
+10 PRINT "SZOL A ZENE"
+20 FOR I=1 TO 3000 : NEXT I
+30 EXT 0
+RUN                    a program fut, a zene szól, a 30. sor leállítja
+EXT 1                  elölről indítja
+```
+
+A `6762`/`6765` belépési pont csak addig hívható, amíg a betöltött program
+(a két BASIC sor és mögötte a lejátszó) érintetlen, tehát közvetlenül a
+`LOAD` után. Új sorok begépelése vagy `NEW` után már csak az `EXT 0` /
+`EXT 1` használható: ezek a lefoglalt blokkba mutatnak.
+
+A lejátszó által elvett idő (emulátorban, a valódi ROM-mal mérve, a 58 s-os
+DuckTales egycsatornás változatain, képkockánként 62 802 ciklusból):
+
+| | Átlag | Legrosszabb képkocka |
+| --- | --- | --- |
+| a lejátszó | 2 400–2 600 ciklus (3,8–4,2%) | ~24 100 ciklus (38%, a dobok zajlökete) |
+| a ROM megszakításkezelője (zene nélkül is fut) | 4 935 ciklus (7,9%) | 5 398 ciklus (8,6%) |
+
+A többszólamú lejátszó a teljes CPU-t használja (DI mellett kever), mellette
+más nem futhat.
 
 Az adatformátum leírása a `player.asm` elején található.
 
@@ -190,10 +247,13 @@ portírásokat. Végül ellenőrzi:
   felvételben, valamint azt, hogy a dallam a dob közben is halad,
 - a felvett hang frekvenciáját (C4: 261,45 Hz, a számított érték 261,46 Hz),
 - a dal végi és az ESC utáni csendet,
-- az IT-vektor visszaállítását,
+- az IT-belépő visszaállítását,
 - a többszólamú motort: a hangmagasságot (±5 cent), az időzítést, hogy egy
   akkord három hangja egyszerre szól (spektrumból), a csendet a dal végén és
-  az ESC-et.
+  az ESC-et,
+- a háttér-módot: a zene alatt a BASIC végrehajt egy `POKE`-ot, a zene
+  végig szól, az `EXT 0` leállítja, az `EXT 1` újraindítja, a `HIMEM`
+  lejjebb kerül, és az EXT-címek a lefoglalt blokkba mutatnak.
 
 Kell hozzá g++, gcc, sjasmplus, az Ep128web (az `ep128emu` almodullal), az
 ep128emu ROM-csomagja, és írási jog a `/files` könyvtárba, mert az Ep128web

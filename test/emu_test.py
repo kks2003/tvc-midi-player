@@ -75,6 +75,13 @@ def build_emulator(root, objdir):
     return exe
 
 
+def isr_restored(res):
+    """az IT-belépő (0038h..003Fh) ugyanaz, mint a betöltés előtt"""
+    before = res.split("isr0=")[1].split("\n")[0].strip()
+    after = res.split("isr=")[1].split("time=")[0].strip()
+    return before == after and before.startswith("f5 3e 70 d3 02 c3")
+
+
 def zero_cross_freq(samples, rate):
     """Alapfrekvencia a középszint-átlépésekből (négyszögjelre pontos)."""
     if len(samples) < 16:
@@ -131,7 +138,7 @@ def main():
     drum_w = [w for w in mine if dlo <= w[1] < dhi]
     mine = [w for w in mine if not dlo <= w[1] < dhi]      # a dallam írásai
     check("a lejátszó írja a hangportokat (04h/05h/06h)", len(mine) > 20, "%d írás" % len(mine))
-    check("az IT-vektor visszaállt (PUSH AF / LD A,70h)", res.split("isr=")[1].startswith("f5 3e 70"))
+    check("az IT-belépő visszaállt (PUSH AF / LD A,70h / OUT (02h),A / JP ROM)", isr_restored(res))
 
     # a kiadott PITCH-ek: a lejátszó 04h, majd 05h írásai
     table = midi2tvc.pitch_table(440.0)
@@ -209,7 +216,7 @@ def main():
         d2 = struct.unpack("<%dh" % w.getnframes(), w.readframes(w.getnframes()))
     tail = d2[-rate:]
     check("ESC: leáll a hang", max(tail) - min(tail) < 200)
-    check("ESC: az IT-vektor visszaállt", res.split("isr=")[1].startswith("f5 3e 70"))
+    check("ESC: az IT-belépő visszaállt", isr_restored(res))
     # 3. többszólamú motor (--mode poly)
     subprocess.check_call([os.path.join(REPO, "build.sh"), mid, "--mode", "poly", "--decay", "4"])
     shutil.copy(os.path.join(REPO, "build", "teszt.cas"), "/files/poly.cas")
@@ -245,12 +252,53 @@ def main():
               "C2 %.0f, E4 %.0f, G4 %.0f, D4 %.0f" % (p[65.41] / 1e3, p[329.63] / 1e3, p[392.0] / 1e3, p[293.66] / 1e3))
         tail = d3[-rate:]
         check("poly: a dal végén csend", max(tail) - min(tail) < 200)
-    check("poly: a rendszer IT-belépése érintetlen", res.split("isr=")[1].startswith("f5 3e 70"))
+    check("poly: a rendszer IT-belépése érintetlen", isr_restored(res))
     wav4 = os.path.join(out, "poly_esc.wav")
     subprocess.check_output([exe, args.roms, "poly", "7", wav4, os.path.join(out, "poly_esc.txt"), "4"])
     with wave.open(wav4) as w:
         d4 = struct.unpack("<%dh" % w.getnframes(), w.readframes(w.getnframes()))
     check("poly: ESC: leáll a hang", max(d4[-rate:]) - min(d4[-rate:]) < 200)
+
+    # 4. háttér-mód (--background): a zene szól, a BASIC közben dolgozik
+    subprocess.check_call([os.path.join(REPO, "build.sh"), mid, "--background", "--loop", "--decay", "4"])
+    shutil.copy(os.path.join(REPO, "build", "teszt.cas"), "/files/bg.cas")
+    wav5 = os.path.join(out, "bg.wav")
+    env = dict(os.environ, DUMP="7530,1", TYPE_AT="5:poke 30000,42\\n;9:ext 0\\n;12:ext 1\\n")
+    res = subprocess.check_output([exe, args.roms, "bg", "17", wav5, os.path.join(out, "bg_ports.txt")], env=env).decode()
+    with wave.open(wav5) as w:
+        d5 = struct.unpack("<%dh" % w.getnframes(), w.readframes(w.getnframes()))
+    def sounding(t0, t1):
+        seg = d5[int(t0 * rate): int(t1 * rate)]
+        return max(seg) - min(seg) > 200
+    check("háttér: a BASIC a zene alatt is végrehajtja a parancsokat (POKE)", "dump 7530: 2a" in res)
+    check("háttér: a zene a gépelés alatt végig szól (3..11 s)",
+          all(sounding(t, t + 0.5) for t in [x * 0.5 for x in range(6, 22)]))
+    check("háttér: EXT 0 leállítja", not sounding(13.0, 14.5))
+    check("háttér: EXT 1 újraindítja", sounding(15.5, 17.0))
+    # NEW után új program, RUN: a BASIC a lefoglalt blokk alá teszi a vermét
+    wav6 = os.path.join(out, "bg_new.wav")
+    res6 = subprocess.check_output([exe, args.roms, "bg", "16", wav6, os.path.join(out, "bg_new_ports.txt")],
+                                   env=dict(os.environ, DUMP="7531,1",
+                                            TYPE_AT="4:new\\n;6:10 poke 30001,7\\n;11:run\\n")).decode()
+    with wave.open(wav6) as w:
+        d6 = struct.unpack("<%dh" % w.getnframes(), w.readframes(w.getnframes()))
+    seg_ok = all(max(d6[int(t * rate):int((t + 0.5) * rate)]) - min(d6[int(t * rate):int((t + 0.5) * rate)]) > 200
+                 for t in [x * 0.5 for x in range(6, 30)])
+    check("háttér: NEW, új program begépelése és RUN alatt a zene végig szól, a program lefut",
+          "dump 7531: 07" in res6 and seg_ok)
+    res2 = subprocess.check_output([exe, args.roms, "bg", "4", os.path.join(out, "bg2.wav"),
+                                    os.path.join(out, "bg2_ports.txt")],
+                                   env=dict(os.environ, DUMP="0B19,2")).decode()
+    hm = res2.split("dump 0b19:")[1].split()
+    himem = int(hm[0], 16) | (int(hm[1], 16) << 8)
+    res3 = subprocess.check_output([exe, args.roms, "bg", "4", os.path.join(out, "bg3.wav"),
+                                    os.path.join(out, "bg3_ports.txt")],
+                                   env=dict(os.environ, DUMP="0021,4")).decode()
+    u = [int(x, 16) for x in res3.split("dump 0021:")[1].split()[:4]]
+    ext0, ext1 = u[0] | (u[1] << 8), u[2] | (u[3] << 8)
+    check("háttér: a HIMEM lejjebb került, az EXT 0/1 a lefoglalt blokkba mutat",
+          himem < 0xBF00 and ext1 == himem + 1 and himem < ext0 < 0xC000,
+          "HIMEM %04Xh, EXT 0 %04Xh, EXT 1 %04Xh" % (himem, ext0, ext1))
 
     print("eredmények: %s" % out)
     print("HIBÁK: %d" % bad if bad else "minden ellenőrzés rendben")

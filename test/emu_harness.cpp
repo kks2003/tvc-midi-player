@@ -30,6 +30,11 @@ int ep_audio_frames();
 void ep_audio_clear();
 void ep_dbg_iolog_enable(int);
 const uint32_t *ep_frame_buffer();
+void ep_dbg_measure_start(int, int, int, int, int);
+void ep_dbg_measure_stop();
+int ep_dbg_measure_count();
+int ep_dbg_measure_kept();
+const double *ep_dbg_measure_samples();
 int ep_frame_width();
 int ep_frame_height();
 const char *ep_dbg_iolog(int);
@@ -79,7 +84,7 @@ static void typeText(const char *t)
 {
   static const int lcodes[26] = {0x0E,0x02,0x03,0x0B,0x15,0x0C,0x0A,0x08,0x48,0x30,0x32,0x34,0x40,
                                  0x00,0x4A,0x4C,0x11,0x13,0x0D,0x14,0x10,0x04,0x16,0x05,0x06,0x12};  // y/z: QWERTZ
-  static const int digits[10] = {0x2C,0x19,0x1E,0x1D,0x1B,0x1C,0x1A,0x18,0x28,0x2A};
+  static const int digits[10] = {0x4B,0x19,0x1E,0x1D,0x1B,0x1C,0x1A,0x18,0x28,0x2A};
   for (; *t; t++) {
     if (*t == '"') {
       ep_set_key(0x07, 1); runMs(60); ep_set_key(0x1E, 1); runMs(80); ep_set_key(0x1E, 0); runMs(40);
@@ -87,6 +92,7 @@ static void typeText(const char *t)
     } else if (*t >= 'a' && *t <= 'z') key(lcodes[*t - 'a']);
     else if (*t >= '0' && *t <= '9') key(digits[*t - '0']);
     else if (*t == ' ') key(0x46);
+    else if (*t == ',') key(0x42);
     else if (*t == '\n') key(0x3E);
   }
 }
@@ -118,22 +124,75 @@ int main(int argc, char **argv)
   ep_reset(1);
   runMs(4000);
   key(0x3E); runMs(3000);                  // a bekapcsolási kép után Enter; az első leütés elveszhet, ezért " load"
+  std::printf("isr0=");                     // az IT-belépő a betöltés előtt
+  for (int a = 0x38; a < 0x40; a++) std::printf("%02x ", ep_read_memory(a));
+  std::printf("\n");
   plog = std::fopen(argv[5], "w");
   std::string cmd = std::string(" load \"") + argv[2] + "\"\n";
+  // MEASURE=start,stop (hex): ciklusmérés a két cím között a felvétel alatt
+  int mStart = -1, mStop = -1;
+  if (const char *m = std::getenv("MEASURE")) {
+    std::sscanf(m, "%x,%x", (unsigned *) &mStart, (unsigned *) &mStop);
+    ep_dbg_measure_start(mStart, -1, mStop, -1, 0);
+  }
   ep_dbg_iolog_enable(1);
   recording = true;            // már a gépeléskor: az autorun rögtön indul
   typeText(cmd.c_str());
   int secs = std::atoi(argv[3]);
   int stopAt = argc > 6 ? std::atoi(argv[6]) : -1;
-  for (int s = 0; s < secs; s++) {
-    if (s == stopAt) { ep_set_key(0x38, 1); runMs(200); ep_set_key(0x38, 0); runMs(800); continue; }
-    runMs(1000);
+  // TYPE_AT="mp:szöveg;mp:szöveg": gépelés a felvétel közben (a szövegben
+  // a \n Enter); az idő a gépelés kezdetétől számít
+  std::vector<std::pair<double, std::string>> typeAt;
+  if (const char *t = std::getenv("TYPE_AT")) {
+    std::string all(t);
+    size_t p = 0;
+    while (p < all.size()) {
+      size_t q = all.find(';', p);
+      std::string item = all.substr(p, q == std::string::npos ? std::string::npos : q - p);
+      size_t c = item.find(':');
+      if (c != std::string::npos) {
+        std::string txt = item.substr(c + 1), out;
+        for (size_t i = 0; i < txt.size(); i++) {
+          if (txt[i] == '\\' && i + 1 < txt.size() && txt[i + 1] == 'n') { out += '\n'; i++; }
+          else out += txt[i];
+        }
+        typeAt.push_back({std::atof(item.substr(0, c).c_str()), out});
+      }
+      if (q == std::string::npos) break;
+      p = q + 1;
+    }
+  }
+  long frame0 = frame;
+  size_t nextType = 0;
+  while (frame - frame0 < long(secs) * 50) {
+    double now = (frame - frame0) / 50.0;
+    if (nextType < typeAt.size() && now >= typeAt[nextType].first) {
+      typeText(typeAt[nextType].second.c_str());
+      nextType++;
+      continue;
+    }
+    if (stopAt >= 0 && now >= stopAt) {
+      ep_set_key(0x38, 1); runMs(200); ep_set_key(0x38, 0);
+      stopAt = -1;
+      continue;
+    }
+    step();
   }
   recording = false;
+  if (mStart >= 0) {
+    int n = ep_dbg_measure_kept();
+    const double *sm = ep_dbg_measure_samples();
+    double sum = 0, mn = 1e18, mx = 0;
+    for (int i = 0; i < n; i++) { double c = sm[i * 2 + 1]; sum += c; mn = c < mn ? c : mn; mx = c > mx ? c : mx; }
+    std::printf("measure %04x-%04x: count=%d avg=%.0f min=%.0f max=%.0f sum=%.0f\n", mStart, mStop,
+                ep_dbg_measure_count(), n ? sum / n : 0, n ? mn : 0, mx, sum);
+    ep_dbg_measure_stop();
+  }
   writeWav(argv[4], 48000);
   std::fclose(plog);
-  std::printf("pc=%04x isr=%02x %02x %02x time=%d\n", ep_pc(), ep_read_memory(0x38), ep_read_memory(0x39),
-              ep_read_memory(0x3A), ep_read_memory(0x0B1D) | (ep_read_memory(0x0B1E) << 8));
+  std::printf("pc=%04x isr=", ep_pc());
+  for (int a = 0x38; a < 0x40; a++) std::printf("%02x ", ep_read_memory(a));
+  std::printf("time=%d\n", ep_read_memory(0x0B1D) | (ep_read_memory(0x0B1E) << 8));
   if (const char *scr = std::getenv("SCREEN")) {      // képernyőkép (PPM)
     int w = ep_frame_width(), h = ep_frame_height();
     const uint32_t *fb = ep_frame_buffer();
