@@ -11,12 +11,12 @@ fordítás szimbólumfájljából (op_XX címkék) a 2. menet elpakolja őket.
 
 Regiszterek a futás alatt (lásd sidplay.asm):
   B   = a 6502 A regisztere      C   = X      IXh = Y
-  F   = a 6502 N és Z jelzője élőben (S és Z); a többi jelző: fC (0. bit),
-        fV (2. bit), fD (08h), fI (04h) változó
+  F   = a 6502 N és Z jelzője élőben (S és Z); IXl = az átvitel (0. bit);
+        a többi jelző változóban: fV (2. bit), fD (08h), fI (04h)
   DE  = a 6502 PC Z80-as címe (a zene lapjai a Z80 memóriájában is
         folytonosak, ezért INC DE-vel léptethető)
   HL, A: munkaregiszterek; AF': munkaterület ott, ahol a jelzők megmaradnak
-  IXl = az őrkutya számlálója (visszafelé ugrások)
+  Az időkorlátot (végtelen ciklus) az IT-kezelő figyeli, nem az emulátor.
 A 6502 memóriája 256 bájtos lapokban: RT (olvasás), WT (írás; 0 = I/O vagy
 lefoglalatlan lap: lassú út), INV (Z80-as lap -> 6502-es lap).
 """
@@ -27,7 +27,7 @@ NEXT = ["ld a,(de)", "inc de", "ld l,a", "ld h,OPHI>>8", "ld h,(hl)", "jp (hl)"]
 FA = ["ex de,hl", "ld a,(hl)", "inc hl", "ld e,(hl)", "inc hl", "ex de,hl"]
 EXA = ["ex af,af'"]
 RDT = ["ld h,RT>>8", "ld h,(hl)", "ld l,a", "ld a,(hl)"]
-STC = ["rla", "ld (fC),a"]          # a Z80 átvitele -> fC (S, Z megmarad)
+STC = ["rla", "ld ixl,a"]          # a Z80 átvitele -> fC (S, Z megmarad)
 _lab = [0]
 
 def idx(reg):
@@ -99,15 +99,15 @@ ALU = {   # A = érték; a végén F = N, Z
     "CPX": ["ld l,a", "ld a,c", "sub l", "ccf"] + STC,
     "CPY": ["ld l,a", "ld a,ixh", "sub l", "ccf"] + STC,
     "BIT": ["call do_bit"],
-    "ANC": ["and b", "ld b,a", "push af", "rlca", "and 1", "ld (fC),a", "pop af"],
+    "ANC": ["and b", "ld b,a", "push af", "rlca", "and 1", "ld ixl,a", "pop af"],
     "ALR": ["and b", "srl a", "ld b,a"] + STC,
     "SBX": ["ld l,a", "ld a,c", "and b", "sub l", "ld c,a", "ccf"] + STC,
 }
 RMW = {   # (HL) = a módosítandó bájt
     "ASL": ["sla (hl)"] + STC,
     "LSR": ["srl (hl)"] + STC,
-    "ROL": ["ld a,(fC)", "rra", "rl (hl)"] + STC,
-    "ROR": ["ld a,(fC)", "rra", "rr (hl)"] + STC,
+    "ROL": ["ld a,ixl", "rra", "rl (hl)"] + STC,
+    "ROR": ["ld a,ixl", "rra", "rr (hl)"] + STC,
     "INC": ["inc (hl)"],
     "DEC": ["dec (hl)"],
 }
@@ -116,8 +116,8 @@ COMBO = {"SLO": ("ASL", "ORA"), "RLA": ("ROL", "AND"), "SRE": ("LSR", "EOR"),
 ACC = {
     "ASL": ["sla b"] + STC,
     "LSR": ["srl b"] + STC,
-    "ROL": ["ld a,(fC)", "rra", "rl b"] + STC,
-    "ROR": ["ld a,(fC)", "rra", "rr b"] + STC,
+    "ROL": ["ld a,ixl", "rra", "rl b"] + STC,
+    "ROR": ["ld a,ixl", "rra", "rr b"] + STC,
 }
 STORE = {"STA": ("A", ["ld (hl),b"]), "STX": ("X", ["ld (hl),c"]),
          "STY": ("Y", ["ld a,ixh", "ld (hl),a"]),
@@ -125,7 +125,7 @@ STORE = {"STA": ("A", ["ld (hl),b"]), "STX": ("X", ["ld (hl),c"]),
 SP = ["ld hl,(rS)"]                 # L = S, H = a verem lapja (rS után STKPG)
 IMP = {
     "NOP": [],
-    "CLC": ["ld a,0", "ld (fC),a"], "SEC": ["ld a,1", "ld (fC),a"],
+    "CLC": ["ld a,0", "ld ixl,a"], "SEC": ["ld a,1", "ld ixl,a"],
     "CLD": ["ld a,0", "ld (fD),a"], "SED": ["ld a,08h", "ld (fD),a"],
     "CLI": ["ld a,0", "ld (fI),a"], "SEI": ["ld a,04h", "ld (fI),a"],
     "CLV": ["ld a,0", "ld (fV),a"],
@@ -139,7 +139,7 @@ IMP = {
     "PLP": SP + ["inc l", "ld a,l", "ld (rS),a", "ld a,(hl)", "call setp"],
 }
 BRANCH = {"BPL": "p", "BMI": "m", "BEQ": "z", "BNE": "nz"}
-BRMEM = {"BCC": (["ld a,(fC)", "rra"], "nc"), "BCS": (["ld a,(fC)", "rra"], "c"),
+BRMEM = {"BCC": (["ld a,ixl", "rra"], "nc"), "BCS": (["ld a,ixl", "rra"], "c"),
          "BVC": (["ld a,(fV)", "and 4"], "z"), "BVS": (["ld a,(fV)", "and 4"], "nz")}
 
 OPS = {}
@@ -220,10 +220,10 @@ def body(code):
         t, cc = BRMEM[mn]
         return EXA + t + ["jp %s,br_taken_alt" % cc] + EXA + ["inc de"] + NEXT
     if mn == "JMP" and mode == "abs":
-        return FA + ["ld h,RT>>8", "ld h,(hl)", "ld l,a", "ex de,hl", "jp jmp_wd"]
+        return FA + ["ld h,RT>>8", "ld h,(hl)", "ld l,a", "ex de,hl"] + NEXT
     if mn == "JMP":
         return FA + ["ld h,RT>>8", "ld h,(hl)", "ld l,a", "ld a,(hl)", "inc l", "ld l,(hl)",
-                     "ld h,RT>>8", "ld h,(hl)", "ld l,a", "ex de,hl", "jp jmp_wd"]
+                     "ld h,RT>>8", "ld h,(hl)", "ld l,a", "ex de,hl"] + NEXT
     if mn == "JSR":     # a verembe a JSR utolsó bájtjának 6502-es címe kerül
         return EXA + ["inc de", "ld h,INV>>8", "ld l,d", "ld a,(hl)"] + SP + \
             ["ld (hl),a", "dec l", "ld (hl),e", "dec l", "ld a,l", "ld (rS),a",
@@ -258,25 +258,8 @@ br_taken_alt:
             ld h,a
             add hl,de
             ex de,hl
-            or a
-            jr nz,wd_tick           ; visszafelé: őrkutya
             ex af,af'
 @NEXT@
-; JMP: őrkutya (végtelen ciklus ellen)
-jmp_wd:     ex af,af'
-wd_tick:    dec ixl
-            jr z,.chk
-            ex af,af'
-@NEXT@
-.chk:       ld a,(ticks)            ; 256 ugrásonként: letelt-e az idő
-            ld hl,wd_start
-            sub (hl)
-wd_lim:     cp 0
-            jr nc,.to
-            ex af,af'
-@NEXT@
-.to:        ex af,af'
-            jp emu_timeout
 emu_exit_alt:
             ex af,af'
             jp emu_exit
@@ -286,7 +269,7 @@ do_adc:     ld l,a
             ld a,(fD)
             or a
             jr nz,.dec
-            ld a,(fC)
+            ld a,ixl
             rra
             ld a,b
             adc a,l
@@ -294,10 +277,10 @@ do_adc:     ld l,a
             push af
             pop hl
             ld a,l
-            ld (fC),a
+            ld ixl,a
             ld (fV),a
             ret
-.dec:       ld a,(fC)
+.dec:       ld a,ixl
             rra
             ld a,b
             adc a,l
@@ -306,13 +289,13 @@ do_adc:     ld l,a
             push af
             pop hl
             ld a,l
-            ld (fC),a
+            ld ixl,a
             ret
 do_sbc:     ld l,a
             ld a,(fD)
             or a
             jr nz,.dec
-            ld a,(fC)
+            ld a,ixl
             cpl
             rra
             ld a,b
@@ -322,10 +305,10 @@ do_sbc:     ld l,a
             push af
             pop hl
             ld a,l
-            ld (fC),a
+            ld ixl,a
             ld (fV),a
             ret
-.dec:       ld a,(fC)
+.dec:       ld a,ixl
             cpl
             rra
             ld a,b
@@ -336,7 +319,7 @@ do_sbc:     ld l,a
             push af
             pop hl
             ld a,l
-            ld (fC),a
+            ld ixl,a
             ret
 ; BIT: A = M; Z = (A and M) = 0, N = M 7. bitje, V = M 6. bitje
 do_bit:     ld l,a
@@ -374,7 +357,7 @@ getp:       push af
             and 4
             jr z,.nv
             set 6,h
-.nv:        ld a,(fC)
+.nv:        ld a,ixl
             and 1
             or h
             ld h,a
@@ -401,7 +384,7 @@ setp:       ld l,a
             ld (fI),a
             ld a,l
             and 01h
-            ld (fC),a
+            ld ixl,a
             ld a,l
             and 80h
             ld h,a

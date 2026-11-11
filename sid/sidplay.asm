@@ -150,10 +150,12 @@ main:
 .found:     ld a, c
             ld (sid_reset.psel1 + 1), a       ; a portcímek a kódba
             ld (wslow_v.psel2 + 1), a
+            ld (wslow_A.psel4 + 1), a
             ld (play_file.psel3 + 1), a
             inc a
             ld (sid_reset.pdat1 + 1), a
             ld (wslow_v.pdat2 + 1), a
+            ld (wslow_A.pdat4 + 1), a
             ld (play_file.pdat3 + 1), a
             inc a
             ld c, a
@@ -429,6 +431,10 @@ play_file:
 .keys:      ld a, (cia_dirty)       ; a zene átírta a CIA időzítőt
             or a
             call nz, timer_update
+            ld hl, key_cnt          ; a billentyűk csak minden 8. hívásnál
+            dec (hl)
+            jp nz, .frame
+            ld (hl), 8
             call read_keys
             cp KEYMASK
             jr nz, .esc
@@ -497,9 +503,24 @@ irq_handler:
             ld a, (pending)
             inc a
             ld (pending), a
-            pop af
+            ld a, (emu_on)          ; őrkutya: a 6502-es kód túl sokáig fut?
+            or a
+            jr z, .r
+            push hl
+            ld a, (ticks)
+            ld hl, wd_start
+            sub (hl)
+            pop hl
+.wd_lim:    cp 0
+            jr nc, .to
+.r:         pop af
             ei
             ret
+.to:        xor a
+            ld (emu_on), a
+            ld sp, (emu_sp)         ; az emu_run hívójához térünk vissza
+            ei
+            jp emu_timeout
 
 ; ---- időzítő: a hanggenerátor IT-je (195312,5 / (4096 - n) Hz) ---------------
 ; A képkocka-IT (a CRTC kurzor-IT-je) közös állapotbitet használ a hang-IT-vel,
@@ -1006,20 +1027,25 @@ call_irq:   ld a, 8
             ld a, 04h               ; I = 1
             ld (fI), a
             jr emu_run
-getp_saved: ld a, (rF)
+getp_saved: ld a, (fC)
+            ld ixl, a
+            ld a, (rF)
             ld l, a
             push hl
             pop af
             jp getp
 
 ; A = időkorlát (időzítő-IT-ben)
-set_wd:     ld (wd_lim + 1), a
+set_wd:     ld (irq_handler.wd_lim + 1), a
             ld a, (ticks)
             ld (wd_start), a
+            ld a, 1
+            ld (emu_on), a
             ret
 
 ; HL = a 6502-es PC; a regiszterek a változókból
-emu_run:    ld e, l
+emu_run:    ld (emu_sp), sp
+            ld e, l
             ld l, h
             ld h, RT >> 8
             ld d, (hl)
@@ -1029,7 +1055,8 @@ emu_run:    ld e, l
             ld c, a
             ld a, (rY)
             ld ixh, a
-            ld ixl, 0
+            ld a, (fC)
+            ld ixl, a
             ld a, (rF)
             ld l, a
             push hl
@@ -1044,10 +1071,14 @@ emu_timeout:
             ld a, 2
 emu_save:   push af
             pop hl                  ; H = állapot, L = jelzők
+            xor a
+            ld (emu_on), a
             ld a, l
             ld (rF), a
             ld a, h
             ld (emu_status), a
+            ld a, ixl
+            ld (fC), a
             ld a, b
             ld (rA), a
             ld a, c
@@ -1058,7 +1089,24 @@ emu_save:   push af
 
 ; ---- írás lassú útja: L = a 6502-es lap, A = alsó bájt ----------------------
 ; Kimenet: HL = írható Z80-as cím, A = L (a hívó LD L,A-t hajt végre)
-wslow_A:    push af
+wslow_A:    ld h, a                 ; gyors út: STA a SID-be ($D400-$D7FF)
+            ld a, l
+            and 0FCh
+            cp 0D4h
+            jr nz, .gen
+            ld a, h
+            and 1Fh
+            cp SID_REGS
+            jr nc, .scr
+            add a, REG_VSID
+.psel4:     out (0), a
+            ld a, b
+.pdat4:     out (0), a
+.scr:       ld hl, SCRATCH
+            ld a, l
+            ret
+.gen:       ld a, h
+            push af
             ld a, b
             jr wslow_v
 wslow_X:    push af
@@ -1536,6 +1584,9 @@ fD:         db 0
 fI:         db 0
 stop_s:     db 0
 ticks:      db 0
+emu_on:     db 0
+emu_sp:     dw 0
+key_cnt:    db 1
 pending:    db 0
 wd_start:   db 0
 irq_on:     db 0
