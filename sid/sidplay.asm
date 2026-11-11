@@ -23,7 +23,7 @@ P_KBDROW    equ 03h
 P_KBDIN     equ 58h
 V_PAGING    equ 0003h
 V_PORT03    equ 0B11h
-V_TIME      equ 0B1Dh
+IRQVEC      equ 0038h
 V_HIMEM     equ 0B19h
 IO_PARAM    equ 0D900h          ; a kártya IO RAM-ja a slot IOMEM-jében
 IO_RESULT   equ 0DA00h
@@ -171,6 +171,8 @@ main:
             jr c, .him
             ld a, 0C0h
 .him:       dec a
+            ld (pool_top), a        ; eddig foglalhatók lapok
+            sub 2                   ; a fájl a lapra igazításhoz feljebb csúszhat
             ld (buf_limit + 1), a
             xor a
             ld (buf_limit), a
@@ -302,12 +304,22 @@ play_file:
             ld (saved_p05), a
             ld a, (V_PAGING)
             ld (saved_paging), a
+            call calc_speed         ; a fejlécből, mielőtt a helyére csúszik a zene
             di
             ld a, PAGE_RUN
             ld (V_PAGING), a
             out (P_PAGING), a
+            ld hl, IRQVEC           ; saját IT-kezelő (a ROM-é ~5000 ciklus)
+            ld de, irq_save
+            ld bc, 3
+            ldir
+            ld a, 0C3h
+            ld (IRQVEC), a
+            ld hl, irq_handler
+            ld (IRQVEC + 1), hl
+            ld a, 1
+            ld (irq_on), a
             ei
-            call mem_init
             call load_image
             jr nc, .loaded
             call stop_all
@@ -329,11 +341,9 @@ play_file:
             ld (fC), a
             ld (fV), a
             ld (fD), a
-            ld (rN), a
+            ld (rF), a              ; N = 0, Z = 0
             ld a, 04h
             ld (fI), a
-            ld a, 1
-            ld (rZ), a
             ld a, 0FFh
             ld (rS), a
             ld a, 2Fh
@@ -385,7 +395,19 @@ play_file:
             ld (cia_dirty), a
 
 ; ---- időzítő-IT-nként a lejátszó (VBI: 50,12 Hz, CIA: a zene tempója) ------
-.frame:     halt
+.frame:     ld a, (pending)         ; van kiszolgálatlan időzítő-IT?
+            or a
+            jr nz, .go
+            halt
+            jr .frame
+.go:        di                      ; ha egy hívás kicsúszott, a következők behozzák
+            ld a, (pending)
+            dec a
+            cp 3
+            jr c, .pc
+            ld a, 2
+.pc:        ld (pending), a
+            ei
             ld hl, it_cnt           ; minden it_div. IT-re
             dec (hl)
             jr nz, .frame
@@ -441,7 +463,16 @@ stop_all:   call sid_reset
             ld a, (saved_paging)
             ld (V_PAGING), a
             out (P_PAGING), a
-            ld a, (timer_on)        ; a hang-IT ki, a kurzor-IT vissza
+            ld a, (irq_on)          ; a ROM IT-kezelője vissza
+            or a
+            jr z, .i
+            xor a
+            ld (irq_on), a
+            ld hl, irq_save
+            ld de, IRQVEC
+            ld bc, 3
+            ldir
+.i:         ld a, (timer_on)        ; a hang-IT ki, a kurzor-IT vissza
             or a
             jr z, .t
             xor a
@@ -456,12 +487,26 @@ stop_all:   call sid_reset
 .t:         ei
             ret
 
+; saját IT-kezelő a lejátszás alatt: nyugtáz, számol
+irq_handler:
+            push af
+            out (P_ITCLR), a
+            ld a, (ticks)
+            inc a
+            ld (ticks), a
+            ld a, (pending)
+            inc a
+            ld (pending), a
+            pop af
+            ei
+            ret
+
 ; ---- időzítő: a hanggenerátor IT-je (195312,5 / (4096 - n) Hz) ---------------
 ; A képkocka-IT (a CRTC kurzor-IT-je) közös állapotbitet használ a hang-IT-vel,
 ; ezért közben tiltva van (CRTC R10 = 23h, mint a ROM magnórutinjában).
 ; A PSID fejléc speed mezőjének a dalhoz tartozó bitje: 0 = VBI (PAL 50,12 Hz),
 ; 1 = a CIA1 A időzítője (985248 / (T + 1) Hz; ha az init nem írta: 60 Hz).
-timer_start:
+calc_speed:
             ld a, (song)            ; bit = dal - 1 (32 fölött a 31.)
             dec a
             cp 32
@@ -488,8 +533,12 @@ timer_start:
             ld a, 0
             rla
             ld (cia_mode), a
+            ret
+timer_start:
             ld a, 1
             ld (timer_on), a
+            xor a
+            ld (pending), a
 timer_update:
             xor a
             ld (cia_dirty), a
@@ -704,7 +753,11 @@ mem_init:
             ld bc, 4 * 256 - 1
             ld (hl), 0
             ldir
-            ; a lapkészlet: U3, a program fölött a verem alá, a .sid helye
+            xor a
+            ld (INV + (ZPG >> 8)), a
+            inc a
+            ld (INV + (STKPG >> 8)), a
+            ; a lapkészlet: U3, majd a zene fölött a HIMEM-ig
             ld hl, pool_ranges
             ld (hl), 0C0h
             inc hl
@@ -714,7 +767,7 @@ mem_init:
             inc a
             ld (hl), a
             inc hl
-            ld a, (buf_limit + 1)
+            ld a, (pool_top)
             ld (hl), a
             dec hl
             cp (hl)                 ; üres tartomány?
@@ -724,13 +777,6 @@ mem_init:
             ld (hl), 0
             dec hl
 .r2:        inc hl
-            inc hl
-            ld a, sidbuf >> 8
-            ld (hl), a
-            inc hl
-            ld a, (sidend + 1)
-            dec a
-            ld (hl), a
             inc hl
             ld (hl), 0              ; a lista vége
             ld hl, pool_ranges
@@ -780,6 +826,9 @@ alloc_page:
             ld (hl), d
             inc h
             ld (hl), d              ; WT = RT + 256
+            ld h, INV >> 8
+            ld l, d
+            ld (hl), e
             ld a, d
             or a
             pop bc
@@ -792,83 +841,80 @@ alloc_page:
 
 ; a .sid adatainak bemásolása a 6502 lapjaira; Cy = 1: nincs elég memória
 load_image:
+            ; A zene a pufferben marad: annyival feljebb csúszik (< 256 bájt), hogy
+            ; a Z80-as cím alsó bájtja a 6502-es címével egyezzen. Így a lapjai a
+            ; Z80 memóriájában is folytonosak (a PC INC DE-vel léptethető).
+            ld a, (load_addr)
+            ld hl, data_ptr
+            sub (hl)
+            ld c, a
+            ld b, 0                 ; BC = eltolás
+            ld hl, (data_ptr)
+            add hl, bc
+            ld (img_z80), hl
+            ld a, c
+            or a
+            jr z, .nomove
+            ld hl, (data_ptr)
+            ld de, (data_len)
+            add hl, de
+            dec hl                  ; a forrás vége
+            push hl
+            add hl, bc
+            ex de, hl               ; DE = a cél vége
+            pop hl
+            ld bc, (data_len)
+            lddr
+.nomove:    ld hl, (img_z80)        ; az első lap eleje a zenéig: 0
+            ld a, l
+            or a
+            jr z, .nz1
+            ld b, a
+            ld l, 0
+.z1:        ld (hl), 0
+            inc l
+            djnz .z1
+.nz1:       ld hl, (img_z80)
+            ld de, (data_len)
+            add hl, de
+            ld (sidend), hl
+            ld a, l                 ; az utolsó lap maradéka: 0
+            or a
+            jr z, .nz2
+.z2:        ld (hl), 0
+            inc l
+            jr nz, .z2
+.nz2:       call mem_init
             ld hl, (load_addr)
-            ld a, h
-            ld (img_first), a
+            ld c, h                 ; C = 6502-es lap
             ld de, (data_len)
             add hl, de
             dec hl
             ld a, h
             ld (img_last), a
-            ld a, (img_first)
-.pg:        ld c, a
+            ld a, (img_z80 + 1)
+            ld b, a                 ; B = Z80-as lap
+.pg:        ld a, c
+            cp 2
+            jr c, .skip             ; a nullás lap és a verem helye fix
+            ld h, INV >> 8
+            ld l, b
+            ld (hl), c
             call is_iopage
-            jr z, .skip
-            ld h, WT >> 8
+            jr z, .skip             ; $D4-$D7: SID
+            ld h, RT >> 8
             ld l, c
-            ld a, (hl)
-            or a
-            jr nz, .skip            ; már van (nullás lap, verem)
-            ld a, c
-            call alloc_page
-            scf
-            ret z
+            ld (hl), b
+            inc h
+            ld (hl), b
 .skip:      ld a, (img_last)
             cp c
-            jr z, .copy
-            ld a, c
-            inc a
-            jr .pg
-.copy:
-            ; másolás lapdarabokban
-            ld hl, (data_ptr)
-            ld (src), hl
-            ld hl, (load_addr)
-            ld (dst6502), hl
-            ld hl, (data_len)
-            ld (remain), hl
-.cp:        ld hl, (remain)
-            ld a, h
-            or l
-            ret z                   ; Cy = 0 (or a)
-            ld a, (dst6502)         ; n = min(remain, 256 - lo)
-            neg
-            ld c, a
-            ld b, 0
-            or a
-            jr nz, .n
+            jr z, .done
+            inc c
             inc b
-.n:         ld hl, (remain)
-            or a
-            sbc hl, bc
-            jr nc, .n2
-            ld bc, (remain)
-.n2:        ld hl, (remain)
-            or a
-            sbc hl, bc
-            ld (remain), hl
-            ld hl, (dst6502)
-            ld a, h
-            ld e, l
-            ld h, WT >> 8
-            ld l, a
-            ld d, (hl)
-            ld hl, (src)
-            ld a, d
-            or a
-            jr z, .nocopy           ; I/O lap: kimarad
-            push bc
-            ldir
-            pop bc
-            jr .adv
-.nocopy:    add hl, bc
-.adv:       ld hl, (src)
-            add hl, bc
-            ld (src), hl
-            ld hl, (dst6502)
-            add hl, bc
-            ld (dst6502), hl
-            jr .cp
+            jr .pg
+.done:      or a
+            ret
 
 ; Z = 1, ha az A. lap a SID I/O tartománya ($D4-$D7)
 is_iopage:  cp 0D4h
@@ -960,60 +1006,54 @@ call_irq:   ld a, 8
             ld a, 04h               ; I = 1
             ld (fI), a
             jr emu_run
-getp_saved: push bc
-            ld a, (rZ)
-            ld c, a
-            ld a, (rN)
-            ld ixh, a
-            call getp
-            pop bc
-            ret
+getp_saved: ld a, (rF)
+            ld l, a
+            push hl
+            pop af
+            jp getp
 
-set_wd:     ld b, a
-            ld a, (V_TIME)
-            add a, b
-            ld (wd_cmp + 1), a
+; A = időkorlát (időzítő-IT-ben)
+set_wd:     ld (wd_lim + 1), a
+            ld a, (ticks)
+            ld (wd_start), a
             ret
 
 ; HL = a 6502-es PC; a regiszterek a változókból
-emu_run:    ld (pch - 1), hl        ; pcl, pch
-            ld a, (rA)
-            ld b, a
-            ld a, (rZ)
-            ld c, a
-            ld a, (rN)
-            ld ixh, a
-            ld e, l
+emu_run:    ld e, l
             ld l, h
             ld h, RT >> 8
             ld d, (hl)
+            ld a, (rA)
+            ld b, a
+            ld a, (rX)
+            ld c, a
+            ld a, (rY)
+            ld ixh, a
+            ld ixl, 0
+            ld a, (rF)
+            ld l, a
+            push hl
+            pop af
             jp emu_next
 
-emu_exit:   xor a
+emu_exit:   ld a, 0                 ; (a jelzők megmaradnak)
             jr emu_save
 emu_brk:    ld a, 1
             jr emu_save
 emu_timeout:
             ld a, 2
-emu_save:   ld (emu_status), a
+emu_save:   push af
+            pop hl                  ; H = állapot, L = jelzők
+            ld a, l
+            ld (rF), a
+            ld a, h
+            ld (emu_status), a
             ld a, b
             ld (rA), a
             ld a, c
-            ld (rZ), a
+            ld (rX), a
             ld a, ixh
-            ld (rN), a
-            ret
-
-; PC lapváltás (E túlcsordult): megőrzi A-t, HL-t
-pcwrap:     push af
-            push hl
-            ld hl, pch
-            inc (hl)
-            ld l, (hl)
-            ld h, RT >> 8
-            ld d, (hl)
-            pop hl
-            pop af
+            ld (rY), a
             ret
 
 ; ---- írás lassú útja: L = a 6502-es lap, A = alsó bájt ----------------------
@@ -1022,14 +1062,14 @@ wslow_A:    push af
             ld a, b
             jr wslow_v
 wslow_X:    push af
-            ld a, (rX)
+            ld a, c
             jr wslow_v
 wslow_Y:    push af
-            ld a, (rY)
+            ld a, ixh
             jr wslow_v
 wslow_SAX:  push af
-            ld a, (rX)
-            and b
+            ld a, b
+            and c
 wslow_v:    ld h, a                 ; H = az írandó érték
             pop af
             push bc
@@ -1488,16 +1528,20 @@ rA:         db 0
 rX:         db 0
 rY:         db 0
 rS:         db 0
-rZ:         db 0
-rN:         db 0
+            db STKPG >> 8           ; LD HL,(rS): a verem Z80-as címe
+rF:         db 0                    ; a Z80 jelzői (S = N, Z)
 fC:         db 0
 fV:         db 0
 fD:         db 0
 fI:         db 0
 stop_s:     db 0
-pcl:        db 0
-pch:        db 0
-            assert pcl + 1 == pch
+ticks:      db 0
+pending:    db 0
+wd_start:   db 0
+irq_on:     db 0
+irq_save:   ds 3
+pool_top:   db 0
+img_z80:    dw 0
 SCRATCH:    db 0
 
             ds 256
@@ -1510,6 +1554,7 @@ ZPG:        ds 256
 STKPG:      ds 256
 ZEROPG:     ds 256
 IOSH:       ds 256
+INV:        ds 256                  ; Z80-as lap -> 6502-es lap
 
 prog_end:
 sidbuf:                             ; ide olvassuk a .sid fájlt (a HIMEM-ig)
