@@ -1,7 +1,7 @@
 // preview.js - a két TVC lejátszó szimulációja a böngészőben (előnézet).
 // A song.bin-t ugyanúgy értelmezi, mint a player.asm / player_poly.asm:
-//   poly: mintára pontosan (fázisakkumulátorok, LFSR, keverőtábla,
-//         képkockánkénti tick), a lejátszó effektív mintafrekvenciáján
+//   poly: mintára pontosan (fázisakkumulátorok, hullámtáblák, keverőtábla,
+//         tick), a lejátszó mintafrekvenciáján (195312,5 / osztó)
 //   mono/arp: tickenként a lejátszó állapotgépe, a hang a hardveres
 //         négyszög (f = 195312,5 / (4096 - PITCH)) és a dobok zajlöketei
 // Eredmény: {levels: Float32Array (0..15), rate, roll: [[{v, note, vol}]]}
@@ -18,19 +18,39 @@
     return s;
   }
 
-  // ---- többszólamú lejátszó ---------------------------------------------------
+  // ---- többszólamú lejátszó (player_poly.asm) ---------------------------------
+  // a hullámtáblák, mint a build_tables-ben: lap 0 csend, helyenként 8 szint
+  function waveSample(id, i, st) {
+    if (id === 0) return i < 128 ? 255 : 0;
+    if (id === 1) return i < 64 ? 255 : 0;
+    if (id === 2) return i < 128 ? 2 * i : 255 - ((2 * i) & 255);
+    if (id === 3) return i;
+    for (let k = 0; k < 8; k++) st.lfsr = lfsrStep(st.lfsr);
+    return st.lfsr & 0xFF;
+  }
+  function buildTables(waves) {
+    const t = new Uint8Array(256 * (1 + 8 * waves.length));
+    waves.forEach((id, slot) => {
+      const st = { lfsr: 0xACE1 };
+      for (let i = 0; i < 256; i++) {
+        const smp = waveSample(id, i, st);
+        for (let lev = 0; lev < 8; lev++) t[256 * (1 + slot * 8 + lev) + i] = (smp * (2 * lev + 1) + 128) >> 8;
+      }
+    });
+    return t;
+  }
   function simulatePoly(song) {
-    const [sr] = M.polyRates();
-    const flags = song[0], decay = song[1], floor = song[2];
-    const loopOff = song[4] | (song[5] << 8);
-    const mix = song.subarray(8, 72);
-    const F = (n) => song[72 + 2 * n] | (song[73 + 2 * n] << 8);
-    const EV = 328;
-    let ptr = EV, wait = 0, done = false;
+    const flags = song[0], decay = song[1], floor = song[2], div = song[3];
+    const loopOff = song[4] | (song[5] << 8), tickn = song[6], nslots = song[7];
+    const waves = Array.from(song.subarray(8, 8 + nslots));
+    const sr = M.TVC_CLOCK / div;
+    const mix = song.subarray(16, 80);
+    const F = (n) => song[80 + 2 * n] | (song[81 + 2 * n] << 8);
+    const EV = 336;
+    const tables = buildTables(waves);
+    let ptr = EV, wait = 0, done = false, loops = 0;
     const loopPtr = EV + loopOff;
-    const vs = [0, 1, 2].map(() => ({ f: 0, slide: 0, vol: 0, dec: 0, cnt: 0, floor: 0, note: -1, drum: false }));
-    let noiseVol = 0, noiseDec = 0, noiseCnt = 0;
-    let loops = 0;
+    const vs = [0, 1, 2].map(() => ({ f: 0, slide: 0, vol: 0, dec: 0, cnt: 0, floor: 0, slot: 0, note: -1, drum: false }));
 
     function events() {
       if (wait) { wait--; if (wait) return; }
@@ -50,15 +70,13 @@
           v.vol = a & 15; v.f = F(n); v.slide = 0; v.dec = decay; v.cnt = decay; v.floor = floor;
           v.note = n; v.drum = false;
         } else if (a < 0xB3) vs[a - 0xB0].vol = 0;
-        else if (a === 0xB4) {
-          const b = song[ptr++];
-          noiseDec = b & 15; noiseCnt = noiseDec; noiseVol = b >> 4;
-        } else if (a >= 0xB8 && a < 0xBB) {
+        else if (a >= 0xB8 && a < 0xBB) {
           const v = vs[a - 0xB8], n = song[ptr++], b = song[ptr++];
           v.f = F(n); v.dec = b & 15; v.cnt = v.dec; v.vol = b >> 4; v.floor = 0;
           v.slide = song[ptr] | (song[ptr + 1] << 8); ptr += 2;
           v.note = n; v.drum = true;
-        } else if (a === 0xBF) {
+        } else if (a >= 0xBB && a < 0xBE) vs[a - 0xBB].slot = song[ptr++];
+        else if (a === 0xBF) {
           wait = song[ptr] | (song[ptr + 1] << 8); ptr += 2; return;
         }
       }
@@ -66,43 +84,32 @@
     function voices() {
       for (const v of vs) {
         v.f = (v.f + v.slide) & 0xFFFF;
-        if (v.dec) {
-          if (--v.cnt === 0) { v.cnt = v.dec; if (v.vol > v.floor) v.vol--; }
-        }
-      }
-      if (noiseDec) {
-        if (--noiseCnt === 0) { noiseCnt = noiseDec; if (noiseVol) noiseVol--; }
+        if (v.dec && --v.cnt === 0) { v.cnt = v.dec; if (v.vol > v.floor) v.vol--; }
+        v.page = v.vol ? 256 * (v.slot * 8 + ((v.vol + 1) >> 1)) : 0;
       }
     }
-    const perFrame = sr / FRAME;
-    const maxFrames = Math.ceil(MAX_SECONDS * FRAME);
+    const maxTicks = Math.ceil(MAX_SECONDS * sr / tickn);
     const chunks = [], roll = [];
-    let acc = [0, 0, 0], lfsr = 0xACE1, frac = 0, frame = 0;
-    // a hurok előtt egy tick (mint a player_poly.asm-ben)
+    const acc = [0, 0, 0];
+    let tick = 0;
     events(); voices();
-    while (!done && frame < maxFrames) {
-      frac += perFrame;
-      const n = Math.floor(frac);
-      frac -= n;
-      const buf = new Uint8Array(n);
+    while (!done && tick < maxTicks) {
+      const buf = new Uint8Array(tickn);
       const f0 = vs[0].f, f1 = vs[1].f, f2 = vs[2].f;
-      const v0 = vs[0].vol, v1 = vs[1].vol, v2 = vs[2].vol, nv = noiseVol;
-      for (let i = 0; i < n; i++) {
+      const p0 = vs[0].page, p1 = vs[1].page, p2 = vs[2].page;
+      for (let i = 0; i < tickn; i++) {
         acc[0] = (acc[0] + f0) & 0xFFFF;
         acc[1] = (acc[1] + f1) & 0xFFFF;
         acc[2] = (acc[2] + f2) & 0xFFFF;
-        lfsr = lfsrStep(lfsr);
-        const s = ((acc[0] & 0x8000) ? v0 : 0) + ((acc[1] & 0x8000) ? v1 : 0) +
-          ((acc[2] & 0x8000) ? v2 : 0) + ((lfsr & 0xFF) & nv);
-        buf[i] = mix[s];
+        buf[i] = mix[tables[p0 + (acc[0] >> 8)] + tables[p1 + (acc[1] >> 8)] + tables[p2 + (acc[2] >> 8)]];
       }
       chunks.push(buf);
-      roll.push(vs.map((v, i) => ({ v: i, note: v.note, vol: v.vol, drum: v.drum }))
-        .filter((x) => x.vol > 0 && x.note >= 0).concat(nv ? [{ v: 3, note: -1, vol: nv, drum: true }] : []));
+      roll.push(vs.map((v, i) => ({ v: i, note: v.note, vol: v.vol, drum: v.drum, noise: waves[v.slot] === 4 }))
+        .filter((x) => x.vol > 0 && x.note >= 0));
       events(); voices();
-      frame++;
+      tick++;
     }
-    return { levels: join(chunks), rate: sr, roll, frames: frame };
+    return { levels: join(chunks), rate: sr, roll, frames: tick };
   }
 
   // ---- egycsatornás lejátszó (player.asm) ---------------------------------------

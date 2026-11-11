@@ -316,36 +316,44 @@ def drum_hits(notes, rate, curve):
 
 # ---- többszólamú motor (player_poly.asm) ----------------------------------------
 CPU_CLOCK = 3125000.0
-POLY_LOOP_CYCLES = 271        # a player_poly.asm minta-hurka
-POLY_TICK_OVERHEAD = 1100     # a tick rutin átlagos ideje (ciklus): az emulátorban
-                              # mérve (a hangmagasságból, test/emu_test.py)
+POLY_HANDLER_CYCLES = 253     # a player_poly.asm mintamegszakítása a belépéssel együtt
 POLY_VOICES = 3
+POLY_DIV_MIN, POLY_DIV_MAX = 17, 64
+WAVES = ["square", "pulse", "triangle", "saw", "noise"]
+WAVE_NAMES = {"square": "négyszög", "pulse": "impulzus (25%)", "triangle": "háromszög",
+              "saw": "fűrész", "noise": "zaj"}
+NOISE = WAVES.index("noise")
+MAX_SLOTS = 5
 
-# poly dobkészlet: zaj: ("noise", hangerő, lecsengés tick/lépés, hossz tick)
-# csúszó hang: ("slide", kezdő hangjegy, vég Hz, hangerő, lecsengés, hossz tick)
+# poly dobkészlet: (hullámforma, kezdő hangjegy, vég Hz vagy None = nem csúszik,
+#                   hangerő, lecsengés tick/lépés, hossz tick)
+# zajnál a hangjegy a zaj színét adja (magasabb = világosabb)
 POLY_KIT = {
-    KICK:    ("slide", 50, 45, 15, 1, 5),
-    LOTOM:   ("slide", 55, 90, 13, 1, 6),
-    MIDTOM:  ("slide", 59, 120, 13, 1, 6),
-    HITOM:   ("slide", 63, 160, 13, 1, 6),
-    COWBELL: ("slide", 79, 780, 10, 1, 4),
-    SNARE:   ("noise", 12, 1, 8),
-    CLAP:    ("noise", 11, 1, 6),
-    HAT:     ("noise", 6, 1, 2),
-    OPENHAT: ("noise", 7, 2, 10),
-    CRASH:   ("noise", 10, 3, 30),
-    RIDE:    ("noise", 5, 2, 8),
-    RIM:     ("noise", 8, 1, 2),
+    KICK:    ("square", 50, 45, 15, 1, 5),
+    LOTOM:   ("square", 55, 90, 13, 1, 6),
+    MIDTOM:  ("square", 59, 120, 13, 1, 6),
+    HITOM:   ("square", 63, 160, 13, 1, 6),
+    COWBELL: ("square", 79, 780, 10, 1, 4),
+    SNARE:   ("noise", 96, None, 13, 1, 8),
+    CLAP:    ("noise", 100, None, 12, 1, 6),
+    HAT:     ("noise", 115, None, 7, 1, 2),
+    OPENHAT: ("noise", 113, None, 8, 2, 10),
+    CRASH:   ("noise", 108, None, 11, 3, 30),
+    RIDE:    ("noise", 117, None, 6, 2, 8),
+    RIM:     ("noise", 104, None, 9, 1, 2),
 }
 
 
-def poly_rates():
-    """-> (effektív mintafrekvencia, tick/s).  A tick a képkocka-IT (49,76 Hz);
-    egy képkockában a tick idején kívül fut a minta-hurok, ebből jön a
-    hangmagassághoz szükséges effektív mintafrekvencia."""
-    frame = CPU_CLOCK / FRAME_RATE
-    samples = (frame - POLY_TICK_OVERHEAD) / POLY_LOOP_CYCLES
-    return samples * FRAME_RATE, FRAME_RATE
+def poly_rates(div):
+    """-> (mintafrekvencia, minta/tick, tick/s).  A mintaóra a hangszámláló
+    (195312,5 / osztó Hz), a tick ebből számolt egész számú minta (~50 Hz)."""
+    sr = TVC_CLOCK / div
+    tickn = max(1, min(255, int(round(sr / 50.0))))
+    return sr, tickn, sr / tickn
+
+
+def poly_cpu_load(div):
+    return POLY_HANDLER_CYCLES / (CPU_CLOCK / (TVC_CLOCK / div))
 
 
 def poly_freq_table(tuning, sr):
@@ -357,7 +365,7 @@ def poly_freq_table(tuning, sr):
 
 
 def poly_mix_table(knee, ceiling=15):
-    """A szólamok összege (0..60) -> 4 bites kimenet, a térd fölött lágy
+    """A szólamok összege (0..45) -> 4 bites kimenet, a térd fölött lágy
     telítéssel."""
     out = []
     for s in range(64):
@@ -369,7 +377,20 @@ def poly_mix_table(knee, ceiling=15):
     return out
 
 
-def convert_poly(notes, drums, args, sr, tick_rate, ftab):
+def parse_channel_waves(spec):
+    """'1=saw,6=triangle' -> {0: 'saw', 5: 'triangle'}"""
+    out = {}
+    if not spec:
+        return out
+    for item in spec.split(","):
+        ch, _, w = item.partition("=")
+        if w not in WAVES[:4]:
+            raise ValueError("ismeretlen hullámforma: %r (lehet: %s)" % (w, ", ".join(WAVES[:4])))
+        out[int(ch) - 1] = w
+    return out
+
+
+def convert_poly(notes, drums, args, sr, tick_rate, ftab, ch_waves):
     ticks = build_ticks(notes, tick_rate)
     total = max([t[1] for t in ticks] + [t + 8 for t in drums] + [1])
     starts = {}
@@ -380,6 +401,15 @@ def convert_poly(notes, drums, args, sr, tick_rate, ftab):
     out = bytearray()
     pending = [0]
     stats = {"notes": 0, "drums": len(drums), "voices_max": 0}
+    slots = []                        # hullámforma-helyek a megjelenés sorrendjében
+
+    def slot_of(wave):
+        w = WAVES.index(wave)
+        if w not in slots:
+            if len(slots) >= MAX_SLOTS:
+                raise ValueError("legfeljebb %d féle hullámforma használható egyszerre" % MAX_SLOTS)
+            slots.append(w)
+        return slots.index(w)
 
     def emit(b):
         encode_wait_poly(out, pending[0])
@@ -389,52 +419,55 @@ def convert_poly(notes, drums, args, sr, tick_rate, ftab):
     active = {}
     cur = [None] * POLY_VOICES        # (idx, note)
     reserved = [0] * POLY_VOICES      # dob foglalja eddig a tickig
-    noise_off_at = None
+    vslot = [0] * POLY_VOICES         # a szólam hullámforma-helye a lejátszóban
+    slot_of(args.wave)                # az alap hullámforma a 0. hely
+
+    def set_wave(v, wave):
+        sl = slot_of(wave)
+        if vslot[v] != sl:
+            emit(bytes((0xBB + v, sl)))
+            vslot[v] = sl
+
     for t in range(total + 1):
         for k in [k for k, a in active.items() if a[1] <= t]:
             del active[k]
         for st, en, n, v, ch, idx in starts.get(t, ()):
-            active[idx] = (st, en, n, v)
+            active[idx] = (st, en, n, v, ch)
         # lejárt dobfoglalások: a szólam elhallgat
         for v in range(POLY_VOICES):
             if reserved[v] and reserved[v] <= t:
                 reserved[v] = 0
                 emit(bytes((0xB0 + v,)))
                 cur[v] = None
-        if noise_off_at is not None and noise_off_at <= t:
-            emit(bytes((0xB4, 0x00)))
-            noise_off_at = None
         # a hangok sorrendje: legmagasabb, legmélyebb, majd a többi lefelé
         uniq = {}
-        for idx, (st, en, n, v) in active.items():
+        for idx, (st, en, n, v, ch) in active.items():
             if n not in uniq or st > uniq[n][0]:
                 uniq[n] = (st, idx, v)
         ordered = sorted(uniq, reverse=True)
         prio = ordered[:1] + ordered[-1:] + ordered[1:-1] if len(ordered) > 1 else ordered
-        # dob ezen a ticken
+        # dob ezen a ticken: szabad szólam, különben a középső (nem dallam, nem basszus)
         if t in drums:
             k, att = drums[t]
             kit = POLY_KIT.get(k)
-            if kit and kit[0] == "noise":
-                _, vol, dec, dur = kit
-                vol = max(1, vol - att)
-                emit(bytes((0xB4, (vol << 4) | dec)))
-                noise_off_at = t + dur
-            elif kit:
-                _, note, end_hz, vol, dec, dur = kit
-                # szabad szólam, különben a középső (nem dallam, nem basszus)
+            if kit:
+                wave, note, end_hz, vol, dec, dur = kit
                 keep = set(prio[:2])
                 cand = [v for v in range(POLY_VOICES) if not reserved[v] and cur[v] is None]
                 cand += [v for v in range(POLY_VOICES) if not reserved[v] and cur[v] is not None
                          and cur[v][1] not in keep]
-                cand += [v for v in range(POLY_VOICES) if not reserved[v]
-                         and cur[v] is not None and cur[v][1] == prio[-1:][0]] if prio else []
+                cand += [v for v in range(POLY_VOICES) if reserved[v]]     # egy futó dob helyére
+                if prio:
+                    cand += [v for v in range(POLY_VOICES) if not reserved[v]
+                             and cur[v] is not None and cur[v][1] == prio[-1]]
                 if cand:
                     v = cand[0]
-                    f0 = ftab[note]
-                    f1 = int(round(end_hz * 65536 / sr))
-                    slide = int(round((f1 - f0) / float(dur))) & 0xFFFF
+                    slide = 0
+                    if end_hz is not None:
+                        f1 = int(round(end_hz * 65536 / sr))
+                        slide = int(round((f1 - ftab[note]) / float(dur))) & 0xFFFF
                     vol = max(1, vol - att)
+                    set_wave(v, wave)
                     emit(bytes((0xB8 + v, note, (vol << 4) | dec, slide & 0xFF, slide >> 8)))
                     reserved[v] = t + dur
                     cur[v] = None
@@ -453,8 +486,9 @@ def convert_poly(notes, drums, args, sr, tick_rate, ftab):
             if idx in placed:
                 continue
             v = empty.pop(0)
-            vel = active[idx][3]
+            vel, ch = active[idx][3], active[idx][4]
             vol = velocity_to_volume(vel, args.curve, vmin, vmax)
+            set_wave(v, ch_waves.get(ch, args.wave))
             emit(bytes((0x80 + 16 * v + vol, n)))
             stats["notes"] += 1
             new_cur[v] = (idx, n)
@@ -464,11 +498,11 @@ def convert_poly(notes, drums, args, sr, tick_rate, ftab):
             cur[v] = new_cur.get(v)
         pending[0] += 1
     encode_wait_poly(out, pending[0])
-    out += bytes([0xB0, 0xB1, 0xB2, 0xB4, 0x00])
+    out += bytes([0xB0, 0xB1, 0xB2])
     if args.loop:
         out.append(0xC0 + 0x0F)
     out.append(0xFF)
-    return bytes(out), total, stats
+    return bytes(out), total, stats, slots
 
 
 def encode_wait_poly(out, n):
@@ -605,6 +639,13 @@ def main():
                     help="poly: egy szólam legnagyobb hangereje (alap: 9)")
     ap.add_argument("--poly-knee", type=int, default=10,
                     help="poly: a keverőtábla eddig lineáris, fölötte lágyan telít (alap: 10)")
+    ap.add_argument("--poly-div", type=int, default=19,
+                    help="poly: a mintaóra osztója, mintafrekvencia = 195312,5 / osztó "
+                         "(alap: 19 = 10 280 Hz; 23 = 8 492 Hz, több szabad CPU)")
+    ap.add_argument("--wave", choices=WAVES[:4], default="square",
+                    help="poly: hullámforma (square, pulse = 25%%-os impulzus, triangle, saw)")
+    ap.add_argument("--channel-wave", metavar="CS=HULLÁM,...",
+                    help="poly: csatornánkénti hullámforma, pl. 1=saw,6=triangle")
     ap.add_argument("--prio", choices=("high", "low", "last"), default="high",
                     help="mono módban melyik hang szóljon (alap: a legmagasabb)")
     ap.add_argument("--max-notes", type=int, default=3, choices=(2, 3, 4),
@@ -692,7 +733,9 @@ def write_title(args):
 
 
 def write_poly(args, notes, drums_sec):
-    sr, tick_rate = poly_rates()
+    if not POLY_DIV_MIN <= args.poly_div <= POLY_DIV_MAX:
+        sys.exit("--poly-div: %d..%d" % (POLY_DIV_MIN, POLY_DIV_MAX))
+    sr, tickn, tick_rate = poly_rates(args.poly_div)
     # a dobütések a poly tick-rácsra
     drums = {}
     for (t, hit) in drums_sec.items():
@@ -701,17 +744,24 @@ def write_poly(args, notes, drums_sec):
         if old is None or DRUM_PRIORITY.index(hit[0]) < DRUM_PRIORITY.index(old[0]):
             drums[tt] = hit
     ftab = poly_freq_table(args.tuning, sr)
-    body, total, stats = convert_poly(notes, drums, args, sr, tick_rate, ftab)
-    header = struct.pack("<BBBBHH", 1 if args.loop else 0, args.decay,
-                         max(0, min(15, args.decay_floor)), 0, 0, 0)
+    try:
+        ch_waves = parse_channel_waves(args.channel_wave)
+        body, total, stats, slots = convert_poly(notes, drums, args, sr, tick_rate, ftab, ch_waves)
+    except ValueError as e:
+        sys.exit(str(e))
+    header = struct.pack("<BBBBHBB", 1 if args.loop else 0, args.decay,
+                         max(0, min(15, args.decay_floor)), args.poly_div, 0, tickn, len(slots))
+    header += bytes(slots + [0] * (MAX_SLOTS - len(slots))) + bytes(3)
     data = header + bytes(poly_mix_table(args.poly_knee)) + \
         b"".join(struct.pack("<H", f) for f in ftab) + body
     os.makedirs(os.path.dirname(os.path.abspath(args.output)), exist_ok=True)
     with open(args.output, "wb") as f:
         f.write(data)
     write_title(args)
-    print("poly: %.0f Hz mintavétel, %.2f tick/s, legfeljebb %d szólam egyszerre"
-          % (sr, tick_rate, stats["voices_max"]))
+    print("poly: %.0f Hz mintavétel (osztó %d), %.2f tick/s, a keverés a CPU %.0f%%-a; "
+          "hullámformák: %s; táblák: %d bájt a program után"
+          % (sr, args.poly_div, tick_rate, 100 * poly_cpu_load(args.poly_div),
+             ", ".join(WAVE_NAMES[WAVES[w]] for w in slots), 256 * (1 + 8 * len(slots))))
     stats.setdefault("chords", 0)
     stats.setdefault("rests", 0)
     report(args, notes, total, tick_rate, stats, len(data))

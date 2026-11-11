@@ -30,6 +30,9 @@ CASES = [
     (["--mode", "poly", "--channels", "1,4,6,5,10"], {"mode": "poly", "channels": [1, 4, 6, 5, 10]}),
     (["--channels", "1,2,10", "--max-notes", "4"], {"channels": [1, 2, 10], "maxNotes": 4}),
     (["--mode", "mono", "--background", "--loop"], {"mode": "mono", "background": True, "loop": True}),
+    (["--mode", "poly", "--wave", "saw", "--poly-div", "23", "--channel-wave", "1=triangle,6=pulse"],
+     {"mode": "poly", "wave": "saw", "polyDiv": 23, "channelWave": {"1": "triangle", "6": "pulse"}}),
+    (["--mode", "poly", "--wave", "triangle", "--drums", "off"], {"mode": "poly", "wave": "triangle", "drums": "off"}),
 ]
 
 RUNNER = r"""
