@@ -151,6 +151,9 @@ def main():
     ap.add_argument("--keep", help="a felvétel (wav) és a portnapló ide kerül")
     ap.add_argument("--machine", default="tvc64-12", choices=("tvc64-12", "tvc32-12", "tvc64p-22"),
                     help="a fő tesztek gépe (alap: TVC 64k, BASIC 1.2, mint az Ep128web-ben)")
+    ap.add_argument("--all-machines", action="store_true",
+                    help="a másik két gépen is: mindkét lejátszó, és a háttér-mód a 32k-s gépen "
+                         "(kb. kétszer annyi idő)")
     args = ap.parse_args()
     os.environ["MACHINE"] = args.machine
     print("gép:", args.machine)
@@ -359,7 +362,16 @@ def main():
           himem < 0xBF00 and ext1 == himem + 1 and himem < ext0 < 0xC000,
           "HIMEM %04Xh, EXT 0 %04Xh, EXT 1 %04Xh" % (himem, ext0, ext1))
 
-    # 5. a többi gép: mindkét lejátszó, és a háttér-mód a 32k-s gépen
+    # 5. a többi gép (--all-machines): mindkét lejátszó, és a háttér-mód a 32k-s gépen
+    if args.all_machines:
+        other_machines(args, exe, mid, out, rate, check)
+
+    print("eredmények: %s" % out)
+    print("HIBÁK: %d" % bad if bad else "minden ellenőrzés rendben")
+    return 1 if bad else 0
+
+
+def other_machines(args, exe, mid, out, rate, check):
     shutil.copy(os.path.join(REPO, "build", "teszt.cas"), "/files/bg.cas")      # az utolsó build: --background
     subprocess.check_call([os.path.join(REPO, "build.sh"), mid, "--decay", "4"], stdout=subprocess.DEVNULL)
     shutil.copy(os.path.join(REPO, "build", "teszt.cas"), "/files/arp.cas")
@@ -390,10 +402,6 @@ def main():
         seg = dd[int(5 * rate):int(10 * rate)]
         check("tvc32-12, háttér-mód: a HIMEM 8000h alá kerül, a zene szól",
               himem < 0x8000 and max(seg) - min(seg) > 200, "HIMEM %04Xh" % himem)
-
-    print("eredmények: %s" % out)
-    print("HIBÁK: %d" % bad if bad else "minden ellenőrzés rendben")
-    return 1 if bad else 0
 
 
 if __name__ == "__main__":

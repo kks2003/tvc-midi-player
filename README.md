@@ -300,8 +300,10 @@ portírásokat. Végül ellenőrzi:
   lejjebb kerül, és az EXT-címek a lefoglalt blokkba mutatnak,
 - a képernyőn, hogy a lejátszás után a BASIC `ok`-kal folytatja, nem
   hibaüzenettel,
-- a másik két gépen (TVC 64k+ / BASIC 2.2 és TVC 32k / BASIC 1.2) mindkét
-  lejátszót (a polyt szinusszal), és a 32k-s gépen a háttér-módot.
+- `--all-machines` kapcsolóval a másik két gépen (TVC 64k+ / BASIC 2.2 és
+  TVC 32k / BASIC 1.2) is mindkét lejátszót (a polyt szinusszal), és a
+  32k-s gépen a háttér-módot. Ez kb. kétszer annyi idő, ezért alapból
+  kimarad.
 
 Kell hozzá g++, gcc, sjasmplus, az Ep128web (az `ep128emu` almodullal), az
 ep128emu ROM-csomagja, és írási jog a `/files` könyvtárba, mert az Ep128web
