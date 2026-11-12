@@ -55,8 +55,7 @@
     const F = (n) => song[80 + 2 * n] | (song[81 + 2 * n] << 8);
     const EV = 336;
     const tables = buildTables(waves);
-    let ptr = EV, wait = 0, done = false, loops = 0;
-    const loopPtr = EV + loopOff;
+    let ptr = EV, wait = 0, done = false;
     const vs = [0, 1, 2].map(() => ({ f: 0, slide: 0, vol: 0, dec: 0, cnt: 0, floor: 0, slot: 0, note: -1, drum: false }));
 
     function events() {
@@ -66,7 +65,7 @@
         if (a === undefined) { done = true; return; }
         if (a >= 0xC0) {
           if (a === 0xFF) {
-            if (flags & 1) { if (++loops > 1) { done = true; return; } ptr = loopPtr; continue; }
+            // ismétlésnél is csak egy kör: a weboldal hurokban játssza le
             ptr--; done = true; return;
           }
           wait = a - 0xBF; return;
@@ -116,7 +115,7 @@
       events(); voices();
       tick++;
     }
-    return { levels: join(chunks), rate: sr, roll, frames: tick };
+    return { levels: join(chunks), rate: sr, roll, frames: tick, loop: !!(flags & 1) };
   }
 
   // ---- egycsatornás lejátszó (player.asm) ---------------------------------------
@@ -125,8 +124,7 @@
     const loopOff = song[4] | (song[5] << 8), kitOff = song[6] | (song[7] << 8);
     const P = (n) => song[8 + 2 * n] | (song[9 + 2 * n] << 8);
     const EV = 264;
-    let ptr = EV, wait = 0, done = false, loops = 0;
-    const loopPtr = EV + loopOff;
+    let ptr = EV, wait = 0, done = false;
     let arpN = 0, arpI = 0, arpCnt = 0, envCnt = 0, curVol = 0, noteVol = 12;
     const arpNotes = [0, 0, 0, 0];
     let shPitch = 0;
@@ -158,8 +156,9 @@
         if (a === 0xA0) { wait = song[ptr] | (song[ptr + 1] << 8); ptr += 2; return; }
         if (a < 0xC0) { const att = song[ptr++]; drumStart(a - 0xA1, att); continue; }
         if (a === 0xFF) {
-          if (flags & 1) { if (++loops > 1) { done = true; return; } ptr = loopPtr; continue; }
-          ptr--; soundOff(); done = true; return;
+          // ismétlésnél is csak egy kör (a lejátszó itt az elejére ugrik, a
+          // weboldal hurokban játssza le); csak a dal végén hallgat el
+          ptr--; if (!(flags & 1)) soundOff(); done = true; return;
         }
         wait = a - 0xBF; return;
       }
@@ -228,7 +227,7 @@
       roll.push(r);
       frame++;
     }
-    return { levels: join(chunks), rate: outRate, roll, frames: frame };
+    return { levels: join(chunks), rate: outRate, roll, frames: frame, loop: !!(flags & 1) };
   }
 
   function join(chunks) {

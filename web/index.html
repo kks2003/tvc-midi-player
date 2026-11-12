@@ -273,7 +273,7 @@ footer code, .hint code { font-family: var(--font-mono); font-size: 12.5px; }
           <div id="playhead"></div>
         </div>
         <div class="legendrow" id="legend"></div>
-        <p class="hint">Halványan a kiválasztott csatornák MIDI-hangjai, színesen az, amit a TVC tényleg lejátszik. Kattintással oda lehet ugrani. Lejátszás közben a beállítások változása azonnal hallható: a zene ugyanonnan folytatódik az új beállítással.</p>
+        <p class="hint">Halványan a kiválasztott csatornák MIDI-hangjai, színesen az, amit a TVC tényleg lejátszik. Kattintással oda lehet ugrani. Lejátszás közben a beállítások változása azonnal hallható: a zene ugyanonnan folytatódik az új beállítással. Ismétlésnél a dal végén az elejéről folytatja, amíg le nem állítod.</p>
       </section>
 
       <section class="panel" aria-labelledby="h-out">
@@ -599,7 +599,11 @@ footer code, .hint code { font-family: var(--font-mono); font-size: 12.5px; }
   // ---- lejátszás ---------------------------------------------------------------
   let ctx = null, srcNode = null, startAt = 0, offset = 0, raf = 0;
   function duration() { return sim ? sim.levels.length / sim.rate : 0; }
-  function position() { return srcNode ? Math.min(duration(), ctx.currentTime - startAt) : offset; }
+  function position() {
+    if (!srcNode) return offset;
+    const t = ctx.currentTime - startAt;
+    return sim && sim.loop && duration() > 0 ? t % duration() : Math.min(duration(), t);   // ismétlésnél körbe
+  }
   function play() {
     if (!sim) return;
     try {
@@ -614,6 +618,7 @@ footer code, .hint code { font-family: var(--font-mono); font-size: 12.5px; }
     srcNode.connect(ctx.destination);
     if (offset >= duration() - 0.05) offset = 0;
     startAt = ctx.currentTime - offset;
+    srcNode.loop = !!sim.loop;           // ismétlés: a végén az elejére ugrik
     srcNode.start(0, offset);
     srcNode.onended = () => { if (srcNode && position() >= duration() - 0.05) { srcNode = null; offset = 0; setPlayUi(false); updatePlayhead(); } };
     setPlayUi(true);
