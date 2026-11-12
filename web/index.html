@@ -271,7 +271,7 @@ footer code, .hint code { font-family: var(--font-mono); font-size: 12.5px; }
           <div id="playhead"></div>
         </div>
         <div class="legendrow" id="legend"></div>
-        <p class="hint">Halványan a kiválasztott csatornák MIDI-hangjai, színesen az, amit a TVC tényleg lejátszik. Kattintással oda lehet ugrani.</p>
+        <p class="hint">Halványan a kiválasztott csatornák MIDI-hangjai, színesen az, amit a TVC tényleg lejátszik. Kattintással oda lehet ugrani. Lejátszás közben a beállítások változása azonnal hallható: a zene ugyanonnan folytatódik az új beállítással.</p>
       </section>
 
       <section class="panel" aria-labelledby="h-out">
@@ -335,6 +335,7 @@ footer code, .hint code { font-family: var(--font-mono); font-size: 12.5px; }
     try { p = M.parseMidi(bytes); }
     catch (e) { setStatus('A fájl nem olvasható: ' + e.message, true); return; }
     stop();
+    offset = 0;
     setStatus('');
     midiBytes = bytes; parsed = p;
     fileBase = name.replace(/\.[^.]*$/, '') || 'dal';
@@ -425,13 +426,17 @@ footer code, .hint code { font-family: var(--font-mono); font-size: 12.5px; }
   }
   function doRegenerate() {
     if (!parsed) return;
-    stop();
+    // ha szól, az új változat ugyanonnan folytatódik (a dal arányos helyéről,
+    // hogy a tempóváltás is jó helyre ugorjon)
+    const wasPlaying = !!srcNode, oldDur = duration(), oldPos = position();
     const o = options();
     const warns = [];
     try {
       if (!o.channels.length) throw new Error('nincs kiválasztott csatorna');
       result = M.convertMidi(parsed, o);
     } catch (e) {
+      stop();
+      offset = 0;
       result = null; sim = null; casBytes = null;
       $('stats').textContent = '';
       $('mem').textContent = '';
@@ -446,7 +451,11 @@ footer code, .hint code { font-family: var(--font-mono); font-size: 12.5px; }
     }
     const player = o.mode === 'poly' ? PLAYERS.poly : PLAYERS.mono;
     casBytes = M.buildCas(player, result.song, $('title').value || fileBase);
-    sim = PV.simulate(result.song, o.mode, 44100);
+    const newSim = PV.simulate(result.song, o.mode, 44100);
+    if (wasPlaying) stop();
+    sim = newSim;
+    offset = oldDur > 0 ? Math.min(oldPos / oldDur, 1) * duration() : 0;
+    if (wasPlaying) play();
     renderStats(player, warns);
     renderBasic(player);
     drawRoll();
