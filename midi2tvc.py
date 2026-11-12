@@ -513,6 +513,11 @@ def convert_poly(notes, drums, args, sr, tick_rate, ftab, ch_waves):
     encode_wait_poly(out, pending[0])
     out += bytes([0xB0, 0xB1, 0xB2])
     if args.loop:
+        # ismétlés előtt a szólamok a kezdő hullámformára, mert a lejátszó a
+        # dal elejére ugrik, és ott a konverter a 0. helyet feltételezi
+        for v in range(POLY_VOICES):
+            if vslot[v] != 0:
+                out += bytes((0xBB + v, 0))
         out.append(0xC0 + 0x0F)
     out.append(0xFF)
     return bytes(out), total, stats, slots

@@ -524,7 +524,11 @@
     }
     encodeWait(out, pending, 0xBF);
     out.push(0xB0, 0xB1, 0xB2);
-    if (o.loop) out.push(0xC0 + 0x0F);
+    if (o.loop) {
+      // ismétlés előtt a szólamok a kezdő hullámformára (a dal eleje a 0. helyet feltételezi)
+      for (let v = 0; v < POLY_VOICES; v++) if (vslot[v] !== 0) out.push(0xBB + v, 0);
+      out.push(0xC0 + 0x0F);
+    }
     out.push(0xFF);
     return { body: out, total, stats, slots };
   }
