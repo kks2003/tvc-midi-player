@@ -55,7 +55,7 @@ MAX_SLOTS   equ 5
 ; +6   minta / tick
 ; +7   a hullámforma-helyek száma (1..5)
 ; +8   5 bájt: helyenként a hullámforma (0 négyszög, 1 impulzus 25%,
-;      2 háromszög, 3 fűrész, 4 zaj)
+;      2 háromszög, 3 fűrész, 4 zaj, 5 szinusz)
 ; +13  3 bájt tartalék
 ; +16  64 bájt keverőtábla: összeg (0..45) -> kimenet (0..15)
 ; +80  128 x dw fázisnövekmény (MIDI hangjegy -> f * 65536 / mintafrekvencia)
@@ -94,12 +94,24 @@ VS_SIZE     equ 9
 
 ; ---- belépés ----------------------------------------------------------------
 start:
+            ; a BASIC az IX-et, az IY-t és az árnyékregisztereket használja
+            ; (USR: csak HL, BC, DE, AF, DE', AF' szabad), ezeket a végén
+            ; visszaállítjuk
+            push ix
+            push iy
+            exx
+            push bc
+            push de
+            push hl
+            exx
+            ex af, af'
+            push af
+            ex af, af'
             di
             call build_tables
             jr nc, .mem_ok
-            ei                      ; nincs elég memória a tábláknak
-            ld hl, -1
-            ret
+            ld hl, -1               ; nincs elég memória a tábláknak
+            jp exit
 .mem_ok:
             call init_song
             ld a, (V_PORT06)        ; keverőtábla a 06h többi bitjével
@@ -182,8 +194,19 @@ start:
             ld a, (V_PORT03)
             out (P_KBDROW), a
             out (P_IRQCLR), a
-            ei
             ld hl, 0
+exit:
+            ex af, af'
+            pop af
+            ex af, af'
+            exx
+            pop hl
+            pop de
+            pop bc
+            exx
+            pop iy
+            pop ix
+            ei
             ret
 
 ; ---- mintamegszakítás -------------------------------------------------------
@@ -626,6 +649,8 @@ wave_sample:
             jr z, .triangle
             dec a
             jr z, .saw
+            dec a
+            jr nz, .sine
             ld de, (lfsr)           ; zaj
             ld b, 8
 .n:         srl d
@@ -654,6 +679,29 @@ wave_sample:
             ret
 .saw:       ld a, c
             ret
+.sine:      push hl                 ; negyed-szinusz táblából, tükrözve
+            ld a, c
+            bit 6, a
+            jr z, .s1
+            cpl                     ; 2. és 4. negyed: 63 - q
+.s1:        and 63
+            ld e, a
+            ld d, 0
+            ld hl, sine_q
+            add hl, de
+            ld a, (hl)
+            bit 7, c
+            jr z, .s2
+            cpl                     ; 2. félhullám: 255 - érték
+.s2:        pop hl
+            ret
+
+; round(127,5 + 127,5 * sin(2 * pi * (i + 0,5) / 256)), i = 0..63
+sine_q:
+            db 129, 132, 135, 138, 142, 145, 148, 151, 154, 157, 160, 163, 166, 169, 172, 175
+            db 178, 181, 183, 186, 189, 192, 194, 197, 200, 202, 205, 207, 210, 212, 214, 217
+            db 219, 221, 223, 225, 227, 229, 231, 233, 234, 236, 238, 239, 241, 242, 243, 245
+            db 246, 247, 248, 249, 250, 251, 252, 252, 253, 253, 254, 254, 255, 255, 255, 255
 
 ; ---- változók ---------------------------------------------------------------
 ; a dal hossza (a weboldal buildCas-a is ide írja be)

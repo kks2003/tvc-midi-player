@@ -12,8 +12,9 @@
   const POLY_HANDLER_CYCLES = 253;
   const POLY_VOICES = 3;
   const POLY_DIV_MIN = 17, POLY_DIV_MAX = 64;
-  const WAVES = ['square', 'pulse', 'triangle', 'saw', 'noise'];
-  const WAVE_NAMES = { square: 'négyszög', pulse: 'impulzus (25%)', triangle: 'háromszög', saw: 'fűrész', noise: 'zaj' };
+  const WAVES = ['square', 'pulse', 'triangle', 'saw', 'noise', 'sine'];
+  const WAVE_NAMES = { square: 'négyszög', pulse: 'impulzus (25%)', triangle: 'háromszög', saw: 'fűrész', noise: 'zaj', sine: 'szinusz' };
+  const TONE_WAVES = WAVES.filter((w) => w !== 'noise');
   const MAX_SLOTS = 5;
 
   // Python round(): a .5 a páros felé
@@ -563,10 +564,10 @@
       const ftab = polyFreqTable(o.tuning, sr);
       const chWaves = {};
       for (const [ch, w] of Object.entries(o.channelWave || {})) {
-        if (!WAVES.slice(0, 4).includes(w)) throw new Error('ismeretlen hullámforma: ' + w);
+        if (!TONE_WAVES.includes(w)) throw new Error('ismeretlen hullámforma: ' + w);
         chWaves[ch - 1] = w;
       }
-      if (!WAVES.slice(0, 4).includes(o.wave)) throw new Error('ismeretlen hullámforma: ' + o.wave);
+      if (!TONE_WAVES.includes(o.wave)) throw new Error('ismeretlen hullámforma: ' + o.wave);
       const r = convertPoly(notes, pd, o, sr, tickRate, ftab, chWaves);
       const sl = r.slots.concat(new Array(MAX_SLOTS - r.slots.length).fill(0));
       const data = [o.loop ? 1 : 0, o.decay, floor, o.polyDiv, 0, 0, tickn, r.slots.length, ...sl, 0, 0, 0,

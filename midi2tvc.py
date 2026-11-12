@@ -319,9 +319,10 @@ CPU_CLOCK = 3125000.0
 POLY_HANDLER_CYCLES = 253     # a player_poly.asm mintamegszakítása a belépéssel együtt
 POLY_VOICES = 3
 POLY_DIV_MIN, POLY_DIV_MAX = 17, 64
-WAVES = ["square", "pulse", "triangle", "saw", "noise"]
+WAVES = ["square", "pulse", "triangle", "saw", "noise", "sine"]
 WAVE_NAMES = {"square": "négyszög", "pulse": "impulzus (25%)", "triangle": "háromszög",
-              "saw": "fűrész", "noise": "zaj"}
+              "saw": "fűrész", "noise": "zaj", "sine": "szinusz"}
+TONE_WAVES = [w for w in WAVES if w != "noise"]     # dallamhoz választható
 NOISE = WAVES.index("noise")
 MAX_SLOTS = 5
 
@@ -384,8 +385,8 @@ def parse_channel_waves(spec):
         return out
     for item in spec.split(","):
         ch, _, w = item.partition("=")
-        if w not in WAVES[:4]:
-            raise ValueError("ismeretlen hullámforma: %r (lehet: %s)" % (w, ", ".join(WAVES[:4])))
+        if w not in TONE_WAVES:
+            raise ValueError("ismeretlen hullámforma: %r (lehet: %s)" % (w, ", ".join(TONE_WAVES)))
         out[int(ch) - 1] = w
     return out
 
@@ -642,10 +643,10 @@ def main():
     ap.add_argument("--poly-div", type=int, default=19,
                     help="poly: a mintaóra osztója, mintafrekvencia = 195312,5 / osztó "
                          "(alap: 19 = 10 280 Hz; 23 = 8 492 Hz, több szabad CPU)")
-    ap.add_argument("--wave", choices=WAVES[:4], default="square",
-                    help="poly: hullámforma (square, pulse = 25%%-os impulzus, triangle, saw)")
+    ap.add_argument("--wave", choices=TONE_WAVES, default="square",
+                    help="poly: hullámforma (square, pulse = 25%%-os impulzus, triangle, saw, sine)")
     ap.add_argument("--channel-wave", metavar="CS=HULLÁM,...",
-                    help="poly: csatornánkénti hullámforma, pl. 1=saw,6=triangle")
+                    help="poly: csatornánkénti hullámforma, pl. 1=saw,6=sine")
     ap.add_argument("--prio", choices=("high", "low", "last"), default="high",
                     help="mono módban melyik hang szóljon (alap: a legmagasabb)")
     ap.add_argument("--max-notes", type=int, default=3, choices=(2, 3, 4),

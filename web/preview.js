@@ -20,11 +20,18 @@
 
   // ---- többszólamú lejátszó (player_poly.asm) ---------------------------------
   // a hullámtáblák, mint a build_tables-ben: lap 0 csend, helyenként 8 szint
+  const SINE_Q = [];
+  for (let i = 0; i < 64; i++) SINE_Q.push(M.pyRound(127.5 + 127.5 * Math.sin(2 * Math.PI * (i + 0.5) / 256)));
   function waveSample(id, i, st) {
     if (id === 0) return i < 128 ? 255 : 0;
     if (id === 1) return i < 64 ? 255 : 0;
     if (id === 2) return i < 128 ? 2 * i : 255 - ((2 * i) & 255);
     if (id === 3) return i;
+    if (id === 5) {                     // negyed-szinusz tábla tükrözve, mint a lejátszóban
+      const q = (i & 64) ? (~i) & 63 : i & 63;
+      const v = SINE_Q[q];
+      return (i & 128) ? 255 - v : v;
+    }
     for (let k = 0; k < 8; k++) st.lfsr = lfsrStep(st.lfsr);
     return st.lfsr & 0xFF;
   }

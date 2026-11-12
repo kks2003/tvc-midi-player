@@ -205,7 +205,7 @@ footer code, .hint code { font-family: var(--font-mono); font-size: 12.5px; }
         <div class="fields" id="f-poly">
           <div class="field"><label for="polyVolume">Szólam hangereje</label><input id="polyVolume" type="number" min="1" max="15" value="9"></div>
           <div class="field"><label for="polyKnee">Keverés térde</label><input id="polyKnee" type="number" min="1" max="15" value="10"></div>
-          <div class="field"><label for="wave">Hullámforma</label><select id="wave"><option value="square">négyszög</option><option value="pulse">impulzus (25%)</option><option value="triangle">háromszög</option><option value="saw">fűrész</option></select></div>
+          <div class="field"><label for="wave">Hullámforma</label><select id="wave"><option value="square">négyszög</option><option value="pulse">impulzus (25%)</option><option value="triangle">háromszög</option><option value="saw">fűrész</option><option value="sine">szinusz</option></select></div>
           <div class="field"><label for="polyDiv">Mintavétel</label>
             <select id="polyDiv"><option value="17">11 489 Hz · CPU 93%</option><option value="19" selected>10 280 Hz · CPU 83%</option><option value="21">9 301 Hz · CPU 75%</option><option value="23">8 492 Hz · CPU 69%</option><option value="28">6 975 Hz · CPU 56%</option></select></div>
           <p class="hint field wide">A hullámforma csatornánként is megadható a Csatornák táblázatban. Kisebb mintavételnél több processzoridő marad szabadon, de tompább a hang.</p>
@@ -282,15 +282,15 @@ footer code, .hint code { font-family: var(--font-mono); font-size: 12.5px; }
           <button id="srcBtn" type="button" disabled>Forrás letöltése (.zip)</button>
           <div class="field" style="min-width: 0">
             <select id="machine" aria-label="Gép az emulátorban">
-              <option value="tvc64p-22" selected>TVC 64k+ · BASIC 2.2</option>
-              <option value="tvc64-12">TVC 64k · BASIC 1.2</option>
+              <option value="tvc64-12" selected>TVC 64k · BASIC 1.2</option>
+              <option value="tvc64p-22">TVC 64k+ · BASIC 2.2</option>
               <option value="tvc32-12">TVC 32k · BASIC 1.2</option>
             </select>
           </div>
           <a class="btn" id="emuLink" href="https://kks2003.github.io/Ep128web/" target="_blank" rel="noopener" aria-disabled="true">Megnyitás az Ep128web-ben ↗</a>
         </div>
         <div class="status" id="status"></div>
-        <p class="note">Az Ep128web a linkben kapja meg a programot, betölti és elindítja. Lejátszás közben ESC vagy SPACE állítja le. A lejátszót valódi TVC 64k+ / BASIC 2.2 ROM-mal teszteltük.</p>
+        <p class="note">Az Ep128web a linkben kapja meg a programot, betölti és elindítja. Lejátszás közben ESC vagy SPACE állítja le. A lejátszókat emulátorban, a valódi ROM-okkal teszteltük: TVC 64k és 32k / BASIC 1.2, TVC 64k+ / BASIC 2.2.</p>
         <p class="note">A forráscsomagban a lejátszó assembly forrása, a dal adatai, az eredeti MIDI és a kész .cas van; a <code>build.sh</code> sjasmplus-szal bájtra ugyanezt a .cas-t fordítja újra, a README pedig megadja az egyenértékű <code>midi2tvc.py</code> parancssort.</p>
       </section>
     </div>
@@ -380,7 +380,7 @@ footer code, .hint code { font-family: var(--font-mono); font-size: 12.5px; }
         const sel = document.createElement('select');
         sel.id = 'chw-' + c.ch;
         sel.setAttribute('aria-label', c.ch + '. csatorna hullámformája');
-        sel.innerHTML = '<option value="">alap</option><option value="square">négyszög</option><option value="pulse">impulzus</option><option value="triangle">háromszög</option><option value="saw">fűrész</option>';
+        sel.innerHTML = '<option value="">alap</option><option value="square">négyszög</option><option value="pulse">impulzus</option><option value="triangle">háromszög</option><option value="saw">fűrész</option><option value="sine">szinusz</option>';
         sel.addEventListener('change', () => {
           if (sel.value) channelWave[c.ch] = sel.value; else delete channelWave[c.ch];
           regenerate();
