@@ -59,7 +59,8 @@ Helyben a `web/index.html` közvetlenül megnyitható (`file://` is jó).
 
 | Kapcsoló | Jelentés |
 | --- | --- |
-| `--mode poly` | többszólamú lejátszó (lásd lent); `--poly-volume` (alap 9) egy szólam legnagyobb hangereje, `--poly-knee` (alap 10) a keverőtábla térde |
+| `--mode poly` | többszólamú lejátszó (lásd lent); `--poly-volume` (alap 9) egy szólam legnagyobb hangereje |
+| `--poly-mix clean` (alap) / `soft` | poly: keverés; `clean`: a három szólam összege arányosan 0–15-re, nem vezérel túl; `soft`: hangosabb, a `--poly-knee` (alap 10) fölött lágyan telít |
 | `--wave`, `--channel-wave` | poly: hullámforma (`square`, `pulse`, `triangle`, `saw`, `sine`), csatornánként pl. `1=saw,6=sine` |
 | `--poly-div N` | poly: a mintaóra osztója, mintavétel = 195312,5 / N Hz (alap 19; nagyobb osztó: több szabad CPU, tompább hang) |
 | `--mode arp` (alap) | akkordok arpeggióval: legfeljebb `--max-notes` (2–4, alap 3) hang, a legmagasabbak |
@@ -147,8 +148,13 @@ ride > kolomp > perem > zárt cin). A dobütés erőssége halkítja a dobot.
     számolja ki a program utáni szabad memóriába, csak a dalban használt
     hullámformákhoz (hullámformánként 2 KB).
   - **Keverés:** a három érték összegét (0–45) egy 64 bájtos keverőtábla
-    képezi le 0–15-re. A tábla a dallal jön; a `--poly-knee` értékéig
-    lineáris, fölötte lágyan telít.
+    képezi le 0–15-re. A tábla a dallal jön. Alapból (`--poly-mix clean`) a
+    három szólam teljes összegét (3 × a szólam legnagyobb hangereje)
+    arányosan képezi le, így nem vezérel túl: a DuckTales-ben csak a minták
+    0,4%-a telít, a dobok csúcsain. A `soft` keverés kb. 1,6 dB-lel
+    hangosabb, de a térd fölött összenyom: a DuckTales mintáinak 38%-a
+    esik oda, és szinuszos akkordon az akkordon kívüli energia 2,4% helyett
+    6,3% (hallható torzítás).
 - **Hullámformák:** négyszög, 25%-os impulzus, háromszög, fűrész, szinusz
   (`--wave`, csatornánként `--channel-wave 1=saw,6=sine`), és zaj a dobokhoz.
   A szinuszt a lejátszó egy 64 bájtos negyed-szinusz táblából tükrözéssel

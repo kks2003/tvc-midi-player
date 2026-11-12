@@ -365,12 +365,24 @@ def poly_freq_table(tuning, sr):
     return out
 
 
-def poly_mix_table(knee, ceiling=15):
-    """A szólamok összege (0..45) -> 4 bites kimenet, a térd fölött lágy
-    telítéssel."""
+def poly_peak(vol):
+    """a lejátszó hullámtáblájának csúcsa egy hangerőhöz (8 szint: 1, 3, .. 15)"""
+    return 2 * ((vol + 1) >> 1) - 1 if vol > 0 else 0
+
+
+def poly_mix_table(knee, ceiling=15, mode="clean", vmax=9):
+    """A szólamok összege (0..45) -> 4 bites kimenet.
+    clean: a három szólam teljes összege (3 x a szólam legnagyobb csúcsa)
+           lineárisan 0..15-re, így nem telít (a dobok csúcsán legfeljebb
+           egy pillanatra)
+    soft:  a térdig 1:1, fölötte lágy telítés: hangosabb, de erősen
+           összenyom (szinusznál, háromszögnél torzításként hallható)"""
     out = []
+    full = 3 * poly_peak(vmax)
     for s in range(64):
-        if s <= knee:
+        if mode == "clean":
+            v = s * ceiling / float(full)
+        elif s <= knee:
             v = s
         else:
             v = knee + (ceiling - knee) * (1 - math.exp(-(s - knee) / 12.0))
@@ -638,8 +650,11 @@ def main():
                     help="poly: többszólamú motor (a build.sh a player_poly.asm-et fordítja)")
     ap.add_argument("--poly-volume", type=int, default=9,
                     help="poly: egy szólam legnagyobb hangereje (alap: 9)")
+    ap.add_argument("--poly-mix", choices=("clean", "soft"), default="clean",
+                    help="poly: keverés; clean = a három szólam összege arányosan 0..15-re, "
+                         "nem telít (alap); soft = hangosabb, a térd fölött lágyan telít")
     ap.add_argument("--poly-knee", type=int, default=10,
-                    help="poly: a keverőtábla eddig lineáris, fölötte lágyan telít (alap: 10)")
+                    help="poly, --poly-mix soft: a keverőtábla eddig lineáris (alap: 10)")
     ap.add_argument("--poly-div", type=int, default=19,
                     help="poly: a mintaóra osztója, mintafrekvencia = 195312,5 / osztó "
                          "(alap: 19 = 10 280 Hz; 23 = 8 492 Hz, több szabad CPU)")
@@ -753,7 +768,7 @@ def write_poly(args, notes, drums_sec):
     header = struct.pack("<BBBBHBB", 1 if args.loop else 0, args.decay,
                          max(0, min(15, args.decay_floor)), args.poly_div, 0, tickn, len(slots))
     header += bytes(slots + [0] * (MAX_SLOTS - len(slots))) + bytes(3)
-    data = header + bytes(poly_mix_table(args.poly_knee)) + \
+    data = header + bytes(poly_mix_table(args.poly_knee, mode=args.poly_mix, vmax=args.poly_volume)) + \
         b"".join(struct.pack("<H", f) for f in ftab) + body
     os.makedirs(os.path.dirname(os.path.abspath(args.output)), exist_ok=True)
     with open(args.output, "wb") as f:

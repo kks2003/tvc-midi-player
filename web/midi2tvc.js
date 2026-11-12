@@ -318,10 +318,15 @@
     for (let n = 0; n < 128; n++) out.push(clamp(pyRound(noteFreq(n, tuning) * 65536 / sr), 1, 32767));
     return out;
   }
-  function polyMixTable(knee, ceiling = 15) {
+  const polyPeak = (vol) => (vol > 0 ? 2 * ((vol + 1) >> 1) - 1 : 0);
+  // clean: a három szólam teljes összege arányosan 0..15-re (nem telít);
+  // soft: a térdig 1:1, fölötte lágy telítés
+  function polyMixTable(knee, ceiling = 15, mode = 'clean', vmax = 9) {
     const out = [];
+    const full = 3 * polyPeak(vmax);
     for (let s = 0; s < 64; s++) {
-      const v = s <= knee ? s : knee + (ceiling - knee) * (1 - Math.exp(-(s - knee) / 12.0));
+      const v = mode === 'clean' ? s * ceiling / full
+        : s <= knee ? s : knee + (ceiling - knee) * (1 - Math.exp(-(s - knee) / 12.0));
       out.push(clamp(pyRound(v), 0, ceiling));
     }
     return out;
@@ -525,7 +530,7 @@
   }
 
   const DEFAULTS = {
-    mode: 'arp', prio: 'high', maxNotes: 3, arpBass: false, arpSpeed: 1, polyVolume: 9, polyKnee: 10,
+    mode: 'arp', prio: 'high', maxNotes: 3, arpBass: false, arpSpeed: 1, polyVolume: 9, polyKnee: 10, polyMix: 'clean',
     channels: null, drums: 'synth', transpose: 0, tuning: 440.0, speed: 1.0, rate: FRAME_RATE,
     decay: 0, decayFloor: 6, curve: 0.7, minVolume: 6, maxVolume: 15, loop: false, background: false,
     polyDiv: 19, wave: 'square', channelWave: null,     // channelWave: {csatorna (1..16): hullámforma}
@@ -571,7 +576,7 @@
       const r = convertPoly(notes, pd, o, sr, tickRate, ftab, chWaves);
       const sl = r.slots.concat(new Array(MAX_SLOTS - r.slots.length).fill(0));
       const data = [o.loop ? 1 : 0, o.decay, floor, o.polyDiv, 0, 0, tickn, r.slots.length, ...sl, 0, 0, 0,
-        ...polyMixTable(o.polyKnee)];
+        ...polyMixTable(o.polyKnee, 15, o.polyMix, o.polyVolume)];
       for (const f of ftab) data.push(f & 0xFF, f >> 8);
       song = Uint8Array.from(data.concat(r.body));
       ({ total, stats } = r);
@@ -638,7 +643,7 @@
   // a beállításokkal egyenértékű build.sh / midi2tvc.py kapcsolók
   const CLI = [
     ['mode', '--mode'], ['prio', '--prio'], ['maxNotes', '--max-notes'], ['arpBass', '--arp-bass'],
-    ['arpSpeed', '--arp-speed'], ['polyVolume', '--poly-volume'], ['polyKnee', '--poly-knee'],
+    ['arpSpeed', '--arp-speed'], ['polyVolume', '--poly-volume'], ['polyKnee', '--poly-knee'], ['polyMix', '--poly-mix'],
     ['channels', '--channels'], ['drums', '--drums'], ['transpose', '--transpose'], ['tuning', '--tuning'],
     ['speed', '--speed'], ['decay', '--decay'], ['decayFloor', '--decay-floor'], ['curve', '--curve'],
     ['minVolume', '--min-volume'], ['maxVolume', '--max-volume'], ['loop', '--loop'],

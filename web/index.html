@@ -204,11 +204,13 @@ footer code, .hint code { font-family: var(--font-mono); font-size: 12.5px; }
         <p class="hint" id="modeHint"></p>
         <div class="fields" id="f-poly">
           <div class="field"><label for="polyVolume">Szólam hangereje</label><input id="polyVolume" type="number" min="1" max="15" value="9"></div>
-          <div class="field"><label for="polyKnee">Keverés térde</label><input id="polyKnee" type="number" min="1" max="15" value="10"></div>
+          <div class="field"><label for="polyMix">Keverés</label>
+            <select id="polyMix"><option value="clean" selected>tiszta</option><option value="soft">hangos (telít)</option></select></div>
+          <div class="field" id="kneeField" hidden><label for="polyKnee">Telítés térde</label><input id="polyKnee" type="number" min="1" max="15" value="10"></div>
           <div class="field"><label for="wave">Hullámforma</label><select id="wave"><option value="square">négyszög</option><option value="pulse">impulzus (25%)</option><option value="triangle">háromszög</option><option value="saw">fűrész</option><option value="sine">szinusz</option></select></div>
           <div class="field"><label for="polyDiv">Mintavétel</label>
             <select id="polyDiv"><option value="17">11 489 Hz · CPU 93%</option><option value="19" selected>10 280 Hz · CPU 83%</option><option value="21">9 301 Hz · CPU 75%</option><option value="23">8 492 Hz · CPU 69%</option><option value="28">6 975 Hz · CPU 56%</option></select></div>
-          <p class="hint field wide">A hullámforma csatornánként is megadható a Csatornák táblázatban. Kisebb mintavételnél több processzoridő marad szabadon, de tompább a hang.</p>
+          <p class="hint field wide">Tiszta keverésnél a három szólam együtt sem vezérli túl a 4 bites kimenetet; a hangos keverés erősebb, de a csúcsokat összenyomja (szinusznál, háromszögnél torzítás). A hullámforma csatornánként is megadható a Csatornák táblázatban. Kisebb mintavételnél több processzoridő marad szabadon, de tompább a hang.</p>
         </div>
         <div class="fields" id="f-arp" hidden>
           <div class="field"><label for="maxNotes">Hangok száma</label><select id="maxNotes"><option>2</option><option selected>3</option><option>4</option></select></div>
@@ -402,7 +404,7 @@ footer code, .hint code { font-family: var(--font-mono); font-size: 12.5px; }
     const mode = document.querySelector('input[name="mode"]:checked').value;
     return {
       mode, prio: $('prio').value, maxNotes: num('maxNotes'), arpBass: $('arpBass').checked,
-      arpSpeed: num('arpSpeed'), polyVolume: num('polyVolume'), polyKnee: num('polyKnee'),
+      arpSpeed: num('arpSpeed'), polyVolume: num('polyVolume'), polyKnee: num('polyKnee'), polyMix: $('polyMix').value,
       channels: [...channelSel].sort((a, b) => a - b), drums: $('drums').value,
       transpose: num('transpose'), tuning: num('tuning'), speed: num('speed'),
       decay: num('decay'), decayFloor: num('decayFloor'), curve: num('curve'),
@@ -416,6 +418,7 @@ footer code, .hint code { font-family: var(--font-mono); font-size: 12.5px; }
     const mode = document.querySelector('input[name="mode"]:checked').value;
     for (const m of ['poly', 'arp', 'mono']) $('f-' + m).hidden = m !== mode;
     $('f-bg').hidden = mode === 'poly';
+    $('kneeField').hidden = $('polyMix').value !== 'soft';
     document.querySelector('.tablewrap table').classList.toggle('nowave', mode !== 'poly');
     $('modeHint').textContent = MODE_HINTS[mode];
   }
@@ -723,7 +726,8 @@ footer code, .hint code { font-family: var(--font-mono); font-size: 12.5px; }
 
   // ---- események ------------------------------------------------------------------
   for (const el of document.querySelectorAll('input[name="mode"]')) el.addEventListener('change', () => { showModeFields(); regenerate(); });
-  for (const id of ['polyVolume', 'polyKnee', 'maxNotes', 'arpSpeed', 'arpBass', 'prio', 'drums', 'transpose', 'decay',
+  $('polyMix').addEventListener('change', showModeFields);
+  for (const id of ['polyVolume', 'polyKnee', 'polyMix', 'maxNotes', 'arpSpeed', 'arpBass', 'prio', 'drums', 'transpose', 'decay',
     'decayFloor', 'speed', 'title', 'tuning', 'curve', 'minVolume', 'maxVolume', 'loop', 'background', 'wave', 'polyDiv']) {
     $(id).addEventListener(($(id).type === 'checkbox' || $(id).tagName === 'SELECT') ? 'change' : 'input', regenerate);
   }
