@@ -70,7 +70,7 @@ h2 {
   font: 600 12px/1.2 var(--font-head); text-transform: uppercase; letter-spacing: 0.09em;
   color: var(--muted); margin: 0;
 }
-.grid { display: grid; gap: 20px; grid-template-columns: minmax(0, 360px) minmax(0, 1fr); align-items: start; }
+.grid { display: grid; gap: 20px; grid-template-columns: minmax(0, 410px) minmax(0, 1fr); align-items: start; }
 @media (max-width: 900px) { .grid { grid-template-columns: minmax(0, 1fr); } }
 .col { display: grid; gap: 16px; min-width: 0; }
 .panel { background: var(--surface); border: 1px solid var(--line); border-radius: var(--r); padding: 16px; display: grid; gap: 12px; min-width: 0; }
@@ -104,7 +104,9 @@ table { border-collapse: collapse; width: 100%; font-size: 13.5px; }
 th { text-align: left; font-weight: 500; color: var(--muted); font-size: 12px; padding: 0 6px 6px; }
 td { padding: 5px 6px; border-top: 1px solid var(--line); vertical-align: middle; }
 td.num, th.num { text-align: right; font-variant-numeric: tabular-nums; font-family: var(--font-mono); font-size: 12.5px; }
-td.name { max-width: 150px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.nowave .wavecol { display: none; }
+td.wavecol select { font: inherit; font-size: 12.5px; color: inherit; background: var(--surface); border: 1px solid var(--line); border-radius: 4px; padding: 2px 4px; max-width: 110px; }
+td.name { max-width: 104px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .tag { font: 500 11px/1 var(--font-mono); padding: 3px 5px; border-radius: 4px; background: var(--sunk); color: var(--muted); white-space: nowrap; }
 
 /* mód választó */
@@ -129,8 +131,8 @@ details summary { cursor: pointer; font-size: 13.5px; color: var(--muted); }
 details[open] summary { margin-bottom: 10px; }
 
 /* eredmény */
-.stats { display: grid; grid-template-columns: repeat(auto-fit, minmax(130px, 1fr)); gap: 1px; background: var(--line); border: 1px solid var(--line); border-radius: var(--r); overflow: hidden; }
-.stat { background: var(--surface); padding: 10px 12px; display: grid; gap: 2px; }
+.stats { display: flex; flex-wrap: wrap; gap: 1px; background: var(--line); border: 1px solid var(--line); border-radius: var(--r); overflow: hidden; }
+.stat { flex: 1 1 118px; background: var(--surface); padding: 10px 12px; display: grid; gap: 2px; align-content: start; }
 .stat b { font: 500 18px/1.2 var(--font-mono); font-variant-numeric: tabular-nums; }
 .stat span { font-size: 12px; color: var(--muted); }
 .mem { display: grid; gap: 5px; }
@@ -185,11 +187,11 @@ footer code, .hint code { font-family: var(--font-mono); font-size: 12.5px; }
         <h2 id="h-ch">Csatornák</h2>
         <div class="tablewrap">
           <table>
-            <thead><tr><th></th><th class="num">Cs.</th><th>Sáv</th><th class="num">Hang</th><th>Tartomány</th></tr></thead>
+            <thead><tr><th></th><th class="num">Cs.</th><th>Sáv</th><th class="num">Hang</th><th>Tartomány</th><th class="wavecol">Hullám</th></tr></thead>
             <tbody id="chBody"><tr><td colspan="5" class="note">Nincs betöltött fájl.</td></tr></tbody>
           </table>
         </div>
-        <p class="hint">A 10. csatorna a dob. Többszólamú módban a legmagasabb hang (dallam), a legmélyebb (basszus) és a következő legmagasabb kap szólamot, ezért érdemes a kísérő sávokat válogatni.</p>
+        <p class="hint">A 10. csatorna a dob. Többszólamú módban a legmagasabb hang (dallam), a legmélyebb (basszus) és a következő legmagasabb kap szólamot, ezért érdemes a kísérő sávokat válogatni. Ott csatornánként hullámforma is választható.</p>
       </section>
 
       <section class="panel" aria-labelledby="h-mode">
@@ -202,7 +204,13 @@ footer code, .hint code { font-family: var(--font-mono); font-size: 12.5px; }
         <p class="hint" id="modeHint"></p>
         <div class="fields" id="f-poly">
           <div class="field"><label for="polyVolume">Szólam hangereje</label><input id="polyVolume" type="number" min="1" max="15" value="9"></div>
-          <div class="field"><label for="polyKnee">Keverés térde</label><input id="polyKnee" type="number" min="1" max="15" value="10"></div>
+          <div class="field"><label for="polyMix">Keverés</label>
+            <select id="polyMix"><option value="clean" selected>tiszta</option><option value="soft">hangos (telít)</option></select></div>
+          <div class="field" id="kneeField" hidden><label for="polyKnee">Telítés térde</label><input id="polyKnee" type="number" min="1" max="15" value="10"></div>
+          <div class="field"><label for="wave">Hullámforma</label><select id="wave"><option value="square">négyszög</option><option value="pulse">impulzus (25%)</option><option value="triangle">háromszög</option><option value="saw">fűrész</option><option value="sine">szinusz</option></select></div>
+          <div class="field"><label for="polyDiv">Mintavétel</label>
+            <select id="polyDiv"><option value="17">11 489 Hz · CPU 93%</option><option value="19" selected>10 280 Hz · CPU 83%</option><option value="21">9 301 Hz · CPU 75%</option><option value="23">8 492 Hz · CPU 69%</option><option value="28">6 975 Hz · CPU 56%</option></select></div>
+          <p class="hint field wide">Tiszta keverésnél a három szólam együtt sem vezérli túl a 4 bites kimenetet; a hangos keverés erősebb, de a csúcsokat összenyomja (szinusznál, háromszögnél torzítás). A hullámforma csatornánként is megadható a Csatornák táblázatban. Kisebb mintavételnél több processzoridő marad szabadon, de tompább a hang.</p>
         </div>
         <div class="fields" id="f-arp" hidden>
           <div class="field"><label for="maxNotes">Hangok száma</label><select id="maxNotes"><option>2</option><option selected>3</option><option>4</option></select></div>
@@ -256,6 +264,7 @@ footer code, .hint code { font-family: var(--font-mono); font-size: 12.5px; }
           <h2 id="h-roll">Előnézet</h2>
           <div class="row">
             <span class="time" id="time">0:00.0 / 0:00.0</span>
+            <button id="restartBtn" type="button" disabled>⏮ Elölről</button>
             <button id="playBtn" class="primary" type="button" disabled>▶ Lejátszás</button>
           </div>
         </div>
@@ -264,7 +273,7 @@ footer code, .hint code { font-family: var(--font-mono); font-size: 12.5px; }
           <div id="playhead"></div>
         </div>
         <div class="legendrow" id="legend"></div>
-        <p class="hint">Halványan a kiválasztott csatornák MIDI-hangjai, színesen az, amit a TVC tényleg lejátszik. Kattintással oda lehet ugrani.</p>
+        <p class="hint">Halványan a kiválasztott csatornák MIDI-hangjai, színesen az, amit a TVC tényleg lejátszik. Kattintással oda lehet ugrani. Lejátszás közben a beállítások változása azonnal hallható: a zene ugyanonnan folytatódik az új beállítással. Ismétlésnél a dal végén az elejéről folytatja, amíg le nem állítod.</p>
       </section>
 
       <section class="panel" aria-labelledby="h-out">
@@ -275,15 +284,15 @@ footer code, .hint code { font-family: var(--font-mono); font-size: 12.5px; }
           <button id="srcBtn" type="button" disabled>Forrás letöltése (.zip)</button>
           <div class="field" style="min-width: 0">
             <select id="machine" aria-label="Gép az emulátorban">
-              <option value="tvc64p-22" selected>TVC 64k+ · BASIC 2.2</option>
-              <option value="tvc64-12">TVC 64k · BASIC 1.2</option>
+              <option value="tvc64-12" selected>TVC 64k · BASIC 1.2</option>
+              <option value="tvc64p-22">TVC 64k+ · BASIC 2.2</option>
               <option value="tvc32-12">TVC 32k · BASIC 1.2</option>
             </select>
           </div>
           <a class="btn" id="emuLink" href="https://kks2003.github.io/Ep128web/" target="_blank" rel="noopener" aria-disabled="true">Megnyitás az Ep128web-ben ↗</a>
         </div>
         <div class="status" id="status"></div>
-        <p class="note">Az Ep128web a linkben kapja meg a programot, betölti és elindítja. Lejátszás közben ESC vagy SPACE állítja le. A lejátszót valódi TVC 64k+ / BASIC 2.2 ROM-mal teszteltük.</p>
+        <p class="note">Az Ep128web a linkben kapja meg a programot, betölti és elindítja. Lejátszás közben ESC vagy SPACE állítja le. A lejátszókat emulátorban, a valódi ROM-okkal teszteltük: TVC 64k és 32k / BASIC 1.2, TVC 64k+ / BASIC 2.2.</p>
         <p class="note">A forráscsomagban a lejátszó assembly forrása, a dal adatai, az eredeti MIDI és a kész .cas van; a <code>build.sh</code> sjasmplus-szal bájtra ugyanezt a .cas-t fordítja újra, a README pedig megadja az egyenértékű <code>midi2tvc.py</code> parancssort.</p>
       </section>
     </div>
@@ -308,7 +317,7 @@ footer code, .hint code { font-family: var(--font-mono); font-size: 12.5px; }
   const hex4 = (n) => n.toString(16).toUpperCase().padStart(4, '0') + 'h';
   const fmtTime = (s) => Math.floor(s / 60) + ':' + (s % 60).toFixed(1).padStart(4, '0');
   const MODE_HINTS = {
-    poly: '3 négyszög szólam és zaj, szoftveres keverés a DAC-ként használt hangerőregiszteren (~11,3 kHz).',
+    poly: '3 szólam választható hullámformával, szoftveres keverés a DAC-ként használt hangerőregiszteren. A dobok is szólamot kapnak.',
     arp: 'A hardveres hangoszcillátor; akkordnál a hangok tickenként (~50 Hz) váltakoznak.',
     mono: 'A hardveres hangoszcillátor; egyszerre egy hang szól.',
   };
@@ -316,6 +325,7 @@ footer code, .hint code { font-family: var(--font-mono); font-size: 12.5px; }
 
   let midiBytes = null, parsed = null, fileBase = 'dal', result = null, sim = null, casBytes = null;
   let channelSel = new Set();
+  let channelWave = {};             // csatorna (1..16) -> hullámforma (poly)
   const store = {
     get(k) { try { return localStorage.getItem('tvcmidi.' + k); } catch (e) { return null; } },
     set(k, v) { try { localStorage.setItem('tvcmidi.' + k, v); } catch (e) { /* nincs tároló */ } },
@@ -327,6 +337,7 @@ footer code, .hint code { font-family: var(--font-mono); font-size: 12.5px; }
     try { p = M.parseMidi(bytes); }
     catch (e) { setStatus('A fájl nem olvasható: ' + e.message, true); return; }
     stop();
+    offset = 0;
     setStatus('');
     midiBytes = bytes; parsed = p;
     fileBase = name.replace(/\.[^.]*$/, '') || 'dal';
@@ -334,6 +345,7 @@ footer code, .hint code { font-family: var(--font-mono); font-size: 12.5px; }
     $('title').value = fileBase.slice(0, 32);
     const chans = channelInfo(p);
     channelSel = new Set(chans.map((c) => c.ch));
+    channelWave = {};
     const tempo = p.events.find((e) => e[2] === 'tempo');
     const bpm = tempo ? Math.round(60e6 / tempo[4]) : 120;
     $('srcMeta').textContent = p.tracks.length + ' sáv · ' + chans.length + ' csatorna · ' + bpm + ' BPM · ' + bytes.length + ' bájt';
@@ -359,7 +371,7 @@ footer code, .hint code { font-family: var(--font-mono); font-size: 12.5px; }
     for (const c of chans) {
       const tr = document.createElement('tr');
       const id = 'ch-' + c.ch;
-      tr.innerHTML = '<td><input type="checkbox" id="' + id + '" checked></td><td class="num"></td><td class="name"></td><td class="num"></td><td></td>';
+      tr.innerHTML = '<td><input type="checkbox" id="' + id + '" checked></td><td class="num"></td><td class="name"></td><td class="num"></td><td></td><td class="wavecol"></td>';
       tr.children[1].textContent = c.ch;
       const nm = tr.children[2];
       nm.textContent = c.names.join(', ') || '–';
@@ -367,6 +379,17 @@ footer code, .hint code { font-family: var(--font-mono); font-size: 12.5px; }
       tr.children[3].textContent = c.notes;
       if (c.ch === 10) tr.children[4].innerHTML = '<span class="tag">dob</span>';
       else tr.children[4].textContent = noteName(c.lo) + '–' + noteName(c.hi);
+      if (c.ch !== 10) {
+        const sel = document.createElement('select');
+        sel.id = 'chw-' + c.ch;
+        sel.setAttribute('aria-label', c.ch + '. csatorna hullámformája');
+        sel.innerHTML = '<option value="">alap</option><option value="square">négyszög</option><option value="pulse">impulzus</option><option value="triangle">háromszög</option><option value="saw">fűrész</option><option value="sine">szinusz</option>';
+        sel.addEventListener('change', () => {
+          if (sel.value) channelWave[c.ch] = sel.value; else delete channelWave[c.ch];
+          regenerate();
+        });
+        tr.children[5].appendChild(sel);
+      }
       tr.querySelector('input').addEventListener('change', (e) => {
         if (e.target.checked) channelSel.add(c.ch); else channelSel.delete(c.ch);
         regenerate();
@@ -381,18 +404,22 @@ footer code, .hint code { font-family: var(--font-mono); font-size: 12.5px; }
     const mode = document.querySelector('input[name="mode"]:checked').value;
     return {
       mode, prio: $('prio').value, maxNotes: num('maxNotes'), arpBass: $('arpBass').checked,
-      arpSpeed: num('arpSpeed'), polyVolume: num('polyVolume'), polyKnee: num('polyKnee'),
+      arpSpeed: num('arpSpeed'), polyVolume: num('polyVolume'), polyKnee: num('polyKnee'), polyMix: $('polyMix').value,
       channels: [...channelSel].sort((a, b) => a - b), drums: $('drums').value,
       transpose: num('transpose'), tuning: num('tuning'), speed: num('speed'),
       decay: num('decay'), decayFloor: num('decayFloor'), curve: num('curve'),
       minVolume: num('minVolume'), maxVolume: num('maxVolume'), loop: $('loop').checked,
       background: mode !== 'poly' && $('background').checked,
+      wave: $('wave').value, polyDiv: num('polyDiv'),
+      channelWave: mode === 'poly' ? Object.fromEntries(Object.entries(channelWave).filter(([ch]) => channelSel.has(+ch))) : null,
     };
   }
   function showModeFields() {
     const mode = document.querySelector('input[name="mode"]:checked').value;
     for (const m of ['poly', 'arp', 'mono']) $('f-' + m).hidden = m !== mode;
     $('f-bg').hidden = mode === 'poly';
+    $('kneeField').hidden = $('polyMix').value !== 'soft';
+    document.querySelector('.tablewrap table').classList.toggle('nowave', mode !== 'poly');
     $('modeHint').textContent = MODE_HINTS[mode];
   }
   let regenTimer = 0;
@@ -402,13 +429,17 @@ footer code, .hint code { font-family: var(--font-mono); font-size: 12.5px; }
   }
   function doRegenerate() {
     if (!parsed) return;
-    stop();
+    // ha szól, az új változat ugyanonnan folytatódik (a dal arányos helyéről,
+    // hogy a tempóváltás is jó helyre ugorjon)
+    const wasPlaying = !!srcNode, oldDur = duration(), oldPos = position();
     const o = options();
     const warns = [];
     try {
       if (!o.channels.length) throw new Error('nincs kiválasztott csatorna');
       result = M.convertMidi(parsed, o);
     } catch (e) {
+      stop();
+      offset = 0;
       result = null; sim = null; casBytes = null;
       $('stats').textContent = '';
       $('mem').textContent = '';
@@ -423,7 +454,11 @@ footer code, .hint code { font-family: var(--font-mono); font-size: 12.5px; }
     }
     const player = o.mode === 'poly' ? PLAYERS.poly : PLAYERS.mono;
     casBytes = M.buildCas(player, result.song, $('title').value || fileBase);
-    sim = PV.simulate(result.song, o.mode, 44100);
+    const newSim = PV.simulate(result.song, o.mode, 44100);
+    if (wasPlaying) stop();
+    sim = newSim;
+    offset = oldDur > 0 ? Math.min(oldPos / oldDur, 1) * duration() : 0;
+    if (wasPlaying) play();
     renderStats(player, warns);
     renderBasic(player);
     drawRoll();
@@ -439,23 +474,30 @@ footer code, .hint code { font-family: var(--font-mono); font-size: 12.5px; }
       [r.song.length.toLocaleString('hu-HU'), 'bájt dal'],
       [casBytes.length.toLocaleString('hu-HU'), 'bájt .cas'],
     ];
-    if (r.mode === 'poly') items.push([s.notes, 'hangindítás'], [s.voices_max + ' + zaj', 'szólam egyszerre']);
+    if (r.mode === 'poly') items.push([s.notes, 'hangindítás'], [s.voices_max, 'szólam egyszerre'],
+      [Math.round(r.sampleRate).toLocaleString('hu-HU') + ' Hz', 'mintavétel'], [Math.round(100 * r.poly.cpu) + '%', 'CPU a keverésre']);
     else items.push([s.notes + s.chords, s.chords ? 'hang / akkord' : 'hang']);
     items.push([s.drums, 'dobütés']);
     $('stats').innerHTML = items.map(([b, l]) => '<div class="stat"><b></b><span></span></div>').join('');
     [...$('stats').children].forEach((el, i) => { el.children[0].textContent = items[i][0]; el.children[1].textContent = items[i][1]; });
     // memória: a program 19EFh-tól; a 32k-s gépen 7FFFh a felső határ
     const start = 0x19EF, codeEnd = start + player.code.length, end = codeEnd + r.song.length;
+    // poly: a hullámtáblák a program után, lapra igazítva (induláskor készülnek)
+    const tabStart = (end + 255) & 0xFF00, tabEnd = r.poly ? tabStart + r.poly.tableBytes : end;
     const top = 0x7FFF, span = top - start;
     const pc = (x) => (100 * x / span).toFixed(2) + '%';
     $('mem').innerHTML =
       '<div class="membar" role="img" aria-label="Memória a 32k-s gépen"><i style="width:' + pc(codeEnd - start) +
-      ';background:var(--v3)"></i><i style="width:' + pc(end - codeEnd) + ';background:var(--accent)"></i></div>' +
+      ';background:var(--v3)"></i><i style="width:' + pc(end - codeEnd) + ';background:var(--accent)"></i>' +
+      (r.poly ? '<i style="width:' + pc(tabEnd - end) + ';background:var(--v1)"></i>' : '') + '</div>' +
       '<div class="legend"><span><i class="dot" style="background:var(--v3)"></i>BASIC + lejátszó ' + hex4(start) + '–' + hex4(codeEnd - 1) +
-      '</span><span><i class="dot" style="background:var(--accent)"></i>dal –' + hex4(end - 1) + '</span><span>32k-s gép: ' + hex4(top) + '-ig</span></div>';
+      '</span><span><i class="dot" style="background:var(--accent)"></i>dal –' + hex4(end - 1) + '</span>' +
+      (r.poly ? '<span><i class="dot" style="background:var(--v1)"></i>hullámtáblák –' + hex4(tabEnd - 1) + '</span>' : '') +
+      '<span>32k-s gép: ' + hex4(top) + '-ig</span></div>';
     const w = $('warns');
     w.innerHTML = '';
     for (const t of r.warnings.concat(warns)) { const li = document.createElement('li'); li.textContent = 'Figyelem: ' + t + '.'; w.appendChild(li); }
+    if (tabEnd > top - 512) { const li = document.createElement('li'); li.textContent = 'Figyelem: a program a hullámtáblákkal ' + hex4(tabEnd - 1) + '-ig ér, a 32k-s gépen nem fér el (kevesebb féle hullámforma kevesebb helyet kér).'; w.appendChild(li); }
     if (r.song.length > 20000) { const li = document.createElement('li'); li.textContent = 'Figyelem: a dal ' + r.song.length + ' bájt, a 32k-s gépen kevés lehet a hely.'; w.appendChild(li); }
   }
   function renderBasic(player) {
@@ -471,6 +513,7 @@ footer code, .hint code { font-family: var(--font-mono); font-size: 12.5px; }
     $('dlBtn').disabled = !on;
     $('srcBtn').disabled = !on;
     $('playBtn').disabled = !on;
+    $('restartBtn').disabled = !on;
     $('emuLink').setAttribute('aria-disabled', on ? 'false' : 'true');
   }
   function setStatus(t, bad) {
@@ -522,7 +565,7 @@ footer code, .hint code { font-family: var(--font-mono); font-size: 12.5px; }
       const o = open.get(key);
       g.fillStyle = colors[o.v];
       g.globalAlpha = 0.45 + 0.55 * Math.min(1, o.vol / 12);
-      if (o.drum) g.fillRect(o.f * fx, H - drumH + (o.v === 3 ? 9 : 2), Math.max(1.5, (endF - o.f) * fx), 6);
+      if (o.drum) g.fillRect(o.f * fx, H - drumH + (o.noise ? 9 : 2), Math.max(1.5, (endF - o.f) * fx), 6);
       else g.fillRect(o.f * fx, yOf(o.note) + 0.5, Math.max(1, (endF - o.f) * fx), Math.max(1.5, rowH - 1));
       g.globalAlpha = 1;
       open.delete(key);
@@ -533,7 +576,7 @@ footer code, .hint code { font-family: var(--font-mono); font-size: 12.5px; }
         const key = x.v + ':' + (x.drum ? 'd' : x.note);
         seen.add(key);
         const o = open.get(key);
-        if (!o) open.set(key, { f, v: x.v, note: x.note, vol: x.vol, drum: x.drum });
+        if (!o) open.set(key, { f, v: x.v, note: x.note, vol: x.vol, drum: x.drum, noise: x.noise !== false });
       }
       for (const key of [...open.keys()]) if (!seen.has(key)) flush(key, f);
     }
@@ -547,7 +590,7 @@ footer code, .hint code { font-family: var(--font-mono); font-size: 12.5px; }
   function renderLegend() {
     const mode = result ? result.mode : 'poly';
     const items = mode === 'poly'
-      ? [['--v0', '1. szólam'], ['--v1', '2. szólam'], ['--v2', '3. szólam'], ['--v3', 'zaj (dob)']]
+      ? [['--v0', '1. szólam'], ['--v1', '2. szólam'], ['--v2', '3. szólam']]
       : [['--v0', 'hangoszcillátor'], ['--v3', 'dob']];
     $('legend').innerHTML = items.map(([c, t]) => '<span><i class="dot" style="background:var(' + c + ')"></i>' + t + '</span>').join('') +
       '<span><i class="dot" style="background:var(--src)"></i>MIDI</span>';
@@ -556,7 +599,11 @@ footer code, .hint code { font-family: var(--font-mono); font-size: 12.5px; }
   // ---- lejátszás ---------------------------------------------------------------
   let ctx = null, srcNode = null, startAt = 0, offset = 0, raf = 0;
   function duration() { return sim ? sim.levels.length / sim.rate : 0; }
-  function position() { return srcNode ? Math.min(duration(), ctx.currentTime - startAt) : offset; }
+  function position() {
+    if (!srcNode) return offset;
+    const t = ctx.currentTime - startAt;
+    return sim && sim.loop && duration() > 0 ? t % duration() : Math.min(duration(), t);   // ismétlésnél körbe
+  }
   function play() {
     if (!sim) return;
     try {
@@ -571,6 +618,7 @@ footer code, .hint code { font-family: var(--font-mono); font-size: 12.5px; }
     srcNode.connect(ctx.destination);
     if (offset >= duration() - 0.05) offset = 0;
     startAt = ctx.currentTime - offset;
+    srcNode.loop = !!sim.loop;           // ismétlés: a végén az elejére ugrik
     srcNode.start(0, offset);
     srcNode.onended = () => { if (srcNode && position() >= duration() - 0.05) { srcNode = null; offset = 0; setPlayUi(false); updatePlayhead(); } };
     setPlayUi(true);
@@ -598,6 +646,12 @@ footer code, .hint code { font-family: var(--font-mono); font-size: 12.5px; }
     $('playhead').style.left = (d ? (p / d) * $('roll').clientWidth : 0) + 'px';
   }
   $('playBtn').addEventListener('click', () => (srcNode ? stop() : play()));
+  $('restartBtn').addEventListener('click', () => {
+    if (!sim) return;
+    stop();
+    offset = 0;
+    play();
+  });
   $('rollbox').addEventListener('click', (e) => {
     if (!sim) return;
     const r = $('roll').getBoundingClientRect();
@@ -677,8 +731,9 @@ footer code, .hint code { font-family: var(--font-mono); font-size: 12.5px; }
 
   // ---- események ------------------------------------------------------------------
   for (const el of document.querySelectorAll('input[name="mode"]')) el.addEventListener('change', () => { showModeFields(); regenerate(); });
-  for (const id of ['polyVolume', 'polyKnee', 'maxNotes', 'arpSpeed', 'arpBass', 'prio', 'drums', 'transpose', 'decay',
-    'decayFloor', 'speed', 'title', 'tuning', 'curve', 'minVolume', 'maxVolume', 'loop', 'background']) {
+  $('polyMix').addEventListener('change', showModeFields);
+  for (const id of ['polyVolume', 'polyKnee', 'polyMix', 'maxNotes', 'arpSpeed', 'arpBass', 'prio', 'drums', 'transpose', 'decay',
+    'decayFloor', 'speed', 'title', 'tuning', 'curve', 'minVolume', 'maxVolume', 'loop', 'background', 'wave', 'polyDiv']) {
     $(id).addEventListener(($(id).type === 'checkbox' || $(id).tagName === 'SELECT') ? 'change' : 'input', regenerate);
   }
   $('fileInput').addEventListener('change', (e) => {

@@ -130,6 +130,11 @@ play_fg:
 
 ; háttérben: a rezidens rész (res_begin..res_end) a HIMEM alá kerül
 play_bg:
+            push ix                 ; a BASIC változóterülete (USR: őrizni kell)
+            call play_bg1
+            pop ix
+            ret
+play_bg1:
             ld hl, (song_len)       ; a blokk mérete: a kód és a dal
             ld de, song - res_begin
             add hl, de

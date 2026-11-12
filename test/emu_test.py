@@ -82,6 +82,54 @@ def isr_restored(res):
     return before == after and before.startswith("f5 3e 70 d3 02 c3")
 
 
+def basic_ok(ppm):
+    """A BASIC a lejátszás után "ok"-kal folytatja, nem hibaüzenettel: a
+    képernyő szövegsorai közül a 7. (a betöltött program címe utáni sor)
+    ugyanolyan rövid, mint a 4. ("ok" a bekapcsolás után)."""
+    data = open(ppm, "rb").read()
+    parts = data.split(b"\n", 3)
+    w, h = (int(x) for x in parts[1].split())
+    px = parts[3]
+    rows = []
+    for y in range(h):
+        line = px[y * w * 3:(y + 1) * w * 3]
+        xs = [x for x in range(0, w) if sum(line[x * 3:x * 3 + 3]) > 200]
+        rows.append((min(xs), max(xs)) if xs else None)
+    lines, cur = [], None
+    for y, r in enumerate(rows):
+        if r and cur is None:
+            cur = [r[0], r[1]]
+        elif r:
+            cur = [min(cur[0], r[0]), max(cur[1], r[1])]
+        elif cur is not None:
+            lines.append(cur)
+            cur = None
+    if cur is not None:
+        lines.append(cur)
+    if len(lines) < 7:
+        return False
+    width = lambda l: l[1] - l[0]
+    return width(lines[6]) <= width(lines[3]) * 1.5
+
+
+def peak_cents(samples, rate, f0):
+    """A legerősebb összetevő eltérése f0-tól centben (±50 cent, 1 centes
+    lépésekben, Hann-ablakkal): a lépcsős, halkuló szinuszra is jó, ahol a
+    nullátmenetek számlálása téved."""
+    n = len(samples)
+    mean = sum(samples) / n
+    x = [(v - mean) * (0.5 - 0.5 * math.cos(2 * math.pi * i / n)) for i, v in enumerate(samples)]
+    best, bc = -1, 0
+    for c in range(-50, 51):
+        w = 2 * math.pi * f0 * 2 ** (c / 1200.0) / rate
+        re = sum(v * math.cos(w * i) for i, v in enumerate(x))
+        im = sum(v * math.sin(w * i) for i, v in enumerate(x))
+        p = re * re + im * im
+        if p > best:
+            best, bc = p, c
+    return bc
+
+
 def zero_cross_freq(samples, rate):
     """Alapfrekvencia a középszint-átlépésekből (négyszögjelre pontos)."""
     if len(samples) < 16:
@@ -101,7 +149,14 @@ def main():
     ap.add_argument("--ep128web", default=os.path.join(REPO, "..", "Ep128web"))
     ap.add_argument("--roms", required=True, help="ep128emu_roms-2.0.11.bin")
     ap.add_argument("--keep", help="a felvétel (wav) és a portnapló ide kerül")
+    ap.add_argument("--machine", default="tvc64-12", choices=("tvc64-12", "tvc32-12", "tvc64p-22"),
+                    help="a fő tesztek gépe (alap: TVC 64k, BASIC 1.2, mint az Ep128web-ben)")
+    ap.add_argument("--all-machines", action="store_true",
+                    help="a másik két gépen is: mindkét lejátszó, és a háttér-mód a 32k-s gépen "
+                         "(kb. kétszer annyi idő)")
     args = ap.parse_args()
+    os.environ["MACHINE"] = args.machine
+    print("gép:", args.machine)
 
     out = args.keep or tempfile.mkdtemp(prefix="tvcmidi_")
     os.makedirs(out, exist_ok=True)
@@ -121,7 +176,8 @@ def main():
 
     # 1. a teljes dal (~10 s) + utána csend
     wav, plog = os.path.join(out, "teszt.wav"), os.path.join(out, "teszt_ports.txt")
-    res = subprocess.check_output([exe, args.roms, "teszt", "16", wav, plog]).decode()
+    scr1 = os.path.join(out, "teszt.ppm")
+    res = subprocess.check_output([exe, args.roms, "teszt", "16", wav, plog], env=dict(os.environ, SCREEN=scr1)).decode()
     print(res.strip())
     sym = {}
     for line in open(os.path.join(REPO, "build", "teszt.sym")):
@@ -139,6 +195,7 @@ def main():
     mine = [w for w in mine if not dlo <= w[1] < dhi]      # a dallam írásai
     check("a lejátszó írja a hangportokat (04h/05h/06h)", len(mine) > 20, "%d írás" % len(mine))
     check("az IT-belépő visszaállt (PUSH AF / LD A,70h / OUT (02h),A / JP ROM)", isr_restored(res))
+    check("a dal végén a BASIC hiba nélkül folytatja (ok)", basic_ok(scr1))
 
     # a kiadott PITCH-ek: a lejátszó 04h, majd 05h írásai
     table = midi2tvc.pitch_table(440.0)
@@ -211,17 +268,22 @@ def main():
 
     # 2. ESC megállítja a lejátszást
     wav2, plog2 = os.path.join(out, "esc.wav"), os.path.join(out, "esc_ports.txt")
-    res = subprocess.check_output([exe, args.roms, "teszt", "6", wav2, plog2, "3"]).decode()
+    scr2 = os.path.join(out, "esc.ppm")
+    res = subprocess.check_output([exe, args.roms, "teszt", "6", wav2, plog2, "3"], env=dict(os.environ, SCREEN=scr2)).decode()
     with wave.open(wav2) as w:
         d2 = struct.unpack("<%dh" % w.getnframes(), w.readframes(w.getnframes()))
     tail = d2[-rate:]
     check("ESC: leáll a hang", max(tail) - min(tail) < 200)
     check("ESC: az IT-belépő visszaállt", isr_restored(res))
+    check("ESC: a BASIC hiba nélkül folytatja (ok)", basic_ok(scr2))
     # 3. többszólamú motor (--mode poly)
     subprocess.check_call([os.path.join(REPO, "build.sh"), mid, "--mode", "poly", "--decay", "4"])
     shutil.copy(os.path.join(REPO, "build", "teszt.cas"), "/files/poly.cas")
     wav3 = os.path.join(out, "poly.wav")
-    res = subprocess.check_output([exe, args.roms, "poly", "16", wav3, os.path.join(out, "poly_ports.txt")]).decode()
+    scr3 = os.path.join(out, "poly.ppm")
+    res = subprocess.check_output([exe, args.roms, "poly", "16", wav3, os.path.join(out, "poly_ports.txt")],
+                                  env=dict(os.environ, SCREEN=scr3)).decode()
+    check("poly: a dal végén a BASIC hiba nélkül folytatja (ok; IX, IY, árnyékregiszterek)", basic_ok(scr3))
     with wave.open(wav3) as w:
         d3 = struct.unpack("<%dh" % w.getnframes(), w.readframes(w.getnframes()))
     st = next((i for i in range(len(d3)) if abs(d3[i] - d3[0]) > 200), None)
@@ -300,9 +362,46 @@ def main():
           himem < 0xBF00 and ext1 == himem + 1 and himem < ext0 < 0xC000,
           "HIMEM %04Xh, EXT 0 %04Xh, EXT 1 %04Xh" % (himem, ext0, ext1))
 
+    # 5. a többi gép (--all-machines): mindkét lejátszó, és a háttér-mód a 32k-s gépen
+    if args.all_machines:
+        other_machines(args, exe, mid, out, rate, check)
+
     print("eredmények: %s" % out)
     print("HIBÁK: %d" % bad if bad else "minden ellenőrzés rendben")
     return 1 if bad else 0
+
+
+def other_machines(args, exe, mid, out, rate, check):
+    shutil.copy(os.path.join(REPO, "build", "teszt.cas"), "/files/bg.cas")      # az utolsó build: --background
+    subprocess.check_call([os.path.join(REPO, "build.sh"), mid, "--decay", "4"], stdout=subprocess.DEVNULL)
+    shutil.copy(os.path.join(REPO, "build", "teszt.cas"), "/files/arp.cas")
+    subprocess.check_call([os.path.join(REPO, "build.sh"), mid, "--mode", "poly", "--wave", "sine", "--decay", "4"],
+                          stdout=subprocess.DEVNULL)
+    shutil.copy(os.path.join(REPO, "build", "teszt.cas"), "/files/sin.cas")
+    for mach in [m for m in ("tvc64p-22", "tvc64-12", "tvc32-12") if m != args.machine]:
+        for name, label in (("arp", "egycsatornás"), ("sin", "poly, szinusz")):
+            wv, scr = os.path.join(out, mach + "_" + name + ".wav"), os.path.join(out, mach + "_" + name + ".ppm")
+            r = subprocess.check_output([exe, args.roms, name, "14", wv, os.path.join(out, "x_ports.txt")],
+                                        env=dict(os.environ, MACHINE=mach, SCREEN=scr)).decode()
+            with wave.open(wv) as w:
+                dd = struct.unpack("<%dh" % w.getnframes(), w.readframes(w.getnframes()))
+            st = next((i for i in range(len(dd)) if abs(dd[i] - dd[0]) > 200), None)
+            c = peak_cents(dd[st + int(0.1 * rate): st + int(0.3 * rate)], rate,
+                           midi2tvc.note_freq(60, 440.0)) if st is not None else 999
+            check("%s, %s: C4 pontos, a végén csend, az IT-belépő visszaállt, ok" % (mach, label),
+                  abs(c) < 5 and max(dd[-rate:]) - min(dd[-rate:]) < 200 and isr_restored(r) and basic_ok(scr),
+                  "%d cent" % c)
+    if args.machine != "tvc32-12":
+        r = subprocess.check_output([exe, args.roms, "bg", "12", os.path.join(out, "bg32.wav"),
+                                     os.path.join(out, "x_ports.txt")],
+                                    env=dict(os.environ, MACHINE="tvc32-12", DUMP="0B19,2")).decode()
+        hm = r.split("dump 0b19:")[1].split()
+        himem = int(hm[0], 16) | (int(hm[1], 16) << 8)
+        with wave.open(os.path.join(out, "bg32.wav")) as w:
+            dd = struct.unpack("<%dh" % w.getnframes(), w.readframes(w.getnframes()))
+        seg = dd[int(5 * rate):int(10 * rate)]
+        check("tvc32-12, háttér-mód: a HIMEM 8000h alá kerül, a zene szól",
+              himem < 0x8000 and max(seg) - min(seg) > 200, "HIMEM %04Xh" % himem)
 
 
 if __name__ == "__main__":

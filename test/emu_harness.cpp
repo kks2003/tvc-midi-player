@@ -115,8 +115,14 @@ int main(int argc, char **argv)
   mkdir("/tmp/tvcroms", 0755);
   if (ep_init(48000) != 0 || ep_set_machine_type(1) != 0) { std::fprintf(stderr, "init %s\n", ep_last_error()); return 1; }
   if (ep_unpack_rom_package(argv[1], "/tmp/tvcroms") < 10) { std::fprintf(stderr, "unpack %s\n", ep_last_error()); return 1; }
-  ep_reset_memory(128);
-  const struct { int seg; const char *f; } roms[] = {{0, "tvc22_sys.rom"}, {2, "tvc22_ext.rom"}, {4, "tvcfileio.rom"}};
+  // MACHINE: tvc64p-22 (alap: TVC 64k+, BASIC 2.2), tvc64-12 (TVC 64k, BASIC 1.2)
+  // vagy tvc32-12 (TVC 32k, BASIC 1.2), mint az Ep128web gépei
+  std::string machine = std::getenv("MACHINE") ? std::getenv("MACHINE") : "tvc64p-22";
+  bool b12 = machine.find("-12") != std::string::npos;
+  ep_reset_memory(machine == "tvc32-12" ? 48 : (machine == "tvc64-12" ? 80 : 128));
+  const struct { int seg; const char *f; } roms[] = {{0, b12 ? "tvc12_sys.rom" : "tvc22_sys.rom"},
+                                                     {2, b12 ? "tvc12_ext.rom" : "tvc22_ext.rom"},
+                                                     {4, "tvcfileio.rom"}};
   for (auto &r : roms) {
     std::string p = std::string("/tmp/tvcroms/") + r.f;
     if (ep_load_rom(r.seg, p.c_str(), 0) != 0) { std::fprintf(stderr, "rom %s: %s\n", r.f, ep_last_error()); return 1; }
