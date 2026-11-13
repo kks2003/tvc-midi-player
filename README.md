@@ -36,7 +36,14 @@ A `web/index.html` böngészőben végzi el ugyanezt, telepítés nélkül:
 - **előnézet:** a `web/preview.js` a két lejátszót szimulálja (a poly motort
   mintára pontosan), zongoratekercs-nézettel, amelyen halványan a MIDI,
   színesen a TVC kimenete látszik,
-- `.cas` letöltése, és **megnyitás az Ep128web-ben**: a program a linkben
+- **rész kijelölése:** a zongoratekercsen húzással, az időmezőkkel vagy az
+  „Eleje = itt” / „Vége = itt” gombokkal; csak a kijelölt rész szól és
+  kerül a `.cas`-ba, a kimaradó rész a tekercsen sötétebb. A „Teljes” gomb
+  (ez az alap) visszaállítja a teljes dalt. „Csend kihagyása”: az első hang
+  előtti csend és az ismétlés előtti szünet kimarad,
+- lejátszás, „Elölről”, ismétlésnél hurokban; a beállítások változása
+  lejátszás közben is hallható,
+- `.cas` letöltése (ékezet nélküli fájlnévvel), és **megnyitás az Ep128web-ben**: a program a linkben
   utazik (`#m=gép&f=…`), az emulátor betölti és elindítja,
 - **forráscsomag** (`.zip`): a lejátszó assembly forrása (`player_poly.asm`
   vagy `player.asm`, `cas.inc`), a dal adatai (`build/song.bin`,
@@ -45,8 +52,9 @@ A `web/index.html` böngészőben végzi el ugyanezt, telepítés nélkül:
   beállításokkal egyenértékű `build.sh` / `midi2tvc.py` parancssorral.
 
 A `web/midi2tvc.js` a Python konverter JavaScript-portja, a kimenete bájtra
-azonos (`python3 test/web_parity.py` ellenőrzi 11 beállítással, a tesztdalon
-és a DuckTales-en; a forráscsomag `build.sh`-ját és parancssorát is). A lejátszók gépi kódja a `web/players.js`-ben van; a
+azonos (`python3 test/web_parity.py` ellenőrzi 22 beállítással, a tesztdalon
+és a DuckTales-en; a forráscsomag `build.sh`-ját és parancssorát, és az
+ékezetes cím kódolását is). A lejátszók gépi kódja a `web/players.js`-ben van; a
 `player*.asm` módosítása után újra kell generálni:
 
 ```sh
@@ -74,7 +82,11 @@ Helyben a `web/index.html` közvetlenül megnyitható (`file://` is jó).
 | `--curve`, `--min-volume`, `--max-volume` | MIDI erősség (velocity × CC7 × CC11) leképezése a 4 bites hangerőre |
 | `--loop` | a dal végtelenítve szól |
 | `--background` | egycsatornás lejátszó: háttérben szól, a BASIC közben fut (lásd lent) |
-| `--title` | a betöltés után kiírt cím (alapból a fájlnév) |
+| `--from MP`, `--to MP` | csak a dal egy része (másodperc az eredeti MIDI idejében, a `--speed` előtt); a belelógó hangok a határon kezdődnek / végződnek |
+| `--trim` | az első hang előtti csend és az ismétlés előtti szünet kimarad |
+| `--title` | a betöltés után kiírt cím (alapból a fájlnév); a magyar ékezetes betűk a TVC kódjaival (Á..Ű = `80h..88h`, á..ű = `90h..98h`), legfeljebb 32 karakter |
+
+A kimeneti fájl neve ékezet nélküli (`Árvíztűrő.mid` → `build/Arvizturo.cas`).
 
 A konverter kezeli a tempóváltásokat, a kitartó pedált (CC64), a CC7/CC11
 hangerőt és az „all notes off” üzeneteket. A nagyon rövid hangok is legalább

@@ -15,6 +15,8 @@ shift
 case "$mid" in /*) ;; *) mid="$OLDPWD/$mid" ;; esac
 name=$(basename "$mid")
 name=${name%.*}
+# ékezet nélküli fájlnév (Árvíztűrő -> Arvizturo)
+name=$(python3 -c 'import sys,unicodedata; t=unicodedata.normalize("NFKD",sys.argv[1]); print("".join(c for c in t if c.isascii() and (c.isalnum() or c in "-_")) or "dal")' "$name")
 command -v sjasmplus >/dev/null || { echo "hiányzik a sjasmplus (https://github.com/z00m128/sjasmplus)" >&2; exit 1; }
 # --mode poly: többszólamú lejátszó, különben az egycsatornás
 player=player.asm

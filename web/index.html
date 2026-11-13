@@ -26,6 +26,7 @@
   --v2: #c27a0e;
   --v3: #7d8698;
   --src: rgba(26, 33, 48, 0.13);
+  --shade: rgba(26, 33, 48, 0.16);
   --warn: #a8471b;
   --ok: #1d7a43;
   --font-body: "IBM Plex Sans", system-ui, -apple-system, "Segoe UI", sans-serif;
@@ -38,7 +39,7 @@
     --bg: #12151b; --surface: #1a1e26; --sunk: #232833; --ink: #e6e9ef; --muted: #9aa3b4;
     --line: #2e3442; --accent: #8a9bff; --accent-ink: #10131a;
     --v0: #8a9bff; --v1: #3fc7b8; --v2: #e3a647; --v3: #8d96a8;
-    --src: rgba(230, 233, 239, 0.14); --warn: #f08a5d; --ok: #5cc98a;
+    --src: rgba(230, 233, 239, 0.14); --warn: #f08a5d; --ok: #5cc98a; --shade: rgba(0, 0, 0, 0.45);
     color-scheme: dark;
   }
 }
@@ -46,7 +47,7 @@
   --bg: #12151b; --surface: #1a1e26; --sunk: #232833; --ink: #e6e9ef; --muted: #9aa3b4;
   --line: #2e3442; --accent: #8a9bff; --accent-ink: #10131a;
   --v0: #8a9bff; --v1: #3fc7b8; --v2: #e3a647; --v3: #8d96a8;
-  --src: rgba(230, 233, 239, 0.14); --warn: #f08a5d; --ok: #5cc98a;
+  --src: rgba(230, 233, 239, 0.14); --warn: #f08a5d; --ok: #5cc98a; --shade: rgba(0, 0, 0, 0.45);
   color-scheme: dark;
 }
 * { box-sizing: border-box; }
@@ -145,6 +146,10 @@ details[open] summary { margin-bottom: 10px; }
 
 .rollbox { position: relative; border: 1px solid var(--line); border-radius: var(--r); background: var(--sunk); overflow: hidden; cursor: crosshair; }
 #roll { display: block; width: 100%; height: 280px; }
+#selbox { position: absolute; top: 0; bottom: 0; background: var(--accent); opacity: .18; pointer-events: none; }
+.rangerow { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; font-size: 13.5px; }
+.rangerow input { width: 6.5em; font: 13.5px var(--font-mono); border: 1px solid var(--line); border-radius: var(--r); background: var(--surface); color: inherit; padding: 5px 7px; }
+.rangerow button { padding: 5px 10px; font-size: 13px; }
 #playhead { position: absolute; top: 0; bottom: 0; width: 2px; background: var(--ink); opacity: .7; pointer-events: none; left: 0; }
 .legendrow { display: flex; flex-wrap: wrap; gap: 4px 16px; font-size: 12.5px; color: var(--muted); }
 .time { font: 500 14px/1 var(--font-mono); font-variant-numeric: tabular-nums; }
@@ -246,6 +251,7 @@ footer code, .hint code { font-family: var(--font-mono); font-size: 12.5px; }
             <div class="field"><label for="minVolume">Min. hangerő</label><input id="minVolume" type="number" min="1" max="15" value="6"></div>
             <div class="field"><label for="maxVolume">Max. hangerő</label><input id="maxVolume" type="number" min="1" max="15" value="15"></div>
             <label class="check field wide"><input id="loop" type="checkbox"> Végtelenítve szóljon</label>
+            <label class="check field wide"><input id="trim" type="checkbox"> Csend kihagyása az elején és az ismétlés előtt</label>
           </div>
         </details>
       </section>
@@ -270,10 +276,21 @@ footer code, .hint code { font-family: var(--font-mono); font-size: 12.5px; }
         </div>
         <div class="rollbox" id="rollbox">
           <canvas id="roll" aria-label="Zongoratekercs: halványan a MIDI hangjai, színesen amit a TVC lejátszik"></canvas>
+          <div id="selbox" hidden></div>
           <div id="playhead"></div>
         </div>
+        <div class="rangerow">
+          <label for="rFrom">Rész:</label>
+          <input id="rFrom" type="text" inputmode="decimal" aria-label="A rész eleje (perc:másodperc)">
+          <span>–</span>
+          <input id="rTo" type="text" inputmode="decimal" placeholder="vége" aria-label="A rész vége (perc:másodperc)">
+          <button id="rFromHere" type="button" title="A rész eleje a lejátszás jelenlegi helye">Eleje = itt</button>
+          <button id="rToHere" type="button" title="A rész vége a lejátszás jelenlegi helye">Vége = itt</button>
+          <button id="rAll" type="button">Teljes</button>
+          <span class="note" id="rInfo"></span>
+        </div>
         <div class="legendrow" id="legend"></div>
-        <p class="hint">Halványan a kiválasztott csatornák MIDI-hangjai, színesen az, amit a TVC tényleg lejátszik. Kattintással oda lehet ugrani. Lejátszás közben a beállítások változása azonnal hallható: a zene ugyanonnan folytatódik az új beállítással. Ismétlésnél a dal végén az elejéről folytatja, amíg le nem állítod.</p>
+        <p class="hint">Halványan a kiválasztott csatornák MIDI-hangjai, színesen az, amit a TVC tényleg lejátszik. Kattintással oda lehet ugrani, húzással részt lehet kijelölni: csak a kijelölt rész szól és kerül a .cas-ba (a sötétebb rész kimarad). Lejátszás közben a beállítások változása azonnal hallható: a zene ugyanonnan folytatódik az új beállítással. Ismétlésnél a dal végén az elejéről folytatja, amíg le nem állítod.</p>
       </section>
 
       <section class="panel" aria-labelledby="h-out">
@@ -326,6 +343,9 @@ footer code, .hint code { font-family: var(--font-mono); font-size: 12.5px; }
   let midiBytes = null, parsed = null, fileBase = 'dal', result = null, sim = null, casBytes = null;
   let channelSel = new Set();
   let channelWave = {};             // csatorna (1..16) -> hullámforma (poly)
+  // a kijelölt rész az eredeti MIDI idejében (másodperc, a tempószorzó előtt); null = eleje / vége
+  let rangeFrom = null, rangeTo = null;
+  let fullResult = null, fullSim = null;   // a teljes dal (a tekercshez), result/sim: a mentett rész
   const store = {
     get(k) { try { return localStorage.getItem('tvcmidi.' + k); } catch (e) { return null; } },
     set(k, v) { try { localStorage.setItem('tvcmidi.' + k, v); } catch (e) { /* nincs tároló */ } },
@@ -346,6 +366,8 @@ footer code, .hint code { font-family: var(--font-mono); font-size: 12.5px; }
     const chans = channelInfo(p);
     channelSel = new Set(chans.map((c) => c.ch));
     channelWave = {};
+    rangeFrom = rangeTo = null;
+    offset = 0;
     const tempo = p.events.find((e) => e[2] === 'tempo');
     const bpm = tempo ? Math.round(60e6 / tempo[4]) : 120;
     $('srcMeta').textContent = p.tracks.length + ' sáv · ' + chans.length + ' csatorna · ' + bpm + ' BPM · ' + bytes.length + ' bájt';
@@ -410,6 +432,7 @@ footer code, .hint code { font-family: var(--font-mono); font-size: 12.5px; }
       decay: num('decay'), decayFloor: num('decayFloor'), curve: num('curve'),
       minVolume: num('minVolume'), maxVolume: num('maxVolume'), loop: $('loop').checked,
       background: mode !== 'poly' && $('background').checked,
+      from: rangeFrom, to: rangeTo, trim: $('trim').checked,
       wave: $('wave').value, polyDiv: num('polyDiv'),
       channelWave: mode === 'poly' ? Object.fromEntries(Object.entries(channelWave).filter(([ch]) => channelSel.has(+ch))) : null,
     };
@@ -431,16 +454,20 @@ footer code, .hint code { font-family: var(--font-mono); font-size: 12.5px; }
     if (!parsed) return;
     // ha szól, az új változat ugyanonnan folytatódik (a dal arányos helyéről,
     // hogy a tempóváltás is jó helyre ugorjon)
-    const wasPlaying = !!srcNode, oldDur = duration(), oldPos = position();
+    const wasPlaying = !!srcNode, oldFullDur = fullDur(), oldFullPos = fullPos();
     const o = options();
     const warns = [];
+    let full;
     try {
       if (!o.channels.length) throw new Error('nincs kiválasztott csatorna');
       result = M.convertMidi(parsed, o);
+      full = (o.from === null && o.to === null && !o.trim) ? result
+        : M.convertMidi(parsed, Object.assign({}, o, { from: null, to: null, trim: false }));
     } catch (e) {
       stop();
       offset = 0;
-      result = null; sim = null; casBytes = null;
+      result = null; sim = null; casBytes = null; fullResult = null; fullSim = null;
+      renderRange();
       $('stats').textContent = '';
       $('mem').textContent = '';
       $('warns').innerHTML = '';
@@ -455,10 +482,15 @@ footer code, .hint code { font-family: var(--font-mono); font-size: 12.5px; }
     const player = o.mode === 'poly' ? PLAYERS.poly : PLAYERS.mono;
     casBytes = M.buildCas(player, result.song, $('title').value || fileBase);
     const newSim = PV.simulate(result.song, o.mode, 44100);
+    const newFull = full === result ? newSim : PV.simulate(full.song, o.mode, 44100);
     if (wasPlaying) stop();
-    sim = newSim;
-    offset = oldDur > 0 ? Math.min(oldPos / oldDur, 1) * duration() : 0;
+    sim = newSim; fullSim = newFull; fullResult = full;
+    // a teljes dalon ugyanoda (tempóváltásnál arányosan), a rész határai közé
+    const target = oldFullDur > 0 ? Math.min(oldFullPos / oldFullDur, 1) * fullDur() : 0;
+    offset = Math.max(0, Math.min(duration(), target - effStart()));
+    if (offset >= duration() - 0.05) offset = 0;
     if (wasPlaying) play();
+    renderRange();
     renderStats(player, warns);
     renderBasic(player);
     drawRoll();
@@ -504,7 +536,10 @@ footer code, .hint code { font-family: var(--font-mono); font-size: 12.5px; }
     const c = player.code;
     const i = c.findIndex((x, j) => x === 0x55 && c[j + 1] === 0x53 && c[j + 2] === 0x52 && c[j + 3] === 0x96);
     const addr = String.fromCharCode(...c.slice(i + 4, i + 8));
-    const title = String.fromCharCode(...M.titleBytes($('title').value || fileBase)).trimEnd();
+    // a TVC-kódok (80h..88h, 90h..98h) vissza ékezetes betűkké a kijelzéshez
+    const HU = 'ÁÉÍÓÖŐÚÜŰ', hu = 'áéíóöőúüű';
+    const title = Array.from(M.titleBytes($('title').value || fileBase), (c) =>
+      c >= 0x80 && c <= 0x88 ? HU[c - 0x80] : c >= 0x90 && c <= 0x98 ? hu[c - 0x90] : String.fromCharCode(c)).join('').trimEnd();
     const bg = result && result.options.background;
     $('basic').textContent = '1 PRINT "' + title + '"\n2 X=USR(' + addr + ')' +
       (bg ? '\n\n! háttérben szól: EXT 0 leállítja, EXT 1 elölről indítja' : '');
@@ -533,12 +568,12 @@ footer code, .hint code { font-family: var(--font-mono); font-size: 12.5px; }
     g.setTransform(dpr, 0, 0, dpr, 0, 0);
     g.clearRect(0, 0, W, H);
     renderLegend();
-    if (!result || !sim) return;
-    const frames = sim.roll.length, dur = sim.levels.length / sim.rate;
-    const notes = result.notes;
+    if (!fullResult || !fullSim) return;
+    const frames = fullSim.roll.length, dur = fullDur();
+    const notes = fullResult.notes;
     let lo = 127, hi = 0;
     for (const n of notes) { lo = Math.min(lo, n[2]); hi = Math.max(hi, n[2]); }
-    for (const fr of sim.roll) for (const x of fr) if (x.note >= 0 && !x.drum) { lo = Math.min(lo, x.note); hi = Math.max(hi, x.note); }
+    for (const fr of fullSim.roll) for (const x of fr) if (x.note >= 0 && !x.drum) { lo = Math.min(lo, x.note); hi = Math.max(hi, x.note); }
     if (lo > hi) { lo = 48; hi = 72; }
     lo -= 2; hi += 2;
     const drumH = 18, plotH = H - drumH - 4;
@@ -572,7 +607,7 @@ footer code, .hint code { font-family: var(--font-mono); font-size: 12.5px; }
     };
     for (let f = 0; f < frames; f++) {
       const seen = new Set();
-      for (const x of sim.roll[f]) {
+      for (const x of fullSim.roll[f]) {
         const key = x.v + ':' + (x.drum ? 'd' : x.note);
         seen.add(key);
         const o = open.get(key);
@@ -585,6 +620,16 @@ footer code, .hint code { font-family: var(--font-mono); font-size: 12.5px; }
     g.fillRect(0, H - drumH - 2, W, 1);
     g.fillStyle = cssVar('--muted');
     g.fillText('dob', W - 28, H - 5);
+    // a mentett rész: kívüle sötétebb, a határain vonal
+    const x0 = xOfS(effStart()), x1 = Math.min(W, xOfS(effStart() + duration()));
+    if (x0 > 0.5 || x1 < W - 0.5) {
+      g.fillStyle = cssVar('--shade');
+      g.fillRect(0, 0, x0, H);
+      g.fillRect(x1, 0, W - x1, H);
+      g.fillStyle = cssVar('--accent');
+      g.fillRect(x0 - 1, 0, 2, H);
+      g.fillRect(x1 - 1, 0, 2, H);
+    }
     updatePlayhead();
   }
   function renderLegend() {
@@ -640,8 +685,12 @@ footer code, .hint code { font-family: var(--font-mono); font-size: 12.5px; }
     updatePlayhead();
     if (srcNode) raf = requestAnimationFrame(tickUi);
   }
+  // a mentett rész helye a teljes dalban (lejátszási idő), és a teljes dal
+  function effStart() { return result && result.range ? result.range.start : 0; }
+  function fullDur() { return fullSim ? fullSim.levels.length / fullSim.rate : 0; }
+  function fullPos() { return effStart() + position(); }
   function updatePlayhead() {
-    const d = duration(), p = position();
+    const d = fullDur(), p = fullPos();
     $('time').textContent = fmtTime(p) + ' / ' + fmtTime(d);
     $('playhead').style.left = (d ? (p / d) * $('roll').clientWidth : 0) + 'px';
   }
@@ -652,18 +701,89 @@ footer code, .hint code { font-family: var(--font-mono); font-size: 12.5px; }
     offset = 0;
     play();
   });
-  $('rollbox').addEventListener('click', (e) => {
-    if (!sim) return;
+  // a tekercsen: kattintás = ugrás, húzás = rész kijelölése
+  let drag = null;
+  const rollTime = (clientX) => {
     const r = $('roll').getBoundingClientRect();
+    return Math.max(0, Math.min(1, (clientX - r.left) / r.width)) * fullDur();
+  };
+  $('rollbox').addEventListener('pointerdown', (e) => {
+    if (!fullSim) return;
+    drag = { x0: e.clientX, moved: false };
+    $('rollbox').setPointerCapture(e.pointerId);
+  });
+  $('rollbox').addEventListener('pointermove', (e) => {
+    if (!drag) return;
+    if (Math.abs(e.clientX - drag.x0) > 5) drag.moved = true;
+    if (!drag.moved) return;
+    const r = $('roll').getBoundingClientRect();
+    const a = Math.max(0, Math.min(e.clientX, drag.x0) - r.left), b = Math.min(r.width, Math.max(e.clientX, drag.x0) - r.left);
+    const box = $('selbox');
+    box.hidden = false;
+    box.style.left = a + 'px';
+    box.style.width = Math.max(1, b - a) + 'px';
+  });
+  $('rollbox').addEventListener('pointerup', (e) => {
+    if (!drag) return;
+    const d = drag;
+    drag = null;
+    $('selbox').hidden = true;
+    if (d.moved) {
+      const t0 = rollTime(Math.min(d.x0, e.clientX)), t1 = rollTime(Math.max(d.x0, e.clientX));
+      setRange(t0 < 0.05 ? null : t0, t1 >= fullDur() - 0.05 ? null : t1);
+      return;
+    }
     const was = !!srcNode;
     stop();
-    offset = Math.max(0, Math.min(1, (e.clientX - r.left) / r.width)) * duration();
+    offset = Math.max(0, Math.min(duration(), rollTime(e.clientX) - effStart()));
     updatePlayhead();
     if (was) play();
   });
+  $('rollbox').addEventListener('pointercancel', () => { drag = null; $('selbox').hidden = true; });
+
+  // ---- a kijelölt rész ------------------------------------------------------------
+  const spd = () => num('speed') || 1;
+  // t: lejátszási idő (másodperc) a teljes dalban; null = eleje / vége
+  function setRange(from, to) {
+    if (from !== null && to !== null && to - from < 0.1) { setStatus('A rész túl rövid.', true); renderRange(); return; }
+    rangeFrom = from === null ? null : from * spd();
+    rangeTo = to === null ? null : to * spd();
+    setStatus('');
+    regenerate();
+  }
+  function parseTime(text) {
+    const t = String(text).trim().replace(',', '.');
+    if (!t) return null;
+    const m = /^(?:(\d+):)?(\d+(?:\.\d*)?)$/.exec(t);
+    if (!m) return NaN;
+    return (m[1] ? Number(m[1]) * 60 : 0) + Number(m[2]);
+  }
+  function renderRange() {
+    if (document.activeElement !== $('rFrom')) $('rFrom').value = fmtTime(rangeFrom === null ? 0 : rangeFrom / spd());
+    if (document.activeElement !== $('rTo')) $('rTo').value = rangeTo === null ? '' : fmtTime(rangeTo / spd());
+    const whole = rangeFrom === null && rangeTo === null;
+    $('rAll').disabled = whole || !fullSim;
+    for (const id of ['rFrom', 'rTo', 'rFromHere', 'rToHere']) $(id).disabled = !fullSim;
+    $('rInfo').textContent = !result ? '' : (whole && !$('trim').checked ? 'a teljes dal'
+      : 'mentve: ' + fmtTime(effStart()) + '–' + fmtTime(effStart() + duration()) + ' (' + duration().toFixed(1).replace('.', ',') + ' s)');
+  }
+  function rangeInput(id, isFrom) {
+    $(id).addEventListener('change', () => {
+      const t = parseTime($(id).value);
+      if (Number.isNaN(t)) { setStatus('Az időt perc:másodperc alakban add meg, pl. 1:23.5.', true); renderRange(); return; }
+      const from = isFrom ? (t || null) : (rangeFrom === null ? null : rangeFrom / spd());
+      const to = isFrom ? (rangeTo === null ? null : rangeTo / spd()) : (t === null || t >= fullDur() - 0.05 ? null : t);
+      setRange(from, to);
+    });
+  }
+  rangeInput('rFrom', true);
+  rangeInput('rTo', false);
+  $('rFromHere').addEventListener('click', () => setRange(fullPos() < 0.05 ? null : fullPos(), rangeTo === null ? null : rangeTo / spd()));
+  $('rToHere').addEventListener('click', () => setRange(rangeFrom === null ? null : rangeFrom / spd(), fullPos()));
+  $('rAll').addEventListener('click', () => setRange(null, null));
 
   // ---- kimenet -----------------------------------------------------------------
-  const baseName = () => (fileBase.replace(/[^A-Za-z0-9_-]+/g, '').slice(0, 12) || 'dal').toLowerCase();
+  const baseName = () => (M.asciiName(fileBase).slice(0, 16) || 'dal').toLowerCase();   // a TVC 16 karakteres nevet kezel
   const casName = () => baseName() + '.cas';
   // fájl mentése: az artifact-nézetben a downloads képességgel (ott .cas
   // nem, .zip igen), különben hagyományos letöltéssel
@@ -733,7 +853,7 @@ footer code, .hint code { font-family: var(--font-mono); font-size: 12.5px; }
   for (const el of document.querySelectorAll('input[name="mode"]')) el.addEventListener('change', () => { showModeFields(); regenerate(); });
   $('polyMix').addEventListener('change', showModeFields);
   for (const id of ['polyVolume', 'polyKnee', 'polyMix', 'maxNotes', 'arpSpeed', 'arpBass', 'prio', 'drums', 'transpose', 'decay',
-    'decayFloor', 'speed', 'title', 'tuning', 'curve', 'minVolume', 'maxVolume', 'loop', 'background', 'wave', 'polyDiv']) {
+    'decayFloor', 'speed', 'title', 'tuning', 'curve', 'minVolume', 'maxVolume', 'loop', 'background', 'wave', 'polyDiv', 'trim']) {
     $(id).addEventListener(($(id).type === 'checkbox' || $(id).tagName === 'SELECT') ? 'change' : 'input', regenerate);
   }
   $('fileInput').addEventListener('change', (e) => {
