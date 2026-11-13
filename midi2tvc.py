@@ -216,6 +216,37 @@ def collect_notes(division, events, channels, transpose, speed):
     return notes
 
 
+def select_range(notes, drum_notes, start, end, speed, trim):
+    """A dal egy része: start..end (másodperc az eredeti MIDI idejében, a
+    --speed előtt; None = eleje / vége).  A belelógó hangok a határon
+    kezdődnek / végződnek, a dobok közül a részben kezdődők maradnak.  trim:
+    az első hang előtti csend is kimarad.  -> (hangok, dobhangok, a rész
+    kezdete a lejátszás idejében, a legkisebb hossz másodpercben vagy None)"""
+    lo = (start or 0.0) / speed
+    hi = end / speed if end is not None else float("inf")
+
+    def clip(lst, onset_only):
+        out = []
+        for s, e, n, v, ch in lst:
+            if onset_only:
+                if lo <= s < hi:
+                    out.append((s, min(e, hi), n, v, ch))
+            elif s < hi and e > lo:
+                out.append((max(s, lo), min(e, hi), n, v, ch))
+        return out
+    notes, drum_notes = clip(notes, False), clip(drum_notes, True)
+    shift = lo
+    if trim:
+        onsets = [n[0] for n in notes] + [d[0] for d in drum_notes]
+        if onsets:
+            shift = min(onsets)
+    min_len = None
+    if end is not None and not trim:
+        min_len = hi - lo                 # a kijelölt rész a csenddel együtt
+    move = lambda lst: sorted((s - shift, e - shift, n, v, ch) for s, e, n, v, ch in lst)
+    return move(notes), move(drum_notes), shift, min_len
+
+
 # --------------------------------------------------------------------------
 # TVC adatok
 # --------------------------------------------------------------------------
@@ -405,7 +436,8 @@ def parse_channel_waves(spec):
 
 def convert_poly(notes, drums, args, sr, tick_rate, ftab, ch_waves):
     ticks = build_ticks(notes, tick_rate)
-    total = max([t[1] for t in ticks] + [t + 8 for t in drums] + [1])
+    total = max([t[1] for t in ticks] + [t + 8 for t in drums] + [1] +
+                ([int(round(args.min_len * tick_rate))] if args.min_len else []))
     starts = {}
     for t in ticks:
         starts.setdefault(t[0], []).append(t)
@@ -518,7 +550,8 @@ def convert_poly(notes, drums, args, sr, tick_rate, ftab, ch_waves):
         for v in range(POLY_VOICES):
             if vslot[v] != 0:
                 out += bytes((0xBB + v, 0))
-        out.append(0xC0 + 0x0F)
+        if not args.trim:
+            out.append(0xC0 + 0x0F)       # rövid szünet az ismétlés előtt
     out.append(0xFF)
     return bytes(out), total, stats, slots
 
@@ -590,7 +623,8 @@ def encode_wait(out, n):
 def convert(notes, args, drums=None):
     ticks = build_ticks(notes, args.rate)
     drums = drums or {}
-    total = max([t[1] for t in ticks] + [t + 6 for t in drums])
+    total = max([t[1] for t in ticks] + [t + 6 for t in drums] +
+                ([int(round(args.min_len * args.rate))] if args.min_len else []))
     starts = {}
     for t in ticks:
         starts.setdefault(t[0], []).append(t)
@@ -638,7 +672,7 @@ def convert(notes, args, drums=None):
         pending_wait += 1
     encode_wait(out, pending_wait)
     out.append(0x80)
-    if args.loop:
+    if args.loop and not args.trim:
         out.append(0xC0 + 0x0F)           # rövid szünet az ismétlés előtt
     out.append(0xFF)
     return bytes(out), total, stats
@@ -690,6 +724,12 @@ def main():
     ap.add_argument("--min-volume", type=int, default=6)
     ap.add_argument("--max-volume", type=int, default=15)
     ap.add_argument("--loop", action="store_true", help="a dal végtelenítve szól")
+    ap.add_argument("--from", dest="start", type=float, default=None, metavar="MP",
+                    help="csak a dal ettől a ponttól (másodperc az eredeti MIDI idejében)")
+    ap.add_argument("--to", dest="end", type=float, default=None, metavar="MP",
+                    help="csak a dal eddig a pontig (másodperc az eredeti MIDI idejében)")
+    ap.add_argument("--trim", action="store_true",
+                    help="az elején a csend és az ismétlés előtti szünet kimarad")
     ap.add_argument("--background", action="store_true",
                     help="egycsatornás lejátszó: háttérben szól, a BASIC közben fut "
                          "(EXT 0 leállítja, EXT 1 újraindítja)")
@@ -714,12 +754,14 @@ def main():
     with open(args.midi, "rb") as f:
         division, events = parse_midi(f.read())
     notes = collect_notes(division, events, channels, args.transpose, args.speed)
-    drums = {}
-    if use_drums:
-        drums = drum_hits(collect_notes(division, events, {DRUM_CHANNEL}, 0, args.speed),
-                          args.rate, args.curve)
+    drum_notes = collect_notes(division, events, {DRUM_CHANNEL}, 0, args.speed) if use_drums else []
+    if args.start is not None and args.end is not None and args.end <= args.start:
+        ap.error("--to legyen nagyobb, mint --from")
+    notes, drum_notes, shift, args.min_len = select_range(notes, drum_notes, args.start, args.end,
+                                                          args.speed, args.trim)
+    drums = drum_hits(drum_notes, args.rate, args.curve) if use_drums else {}
     if not notes and not drums:
-        sys.exit("a kiválasztott csatornákon nincs hang")
+        sys.exit("a kiválasztott csatornákon (és részben) nincs hang")
     if args.mode == "poly":
         if args.background:
             print("figyelem: a háttér-mód csak az egycsatornás lejátszóval működik (a poly a teljes CPU-t használja)")
@@ -744,13 +786,44 @@ def main():
     report(args, notes, total, args.rate, stats, len(data))
 
 
+# a TVC karakterkészlete: Á É Í Ó Ö Ő Ú Ü Ű = 80h..88h, á .. ű = 90h..98h
+TVC_ACCENTS = {c: 0x80 + i for i, c in enumerate("ÁÉÍÓÖŐÚÜŰ")}
+TVC_ACCENTS.update({c: 0x90 + i for i, c in enumerate("áéíóöőúüű")})
+TVC_ACCENTS.update({"Õ": 0x85, "Û": 0x88, "õ": 0x95, "û": 0x98})    # gyakori elírások
+TVC_ACCENTS.update({c: ord("-") for c in "–—‐‑"})                    # gondolatjelek
+TVC_ACCENTS.update({c: ord("'") for c in "‘’‚“”„«»"})                 # idézőjelek
+
+
+def tvc_title(title):
+    """A cím 32 bájton a BASIC PRINT sorához: ASCII, a magyar ékezetes
+    betűk TVC-kóddal, más ékezetes betű ékezet nélkül, a többi '_'."""
+    import unicodedata
+    out = bytearray()
+    for c in title:
+        if c in TVC_ACCENTS:
+            out.append(TVC_ACCENTS[c])
+            continue
+        if not (32 <= ord(c) < 127):
+            c = unicodedata.normalize("NFKD", c)[0]
+        out.append(ord(c) if 32 <= ord(c) < 127 and c != '"' else 0x5F)
+        if len(out) >= 32:
+            break
+    return bytes(out[:32]).ljust(32, b" ")
+
+
+def ascii_name(name):
+    """ékezet nélküli fájlnév: Árvíztűrő -> Arvizturo"""
+    import unicodedata
+    t = unicodedata.normalize("NFKD", name)
+    return "".join(c for c in t if c.isascii() and (c.isalnum() or c in "-_"))
+
+
 def write_title(args):
     if args.title_out:
         title = args.title if args.title is not None else \
             os.path.splitext(os.path.basename(args.midi))[0]
-        t = "".join(c if 32 <= ord(c) < 127 and c != '"' else "_" for c in title)
         with open(args.title_out, "wb") as f:
-            f.write(t[:32].ljust(32).encode("ascii"))
+            f.write(tvc_title(title))
 
 
 def write_poly(args, notes, drums_sec):

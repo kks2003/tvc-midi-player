@@ -30,6 +30,11 @@ CASES = [
      {"mode": "poly", "decay": 4, "decayFloor": 5, "polyVolume": 11, "polyMix": "soft", "polyKnee": 8, "loop": True}),
     (["--mode", "poly", "--poly-volume", "12", "--wave", "sine"], {"mode": "poly", "polyVolume": 12, "wave": "sine"}),
     (["--mode", "poly", "--loop", "--channel-wave", "1=saw"], {"mode": "poly", "loop": True, "channelWave": {"1": "saw"}}),
+    (["--from", "4.5", "--to", "9.25"], {"from": 4.5, "to": 9.25}),
+    (["--from", "4.5", "--to", "9.25", "--trim", "--loop"], {"from": 4.5, "to": 9.25, "trim": True, "loop": True}),
+    (["--mode", "poly", "--from", "2", "--trim"], {"mode": "poly", "from": 2, "trim": True}),
+    (["--mode", "poly", "--to", "30", "--speed", "1.5"], {"mode": "poly", "to": 30, "speed": 1.5}),
+    (["--trim"], {"trim": True}),
     (["--mode", "poly", "--channels", "1,4,6,5,10"], {"mode": "poly", "channels": [1, 4, 6, 5, 10]}),
     (["--channels", "1,2,10", "--max-notes", "4"], {"channels": [1, 2, 10], "maxNotes": 4}),
     (["--mode", "mono", "--background", "--loop"], {"mode": "mono", "background": True, "loop": True}),
@@ -108,6 +113,23 @@ def main():
                       % (os.path.basename(mid), " ".join(args) or "(alap)", len(want), len(got), first))
             else:
                 print("azonos: %s %s (%d bájt)" % (os.path.basename(mid), " ".join(args) or "(alap)", len(got)))
+    # a cím (TVC ékezetes kódok) és az ékezet nélküli fájlnév
+    sys.path.insert(0, REPO)
+    import midi2tvc
+    titles = ["Árvíztűrő tükörfúrógép", "ÁÉÍÓÖŐÚÜŰ áéíóöőúüű", "Õ û ä ß \"idéz\" €", "x" * 40,
+              "Kacsák – „részlet” — ‘a’"]
+    js = subprocess.check_output(["node", "-e", "const M=require(process.argv[1]+'/web/midi2tvc.js');"
+                                  "for (const t of JSON.parse(process.argv[2])) console.log("
+                                  "Buffer.from(M.titleBytes(t)).toString('hex')+' '+M.asciiName(t))",
+                                  REPO, json.dumps(titles)]).decode().split("\n")
+    for t, line in zip(titles, js):
+        n += 1
+        want = midi2tvc.tvc_title(t).hex() + " " + midi2tvc.ascii_name(t)
+        if line != want:
+            bad += 1
+            print("ELTÉR: cím %r: python %s, js %s" % (t, want, line))
+        else:
+            print("azonos: cím %r -> %s" % (t, line))
     print("%d/%d azonos" % (n - bad, n))
     return 1 if bad else 0
 

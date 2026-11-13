@@ -223,6 +223,32 @@
     return notes;
   }
 
+  // A dal egy része: from..to (másodperc az eredeti MIDI idejében, a speed
+  // előtt; null = eleje / vége). trim: az első hang előtti csend is kimarad.
+  // -> [hangok, dobhangok, a rész kezdete a lejátszás idejében, legkisebb hossz vagy null]
+  function selectRange(notes, drumNotes, start, end, speed, trim) {
+    const lo = (start || 0.0) / speed;
+    const hi = end !== null && end !== undefined ? end / speed : Infinity;
+    const clip = (lst, onsetOnly) => {
+      const out = [];
+      for (const [s, e, n, v, ch] of lst) {
+        if (onsetOnly) { if (lo <= s && s < hi) out.push([s, Math.min(e, hi), n, v, ch]); }
+        else if (s < hi && e > lo) out.push([Math.max(s, lo), Math.min(e, hi), n, v, ch]);
+      }
+      return out;
+    };
+    notes = clip(notes, false);
+    drumNotes = clip(drumNotes, true);
+    let shift = lo;
+    if (trim) {
+      const onsets = notes.map((n) => n[0]).concat(drumNotes.map((d) => d[0]));
+      if (onsets.length) shift = onsets.reduce((a, b) => Math.min(a, b));
+    }
+    const minLen = (end !== null && end !== undefined && !trim) ? hi - lo : null;
+    const move = (lst) => lst.map(([s, e, n, v, ch]) => [s - shift, e - shift, n, v, ch]).sort(cmpTuple);
+    return [move(notes), move(drumNotes), shift, minLen];
+  }
+
   // ---- TVC adatok ---------------------------------------------------------------
   const pitchValue = (f) => 4096.0 - TVC_CLOCK / f;
   const noteFreq = (n, tuning) => tuning * Math.pow(2.0, (n - 69) / 12.0);
@@ -388,7 +414,8 @@
 
   function convert(notes, o, drums) {
     const ticks = buildTicks(notes, o.rate);
-    const total = maxOf(ticks.map((t) => t[1]).concat([...drums.keys()].map((t) => t + 6)));
+    const total = maxOf(ticks.map((t) => t[1]).concat([...drums.keys()].map((t) => t + 6),
+      o.minLen ? [pyRound(o.minLen * o.rate)] : []));
     const starts = groupStarts(ticks);
     const active = new Map();
     const out = [];
@@ -427,14 +454,15 @@
     }
     encodeWait(out, pending, 0xA0);
     out.push(0x80);
-    if (o.loop) out.push(0xC0 + 0x0F);
+    if (o.loop && !o.trim) out.push(0xC0 + 0x0F);
     out.push(0xFF);
     return { body: out, total, stats };
   }
 
   function convertPoly(notes, drums, o, sr, tickRate, ftab, chWaves) {
     const ticks = buildTicks(notes, tickRate);
-    const total = maxOf(ticks.map((t) => t[1]).concat([...drums.keys()].map((t) => t + 8), [1]));
+    const total = maxOf(ticks.map((t) => t[1]).concat([...drums.keys()].map((t) => t + 8), [1],
+      o.minLen ? [pyRound(o.minLen * tickRate)] : []));
     const starts = groupStarts(ticks);
     const vmax = o.polyVolume;
     const vmin = Math.max(1, Math.min(vmax, pyRound(o.minVolume * vmax / 15.0)));
@@ -527,7 +555,7 @@
     if (o.loop) {
       // ismétlés előtt a szólamok a kezdő hullámformára (a dal eleje a 0. helyet feltételezi)
       for (let v = 0; v < POLY_VOICES; v++) if (vslot[v] !== 0) out.push(0xBB + v, 0);
-      out.push(0xC0 + 0x0F);
+      if (!o.trim) out.push(0xC0 + 0x0F);
     }
     out.push(0xFF);
     return { body: out, total, stats, slots };
@@ -536,7 +564,7 @@
   const DEFAULTS = {
     mode: 'arp', prio: 'high', maxNotes: 3, arpBass: false, arpSpeed: 1, polyVolume: 9, polyKnee: 10, polyMix: 'clean',
     channels: null, drums: 'synth', transpose: 0, tuning: 440.0, speed: 1.0, rate: FRAME_RATE,
-    decay: 0, decayFloor: 6, curve: 0.7, minVolume: 6, maxVolume: 15, loop: false, background: false,
+    decay: 0, decayFloor: 6, curve: 0.7, minVolume: 6, maxVolume: 15, loop: false, background: false, from: null, to: null, trim: false,
     polyDiv: 19, wave: 'square', channelWave: null,     // channelWave: {csatorna (1..16): hullámforma}
   };
 
@@ -553,10 +581,13 @@
     if (!(o.decay >= 0 && o.decay <= 255)) throw new Error('lecsengés: 0..255');
     if (!(1 <= o.minVolume && o.minVolume <= o.maxVolume && o.maxVolume <= 15))
       throw new Error('1 <= min. hangerő <= max. hangerő <= 15');
-    const notes = collectNotes(division, events, channels, o.transpose, o.speed);
-    let drums = new Map();
-    if (useDrums) drums = drumHits(collectNotes(division, events, new Set([DRUM_CHANNEL]), 0, o.speed), o.rate, o.curve);
-    if (!notes.length && !drums.size) throw new Error('a kiválasztott csatornákon nincs hang');
+    if (o.from !== null && o.to !== null && o.to <= o.from) throw new Error('a rész vége legyen az eleje után');
+    let notes = collectNotes(division, events, channels, o.transpose, o.speed);
+    let drumNotes = useDrums ? collectNotes(division, events, new Set([DRUM_CHANNEL]), 0, o.speed) : [];
+    let shift;
+    [notes, drumNotes, shift, o.minLen] = selectRange(notes, drumNotes, o.from, o.to, o.speed, o.trim);
+    const drums = useDrums ? drumHits(drumNotes, o.rate, o.curve) : new Map();
+    if (!notes.length && !drums.size) throw new Error('a kiválasztott csatornákon (és részben) nincs hang');
     const floor = clamp(o.decayFloor, 0, 15);
     let song, total, stats, rate, sr = null, polyInfo = null;
     if (o.mode === 'poly') {
@@ -603,21 +634,36 @@
     const used = [...new Set(notes.map((n) => n[2]))].sort((a, b) => a - b);
     if (used.length && o.mode !== 'poly' && noteFreq(used[0], o.tuning) < TVC_CLOCK / 4096)
       warnings.push('a 47,7 Hz alatti hangok egy oktávval feljebb szólnak');
-    return { song, mode: o.mode, total, rate, sampleRate: sr, stats, notes, used, warnings, options: o, poly: polyInfo };
+    // range: a mentett rész helye a teljes dal lejátszási idejében (másodperc)
+    return { song, mode: o.mode, total, rate, sampleRate: sr, stats, notes, used, warnings, options: o, poly: polyInfo,
+      range: { start: shift, length: total / rate } };
   }
 
   // ---- .cas összeállítása ---------------------------------------------------------
   // players: a players.js objektuma ({mono: {code, title_offset}, poly: {...}})
+  // a TVC karakterkészlete: Á É Í Ó Ö Ő Ú Ü Ű = 80h..88h, á .. ű = 90h..98h
+  const TVC_ACCENTS = {};
+  [...'ÁÉÍÓÖŐÚÜŰ'].forEach((c, i) => { TVC_ACCENTS[c] = 0x80 + i; });
+  [...'áéíóöőúüű'].forEach((c, i) => { TVC_ACCENTS[c] = 0x90 + i; });
+  Object.assign(TVC_ACCENTS, { 'Õ': 0x85, 'Û': 0x88, 'õ': 0x95, 'û': 0x98 });     // gyakori elírások
+  for (const c of '–—‐‑') TVC_ACCENTS[c] = 0x2D;                                    // gondolatjelek
+  for (const c of '‘’‚“”„«»') TVC_ACCENTS[c] = 0x27;                                // idézőjelek
+  // a cím 32 bájton: ASCII, a magyar ékezetesek TVC-kóddal, más ékezetes
+  // betű ékezet nélkül, a többi '_'
   function titleBytes(title) {
     const out = new Uint8Array(32).fill(32);
     let i = 0;
-    for (const ch of String(title)) {
+    for (let ch of String(title)) {
       if (i >= 32) break;
-      const c = ch.charCodeAt(0);
+      if (ch in TVC_ACCENTS) { out[i++] = TVC_ACCENTS[ch]; continue; }
+      let c = ch.charCodeAt(0);
+      if (!(c >= 32 && c < 127)) { ch = ch.normalize('NFKD')[0]; c = ch.charCodeAt(0); }
       out[i++] = (c >= 32 && c < 127 && ch !== '"') ? c : 0x5F;
     }
     return out;
   }
+  // ékezet nélküli fájlnév: Árvíztűrő -> Arvizturo
+  const asciiName = (name) => String(name).normalize('NFKD').replace(/[^A-Za-z0-9_-]/g, '');
   function buildCas(player, song, title) {
     const code = Uint8Array.from(player.code);
     const suffix = Uint8Array.from(player.suffix || []);
@@ -651,7 +697,7 @@
     ['channels', '--channels'], ['drums', '--drums'], ['transpose', '--transpose'], ['tuning', '--tuning'],
     ['speed', '--speed'], ['decay', '--decay'], ['decayFloor', '--decay-floor'], ['curve', '--curve'],
     ['minVolume', '--min-volume'], ['maxVolume', '--max-volume'], ['loop', '--loop'],
-    ['background', '--background'], ['polyDiv', '--poly-div'], ['wave', '--wave'], ['channelWave', '--channel-wave'],
+    ['background', '--background'], ['from', '--from'], ['to', '--to'], ['trim', '--trim'], ['polyDiv', '--poly-div'], ['wave', '--wave'], ['channelWave', '--channel-wave'],
   ];
   function cliArgs(opts) {
     const o = Object.assign({}, DEFAULTS, opts || {});
@@ -771,7 +817,7 @@
   const api = {
     TVC_CLOCK, FRAME_RATE, CPU_CLOCK, POLY_VOICES, WAVES, WAVE_NAMES, DRUM_CHANNEL, DRUM_KIT, POLY_KIT, DEFAULTS,
     pyRound, parseMidi, collectNotes, pitchTable, polyFreqTable, polyMixTable, polyRates, noteFreq,
-    convertMidi, buildCas, titleBytes, cliArgs, sourcePackage, zipFiles,
+    convertMidi, buildCas, titleBytes, asciiName, selectRange, cliArgs, sourcePackage, zipFiles,
   };
   if (typeof module !== 'undefined' && module.exports) module.exports = api;
   else root.Midi2Tvc = api;
