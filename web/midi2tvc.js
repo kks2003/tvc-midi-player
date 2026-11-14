@@ -420,6 +420,7 @@
 
   function convert(notes, o, drums) {
     const ticks = buildTicks(notes, o.rate);
+    let pause = 0;
     let total = maxOf(ticks.map((t) => t[1]).concat([...drums.keys()].map((t) => t + 6),
       o.minLen ? [pyRound(o.minLen * o.rate)] : []));
     const starts = groupStarts(ticks);
@@ -464,13 +465,15 @@
       const n = pyRound(o.loopPause * o.rate);
       encodeWait(out, n, 0xA0);       // beállított szünet az ismétlés előtt
       total += n;
+      pause = n;
     } else if (o.loop && !o.trim) out.push(0xC0 + 0x0F);
     out.push(0xFF);
-    return { body: out, total, stats };
+    return { body: out, total, stats, pause };
   }
 
   function convertPoly(notes, drums, o, sr, tickRate, ftab, chWaves) {
     const ticks = buildTicks(notes, tickRate);
+    let pause = 0;
     let total = maxOf(ticks.map((t) => t[1]).concat([...drums.keys()].map((t) => t + 8), [1],
       o.minLen ? [pyRound(o.minLen * tickRate)] : []));
     const starts = groupStarts(ticks);
@@ -569,10 +572,11 @@
         const n = pyRound(o.loopPause * tickRate);
         encodeWait(out, n, 0xBF);     // beállított szünet az ismétlés előtt
         total += n;
+        pause = n;
       } else if (!o.trim) out.push(0xC0 + 0x0F);
     }
     out.push(0xFF);
-    return { body: out, total, stats, slots };
+    return { body: out, total, stats, slots, pause };
   }
 
   const DEFAULTS = {
@@ -603,7 +607,7 @@
     const drums = useDrums ? drumHits(drumNotes, o.rate, o.curve) : new Map();
     if (!notes.length && !drums.size) throw new Error('a kiválasztott csatornákon (és részben) nincs hang');
     const floor = clamp(o.decayFloor, 0, 15);
-    let song, total, stats, rate, sr = null, polyInfo = null;
+    let song, total, stats, pause = 0, rate, sr = null, polyInfo = null;
     if (o.mode === 'poly') {
       if (!(o.polyDiv >= POLY_DIV_MIN && o.polyDiv <= POLY_DIV_MAX))
         throw new Error('mintaóra-osztó: ' + POLY_DIV_MIN + '..' + POLY_DIV_MAX);
@@ -628,7 +632,7 @@
         ...polyMixTable(o.polyKnee, 15, o.polyMix, o.polyVolume)];
       for (const f of ftab) data.push(f & 0xFF, f >> 8);
       song = Uint8Array.from(data.concat(r.body));
-      ({ total, stats } = r);
+      ({ total, stats, pause } = r);
       polyInfo = { div: o.polyDiv, tickn, slots: r.slots, cpu: polyCpuLoad(o.polyDiv), tableBytes: 256 * (1 + 8 * r.slots.length) };
       rate = tickRate;
     } else {
@@ -639,7 +643,7 @@
       let all = data.concat(r.body);
       if (drums.size) all = all.concat(buildKit(kitOffset, o.drumVolume));
       song = Uint8Array.from(all);
-      ({ total, stats } = r);
+      ({ total, stats, pause } = r);
       rate = o.rate;
     }
     const warnings = [];
@@ -648,9 +652,10 @@
     const used = [...new Set(notes.map((n) => n[2]))].sort((a, b) => a - b);
     if (used.length && o.mode !== 'poly' && noteFreq(used[0], o.tuning) < TVC_CLOCK / 4096)
       warnings.push('a 47,7 Hz alatti hangok egy oktávval feljebb szólnak');
-    // range: a mentett rész helye a teljes dal lejátszási idejében (másodperc)
+    // range: a mentett rész helye a teljes dal lejátszási idejében (másodperc),
+    // a hossza az ismétlés előtti szünet nélkül
     return { song, mode: o.mode, total, rate, sampleRate: sr, stats, notes, used, warnings, options: o, poly: polyInfo,
-      range: { start: shift, length: total / rate } };
+      range: { start: shift, length: (total - pause) / rate }, pause: pause / rate };
   }
 
   // ---- .cas összeállítása ---------------------------------------------------------
