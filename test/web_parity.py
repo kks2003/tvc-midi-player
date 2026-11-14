@@ -35,6 +35,8 @@ CASES = [
     (["--mode", "poly", "--from", "2", "--trim"], {"mode": "poly", "from": 2, "trim": True}),
     (["--mode", "poly", "--to", "30", "--speed", "1.5"], {"mode": "poly", "to": 30, "speed": 1.5}),
     (["--trim"], {"trim": True}),
+    (["--loop", "--loop-pause", "3"], {"loop": True, "loopPause": 3}),
+    (["--mode", "poly", "--loop", "--trim", "--loop-pause", "9"], {"mode": "poly", "loop": True, "trim": True, "loopPause": 9}),
     (["--mode", "poly", "--channels", "1,4,6,5,10"], {"mode": "poly", "channels": [1, 4, 6, 5, 10]}),
     (["--channels", "1,2,10", "--max-notes", "4"], {"channels": [1, 2, 10], "maxNotes": 4}),
     (["--mode", "mono", "--background", "--loop"], {"mode": "mono", "background": True, "loop": True}),

@@ -104,14 +104,22 @@ button:disabled, .btn[aria-disabled="true"] { opacity: .45; cursor: not-allowed;
 :focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
 
 /* csatornák */
-table { border-collapse: collapse; width: 100%; font-size: 13.5px; }
-.tablewrap { overflow-x: auto; }
+table { border-collapse: collapse; width: 100%; font-size: 13.5px; table-layout: fixed; }
+.tablewrap { min-width: 0; }
+col.c-on { width: 28px; } col.c-ch { width: 46px; } col.c-wave { width: 96px; }
+.nowave col.c-wave { width: 0; }
 th { text-align: left; font-weight: 500; color: var(--muted); font-size: 12px; padding: 0 6px 6px; }
-td { padding: 5px 6px; border-top: 1px solid var(--line); vertical-align: middle; }
+td { padding: 4px 4px; border-top: 1px solid var(--line); vertical-align: middle; }
+th { padding-left: 4px; padding-right: 4px; }
 td.num, th.num { text-align: right; font-variant-numeric: tabular-nums; font-family: var(--font-mono); font-size: 12.5px; }
 .nowave .wavecol { display: none; }
-td.wavecol select { font: inherit; font-size: 12.5px; color: inherit; background: var(--surface); border: 1px solid var(--line); border-radius: 4px; padding: 2px 4px; max-width: 110px; }
-td.name { max-width: 104px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+td.wavecol select { font: inherit; font-size: 12.5px; color: inherit; background: var(--surface); border: 1px solid var(--line); border-radius: 4px; padding: 2px 2px; width: 100%; }
+td.name { overflow: hidden; }
+td.name .nm { display: block; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+td.name .sub { display: block; font: 11.5px var(--font-mono); color: var(--muted); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.panelhead { display: flex; justify-content: space-between; align-items: center; gap: 8px; flex-wrap: wrap; }
+.seg.mini { display: inline-grid; grid-template-columns: repeat(2, auto); }
+.seg.mini label { padding: 3px 9px; font-size: 12.5px; }
 .tag { font: 500 11px/1 var(--font-mono); padding: 3px 5px; border-radius: 4px; background: var(--sunk); color: var(--muted); white-space: nowrap; }
 
 /* mód választó */
@@ -131,6 +139,13 @@ td.name { max-width: 104px; overflow: hidden; text-overflow: ellipsis; white-spa
   padding: 6px 8px; font-size: 14px; font-family: var(--font-mono);
 }
 .field.wide { grid-column: 1 / -1; }
+.fields.compact { grid-template-columns: repeat(auto-fill, minmax(104px, 1fr)); gap: 8px 10px; }
+.fields.compact .field label { font-size: 12px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.fields.compact .field input[type="number"], .fields.compact .field input[type="text"], .fields.compact .field select { padding: 4px 6px; font-size: 13px; }
+.fields.compact .check { font-size: 13px; }
+.pauserow label { font-size: 13px !important; color: inherit !important; overflow: visible !important; }
+.pauserow input[type="number"] { width: 4em !important; padding: 2px 6px !important; font-family: var(--font-mono); border: 1px solid var(--line); border-radius: var(--r); background: var(--surface); color: inherit; }
+.pauserow input:disabled + label, .pauserow input:disabled ~ span { opacity: .5; }
 .check { display: flex; align-items: center; gap: 8px; font-size: 14px; }
 details summary { cursor: pointer; font-size: 13.5px; color: var(--muted); }
 details[open] summary { margin-bottom: 10px; }
@@ -204,11 +219,18 @@ footer code, .hint code { font-family: var(--font-mono); font-size: 12.5px; }
       </section>
 
       <section class="panel" aria-labelledby="h-ch">
-        <h2 id="h-ch">Csatornák</h2>
+        <div class="panelhead">
+          <h2 id="h-ch">Csatornák</h2>
+          <div class="seg mini" role="radiogroup" aria-label="Mit mutasson a név oszlop">
+            <input type="radio" name="nameMode" id="nm-track" value="track" checked><label for="nm-track">Sáv neve</label>
+            <input type="radio" name="nameMode" id="nm-prog" value="prog"><label for="nm-prog">Hangszer</label>
+          </div>
+        </div>
         <div class="tablewrap">
           <table>
-            <thead><tr><th></th><th class="num">Cs.</th><th>Sáv</th><th class="num">Hang</th><th>Tartomány</th><th class="wavecol">Hullám</th></tr></thead>
-            <tbody id="chBody"><tr><td colspan="5" class="note">Nincs betöltött fájl.</td></tr></tbody>
+            <colgroup><col class="c-on"><col class="c-ch"><col><col class="c-wave"></colgroup>
+            <thead><tr><th></th><th class="num">Cs.</th><th id="nameHead">Sáv neve</th><th class="wavecol">Hullám</th></tr></thead>
+            <tbody id="chBody"><tr><td colspan="4" class="note">Nincs betöltött fájl.</td></tr></tbody>
           </table>
         </div>
         <p class="hint">A 10. csatorna a dob. Többszólamú módban a legmagasabb hang (dallam), a legmélyebb (basszus) és a következő legmagasabb kap szólamot, ezért érdemes a kísérő sávokat válogatni. Ott csatornánként hullámforma is választható.</p>
@@ -249,26 +271,23 @@ footer code, .hint code { font-family: var(--font-mono); font-size: 12.5px; }
 
       <section class="panel" aria-labelledby="h-snd">
         <h2 id="h-snd">Hang</h2>
-        <div class="fields">
+        <div class="fields compact">
           <div class="field"><label for="drums">Dob (10. cs.)</label>
             <select id="drums"><option value="synth">szintetizált</option><option value="pitched">dallamhangként</option><option value="off">kimarad</option></select></div>
           <div class="field"><label for="transpose">Transzponálás</label><input id="transpose" type="number" min="-48" max="48" value="0"></div>
-          <div class="field"><label for="decay">Lecsengés (tick/lépés)</label><input id="decay" type="number" min="0" max="15" value="4"></div>
-          <div class="field"><label for="decayFloor">…eddig halkul</label><input id="decayFloor" type="number" min="0" max="15" value="5"></div>
           <div class="field"><label for="speed">Tempószorzó</label><input id="speed" type="number" min="0.25" max="4" step="0.05" value="1"></div>
-          <div class="field"><label for="title">Cím (BASIC sor)</label><input id="title" type="text" maxlength="32"></div>
+          <div class="field"><label for="decay" title="Lecsengés: ennyi tickenként halkul egy lépést">Lecsengés</label><input id="decay" type="number" min="0" max="15" value="4"></div>
+          <div class="field"><label for="decayFloor" title="A lecsengés eddig a hangerőig halkít">…eddig halkul</label><input id="decayFloor" type="number" min="0" max="15" value="5"></div>
+          <div class="field"><label for="tuning" title="Hangolás: az A4 frekvenciája">A4 (Hz)</label><input id="tuning" type="number" min="400" max="480" step="0.5" value="440"></div>
+          <div class="field"><label for="curve" title="A leütési erősség görbéje">Erősség-görbe</label><input id="curve" type="number" min="0.2" max="3" step="0.1" value="0.7"></div>
+          <div class="field"><label for="minVolume">Min. hangerő</label><input id="minVolume" type="number" min="1" max="15" value="6"></div>
+          <div class="field"><label for="maxVolume">Max. hangerő</label><input id="maxVolume" type="number" min="1" max="15" value="15"></div>
+          <div class="field wide"><label for="title">Cím (BASIC sor)</label><input id="title" type="text" maxlength="32"></div>
+          <label class="check field wide"><input id="loop" type="checkbox"> Végtelenítve szóljon</label>
+          <div class="check field wide pauserow"><input id="loopPauseOn" type="checkbox" disabled><label for="loopPauseOn">Szünet ismétlés előtt:</label>
+            <input id="loopPause" type="number" min="1" max="9" step="1" value="2" disabled aria-label="Szünet hossza másodpercben"><span>mp</span></div>
+          <label class="check field wide"><input id="trim" type="checkbox"> Csend kihagyása az elején és az ismétlés előtt</label>
         </div>
-        <details>
-          <summary>További beállítások</summary>
-          <div class="fields">
-            <div class="field"><label for="tuning">Hangolás, A4 (Hz)</label><input id="tuning" type="number" min="400" max="480" step="0.5" value="440"></div>
-            <div class="field"><label for="curve">Erősség görbéje</label><input id="curve" type="number" min="0.2" max="3" step="0.1" value="0.7"></div>
-            <div class="field"><label for="minVolume">Min. hangerő</label><input id="minVolume" type="number" min="1" max="15" value="6"></div>
-            <div class="field"><label for="maxVolume">Max. hangerő</label><input id="maxVolume" type="number" min="1" max="15" value="15"></div>
-            <label class="check field wide"><input id="loop" type="checkbox"> Végtelenítve szóljon</label>
-            <label class="check field wide"><input id="trim" type="checkbox"> Csend kihagyása az elején és az ismétlés előtt</label>
-          </div>
-        </details>
       </section>
     </div>
 
@@ -408,21 +427,61 @@ footer code, .hint code { font-family: var(--font-mono); font-size: 12.5px; }
     for (const t of p.tracks) {
       for (const [ch, c] of Object.entries(t.channels)) {
         const k = +ch;
-        const m = map.get(k) || { ch: k + 1, notes: 0, lo: 127, hi: 0, names: [] };
+        const m = map.get(k) || { ch: k + 1, notes: 0, lo: 127, hi: 0, names: [], prog: null };
+        if (m.prog === null && t.programs && k in t.programs) m.prog = t.programs[k];
         m.notes += c.notes; m.lo = Math.min(m.lo, c.lo); m.hi = Math.max(m.hi, c.hi);
         if (t.name && !m.names.includes(t.name)) m.names.push(t.name.trim());
         map.set(k, m);
       }
     }
+    // hangszerváltás hang nélküli sávban is lehet (pl. a 0. sávban az összes csatornáé)
+    for (const t of p.tracks) for (const [ch, pr] of Object.entries(t.programs || {})) {
+      const m = map.get(+ch);
+      if (m && m.prog === null) m.prog = pr;
+    }
     return [...map.values()].sort((a, b) => a.ch - b.ch);
   }
+  const GM = ['Acoustic Grand Piano','Bright Acoustic Piano','Electric Grand Piano','Honky-tonk Piano','Electric Piano 1','Electric Piano 2','Harpsichord','Clavinet',
+    'Celesta','Glockenspiel','Music Box','Vibraphone','Marimba','Xylophone','Tubular Bells','Dulcimer',
+    'Drawbar Organ','Percussive Organ','Rock Organ','Church Organ','Reed Organ','Accordion','Harmonica','Tango Accordion',
+    'Acoustic Guitar (nylon)','Acoustic Guitar (steel)','Electric Guitar (jazz)','Electric Guitar (clean)','Electric Guitar (muted)','Overdriven Guitar','Distortion Guitar','Guitar Harmonics',
+    'Acoustic Bass','Electric Bass (finger)','Electric Bass (pick)','Fretless Bass','Slap Bass 1','Slap Bass 2','Synth Bass 1','Synth Bass 2',
+    'Violin','Viola','Cello','Contrabass','Tremolo Strings','Pizzicato Strings','Orchestral Harp','Timpani',
+    'String Ensemble 1','String Ensemble 2','Synth Strings 1','Synth Strings 2','Choir Aahs','Voice Oohs','Synth Voice','Orchestra Hit',
+    'Trumpet','Trombone','Tuba','Muted Trumpet','French Horn','Brass Section','Synth Brass 1','Synth Brass 2',
+    'Soprano Sax','Alto Sax','Tenor Sax','Baritone Sax','Oboe','English Horn','Bassoon','Clarinet',
+    'Piccolo','Flute','Recorder','Pan Flute','Blown Bottle','Shakuhachi','Whistle','Ocarina',
+    'Lead 1 (square)','Lead 2 (sawtooth)','Lead 3 (calliope)','Lead 4 (chiff)','Lead 5 (charang)','Lead 6 (voice)','Lead 7 (fifths)','Lead 8 (bass + lead)',
+    'Pad 1 (new age)','Pad 2 (warm)','Pad 3 (polysynth)','Pad 4 (choir)','Pad 5 (bowed)','Pad 6 (metallic)','Pad 7 (halo)','Pad 8 (sweep)',
+    'FX 1 (rain)','FX 2 (soundtrack)','FX 3 (crystal)','FX 4 (atmosphere)','FX 5 (brightness)','FX 6 (goblins)','FX 7 (echoes)','FX 8 (sci-fi)',
+    'Sitar','Banjo','Shamisen','Koto','Kalimba','Bagpipe','Fiddle','Shanai',
+    'Tinkle Bell','Agogo','Steel Drums','Woodblock','Taiko Drum','Melodic Tom','Synth Drum','Reverse Cymbal',
+    'Guitar Fret Noise','Breath Noise','Seashore','Bird Tweet','Telephone Ring','Helicopter','Applause','Gunshot'];
+  const GM_KITS = { 0: 'Standard', 8: 'Room', 16: 'Power', 24: 'Electronic', 25: 'TR-808', 32: 'Jazz', 40: 'Brush', 48: 'Orchestra', 56: 'SFX' };
+  function progName(c) {
+    if (c.ch === 10) return 'Dobkészlet' + (c.prog !== null && GM_KITS[c.prog] ? ' (' + GM_KITS[c.prog] + ')' : '');
+    return GM[c.prog === null ? 0 : c.prog] + (c.prog === null ? ' (alapértelmezett)' : '');
+  }
+  let nameMode = 'track';
+  function chName(c) { return nameMode === 'prog' ? progName(c) : (c.names.join(', ') || '–'); }
+  let lastChans = [];
+  function updateNames() {
+    $('nameHead').textContent = nameMode === 'prog' ? 'Hangszer' : 'Sáv neve';
+    const rows = $('chBody').children;
+    lastChans.forEach((c, i) => { const nm = rows[i] && rows[i].querySelector('.nm'); if (nm) nm.textContent = chName(c); });
+  }
+  for (const r of document.querySelectorAll('input[name="nameMode"]')) r.addEventListener('change', () => {
+    nameMode = document.querySelector('input[name="nameMode"]:checked').value;
+    updateNames();
+  });
   function renderChannels(chans) {
+    lastChans = chans;
     const body = $('chBody');
     body.textContent = '';
     for (const c of chans) {
       const tr = document.createElement('tr');
       const id = 'ch-' + c.ch;
-      tr.innerHTML = '<td><input type="checkbox" id="' + id + '" checked></td><td class="num"></td><td class="name"></td><td class="num"></td><td></td><td class="wavecol"></td>';
+      tr.innerHTML = '<td><input type="checkbox" id="' + id + '"' + (channelSel.has(c.ch) ? ' checked' : '') + '></td><td class="num"></td><td class="name"><span class="nm"></span><span class="sub"></span></td><td class="wavecol"></td>';
       const dot = document.createElement('i');
       dot.className = 'chdot';
       dot.style.background = chColor(c.ch - 1);
@@ -434,21 +493,20 @@ footer code, .hint code { font-family: var(--font-mono); font-size: 12.5px; }
       tr.addEventListener('mouseleave', () => setHover(null));
       tr.children[1].addEventListener('click', () => { pinCh = pinCh === c.ch - 1 ? null : c.ch - 1; setHover(null); });
       const nm = tr.children[2];
-      nm.textContent = c.names.join(', ') || '–';
-      nm.title = nm.textContent;
-      tr.children[3].textContent = c.notes;
-      if (c.ch === 10) tr.children[4].innerHTML = '<span class="tag">dob</span>';
-      else tr.children[4].textContent = noteName(c.lo) + '–' + noteName(c.hi);
+      nm.firstChild.textContent = chName(c);
+      nm.lastChild.textContent = c.notes + ' hang · ' + (c.ch === 10 ? 'dob' : noteName(c.lo) + '–' + noteName(c.hi));
+      nm.title = (c.names.join(', ') || '–') + '\n' + progName(c) + '\n' + nm.lastChild.textContent;
       if (c.ch !== 10) {
         const sel = document.createElement('select');
         sel.id = 'chw-' + c.ch;
         sel.setAttribute('aria-label', c.ch + '. csatorna hullámformája');
         sel.innerHTML = '<option value="">alap</option><option value="square">négyszög</option><option value="pulse">impulzus</option><option value="triangle">háromszög</option><option value="saw">fűrész</option><option value="sine">szinusz</option>';
+        if (channelWave[c.ch]) sel.value = channelWave[c.ch];
         sel.addEventListener('change', () => {
           if (sel.value) channelWave[c.ch] = sel.value; else delete channelWave[c.ch];
           regenerate();
         });
-        tr.children[5].appendChild(sel);
+        tr.children[3].appendChild(sel);
       }
       tr.querySelector('input').addEventListener('change', (e) => {
         if (e.target.checked) channelSel.add(c.ch); else channelSel.delete(c.ch);
@@ -469,6 +527,7 @@ footer code, .hint code { font-family: var(--font-mono); font-size: 12.5px; }
       transpose: num('transpose'), tuning: num('tuning'), speed: num('speed'),
       decay: num('decay'), decayFloor: num('decayFloor'), curve: num('curve'),
       minVolume: num('minVolume'), maxVolume: num('maxVolume'), loop: $('loop').checked,
+      loopPause: $('loop').checked && $('loopPauseOn').checked ? Math.max(1, Math.min(9, Math.round(num('loopPause')) || 1)) : 0,
       background: mode !== 'poly' && $('background').checked,
       from: rangeFrom, to: rangeTo, trim: $('trim').checked,
       wave: $('wave').value, polyDiv: num('polyDiv'),
@@ -1012,8 +1071,15 @@ footer code, .hint code { font-family: var(--font-mono); font-size: 12.5px; }
   // ---- események ------------------------------------------------------------------
   for (const el of document.querySelectorAll('input[name="mode"]')) el.addEventListener('change', () => { showModeFields(); regenerate(); });
   $('polyMix').addEventListener('change', showModeFields);
+  function syncPause() {
+    $('loopPauseOn').disabled = !$('loop').checked;
+    $('loopPause').disabled = !($('loop').checked && $('loopPauseOn').checked);
+  }
+  $('loop').addEventListener('change', syncPause);
+  $('loopPauseOn').addEventListener('change', syncPause);
+  syncPause();
   for (const id of ['polyVolume', 'polyKnee', 'polyMix', 'maxNotes', 'arpSpeed', 'arpBass', 'prio', 'drums', 'transpose', 'decay',
-    'decayFloor', 'speed', 'title', 'tuning', 'curve', 'minVolume', 'maxVolume', 'loop', 'background', 'wave', 'polyDiv', 'trim']) {
+    'decayFloor', 'speed', 'title', 'tuning', 'curve', 'minVolume', 'maxVolume', 'loop', 'loopPauseOn', 'loopPause', 'background', 'wave', 'polyDiv', 'trim']) {
     $(id).addEventListener(($(id).type === 'checkbox' || $(id).tagName === 'SELECT') ? 'change' : 'input', regenerate);
   }
   $('fileInput').addEventListener('change', (e) => {

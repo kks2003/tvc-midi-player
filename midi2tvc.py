@@ -550,7 +550,11 @@ def convert_poly(notes, drums, args, sr, tick_rate, ftab, ch_waves):
         for v in range(POLY_VOICES):
             if vslot[v] != 0:
                 out += bytes((0xBB + v, 0))
-        if not args.trim:
+        if args.loop_pause:
+            n = int(round(args.loop_pause * tick_rate))
+            encode_wait_poly(out, n)      # beállított szünet az ismétlés előtt
+            total += n
+        elif not args.trim:
             out.append(0xC0 + 0x0F)       # rövid szünet az ismétlés előtt
     out.append(0xFF)
     return bytes(out), total, stats, slots
@@ -672,7 +676,11 @@ def convert(notes, args, drums=None):
         pending_wait += 1
     encode_wait(out, pending_wait)
     out.append(0x80)
-    if args.loop and not args.trim:
+    if args.loop and args.loop_pause:
+        n = int(round(args.loop_pause * args.rate))
+        encode_wait(out, n)               # beállított szünet az ismétlés előtt
+        total += n
+    elif args.loop and not args.trim:
         out.append(0xC0 + 0x0F)           # rövid szünet az ismétlés előtt
     out.append(0xFF)
     return bytes(out), total, stats
@@ -724,6 +732,9 @@ def main():
     ap.add_argument("--min-volume", type=int, default=6)
     ap.add_argument("--max-volume", type=int, default=15)
     ap.add_argument("--loop", action="store_true", help="a dal végtelenítve szól")
+    ap.add_argument("--loop-pause", type=float, default=0, metavar="MP",
+                    help="ismétlésnél ennyi másodperc szünet a dal vége után "
+                         "(0 = csak a rövid alapszünet, --trim mellett az sincs)")
     ap.add_argument("--from", dest="start", type=float, default=None, metavar="MP",
                     help="csak a dal ettől a ponttól (másodperc az eredeti MIDI idejében)")
     ap.add_argument("--to", dest="end", type=float, default=None, metavar="MP",
