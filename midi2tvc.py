@@ -364,20 +364,23 @@ MAX_SLOTS = 5
 
 # poly dobkészlet: (hullámforma, kezdő hangjegy, vég Hz vagy None = nem csúszik,
 #                   hangerő, lecsengés tick/lépés, hossz tick)
-# zajnál a hangjegy a zaj színét adja (magasabb = világosabb)
+# zajnál a hangjegy a 256 bájtos zajtábla bejárási sebessége: ha a frekvencia a
+# mintavétel felét eléri, a frekvenciatábla levágja, és a zajból éles sípolás
+# lesz (a mintavétel felén).  Alacsony hangjegynél (45..64) mintánként új
+# zajtábla-bájt jön, a zaj minden mintavételnél (17..28-as osztó) egyenletes.
 POLY_KIT = {
     KICK:    ("square", 50, 45, 15, 1, 5),
     LOTOM:   ("square", 55, 90, 13, 1, 6),
     MIDTOM:  ("square", 59, 120, 13, 1, 6),
     HITOM:   ("square", 63, 160, 13, 1, 6),
     COWBELL: ("square", 79, 780, 10, 1, 4),
-    SNARE:   ("noise", 96, None, 13, 1, 8),
-    CLAP:    ("noise", 100, None, 12, 1, 6),
-    HAT:     ("noise", 115, None, 7, 1, 2),
-    OPENHAT: ("noise", 113, None, 8, 2, 10),
-    CRASH:   ("noise", 108, None, 11, 3, 30),
-    RIDE:    ("noise", 117, None, 6, 2, 8),
-    RIM:     ("noise", 104, None, 9, 1, 2),
+    SNARE:   ("noise", 60, None, 13, 1, 8),
+    CLAP:    ("noise", 62, None, 12, 1, 6),
+    HAT:     ("noise", 57, None, 7, 1, 2),
+    OPENHAT: ("noise", 57, None, 8, 2, 10),
+    CRASH:   ("noise", 45, None, 11, 3, 30),
+    RIDE:    ("noise", 52, None, 6, 2, 8),
+    RIM:     ("noise", 64, None, 9, 1, 2),
 }
 
 
