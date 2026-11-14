@@ -466,7 +466,7 @@
       encodeWait(out, n, 0xA0);       // beállított szünet az ismétlés előtt
       total += n;
       pause = n;
-    } else if (o.loop && !o.trim) out.push(0xC0 + 0x0F);
+    }
     out.push(0xFF);
     return { body: out, total, stats, pause };
   }
@@ -573,7 +573,7 @@
         encodeWait(out, n, 0xBF);     // beállított szünet az ismétlés előtt
         total += n;
         pause = n;
-      } else if (!o.trim) out.push(0xC0 + 0x0F);
+      }
     }
     out.push(0xFF);
     return { body: out, total, stats, slots, pause };

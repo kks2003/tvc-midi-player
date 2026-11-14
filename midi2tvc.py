@@ -562,8 +562,6 @@ def convert_poly(notes, drums, args, sr, tick_rate, ftab, ch_waves):
             n = int(round(args.loop_pause * tick_rate))
             encode_wait_poly(out, n)      # beállított szünet az ismétlés előtt
             total += n
-        elif not args.trim:
-            out.append(0xC0 + 0x0F)       # rövid szünet az ismétlés előtt
     out.append(0xFF)
     return bytes(out), total, stats, slots
 
@@ -688,8 +686,6 @@ def convert(notes, args, drums=None):
         n = int(round(args.loop_pause * args.rate))
         encode_wait(out, n)               # beállított szünet az ismétlés előtt
         total += n
-    elif args.loop and not args.trim:
-        out.append(0xC0 + 0x0F)           # rövid szünet az ismétlés előtt
     out.append(0xFF)
     return bytes(out), total, stats
 
@@ -744,13 +740,13 @@ def main():
                     help="a szintetizált dob hangereje százalékban (alap: 100, a 15-ös szint felett telít)")
     ap.add_argument("--loop-pause", type=float, default=0, metavar="MP",
                     help="ismétlésnél ennyi másodperc szünet a dal vége után "
-                         "(0 = csak a rövid alapszünet, --trim mellett az sincs)")
+                         "(alap: 0 = az ismétlés szünet nélkül folytatódik)")
     ap.add_argument("--from", dest="start", type=float, default=None, metavar="MP",
                     help="csak a dal ettől a ponttól (másodperc az eredeti MIDI idejében)")
     ap.add_argument("--to", dest="end", type=float, default=None, metavar="MP",
                     help="csak a dal eddig a pontig (másodperc az eredeti MIDI idejében)")
     ap.add_argument("--trim", action="store_true",
-                    help="az elején a csend és az ismétlés előtti szünet kimarad")
+                    help="az első hang előtti csend kimarad (és a --to előtti csend is)")
     ap.add_argument("--background", action="store_true",
                     help="egycsatornás lejátszó: háttérben szól, a BASIC közben fut "
                          "(EXT 0 leállítja, EXT 1 újraindítja)")
