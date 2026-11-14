@@ -40,7 +40,8 @@ A `web/index.html` böngészőben végzi el ugyanezt, telepítés nélkül:
   „Eleje = itt” / „Vége = itt” gombokkal; csak a kijelölt rész szól és
   kerül a `.cas`-ba, a kimaradó rész a tekercsen sötétebb. A „Teljes” gomb
   (ez az alap) visszaállítja a teljes dalt. „Csend kihagyása”: az első hang
-  előtti csend és az ismétlés előtti szünet kimarad,
+  előtti csend (és a kijelölt rész végén az utolsó hang utáni) kimarad;
+  ismétlésnél a dal szünet nélkül folytatódik, ha nincs beállítva szünet,
 - lejátszás, „Elölről”, ismétlésnél hurokban; a beállítások változása
   lejátszás közben is hallható,
 - `.cas` letöltése (ékezet nélküli fájlnévvel), és **megnyitás az Ep128web-ben**: a program a linkben
@@ -85,10 +86,10 @@ Helyben a `web/index.html` közvetlenül megnyitható (`file://` is jó). A
 | `--curve`, `--min-volume`, `--max-volume` | MIDI erősség (velocity × CC7 × CC11) leképezése a 4 bites hangerőre |
 | `--loop` | a dal végtelenítve szól |
 | `--drum-volume SZÁZALÉK` | a szintetizált dob hangereje (alap: 100; a webes felületen 10–150%) |
-| `--loop-pause MP` | ismétlésnél ennyi másodperc szünet a dal vége után (a webes felületen 1–9 mp; 0 = csak a rövid alapszünet) |
+| `--loop-pause MP` | ismétlésnél ennyi másodperc szünet a dal vége után (a webes felületen 1–9 mp; alap: 0 = szünet nélkül folytatódik) |
 | `--background` | egycsatornás lejátszó: háttérben szól, a BASIC közben fut (lásd lent) |
 | `--from MP`, `--to MP` | csak a dal egy része (másodperc az eredeti MIDI idejében, a `--speed` előtt); a belelógó hangok a határon kezdődnek / végződnek |
-| `--trim` | az első hang előtti csend és az ismétlés előtti szünet kimarad |
+| `--trim` | az első hang előtti csend kimarad (a `--to`-val kijelölt rész végén az utolsó hang utáni is) |
 | `--title` | a betöltés után kiírt cím (alapból a fájlnév); a magyar ékezetes betűk a TVC kódjaival (Á..Ű = `80h..88h`, á..ű = `90h..98h`), legfeljebb 32 karakter |
 
 A kimeneti fájl neve ékezet nélküli (`Árvíztűrő.mid` → `build/Arvizturo.cas`).
