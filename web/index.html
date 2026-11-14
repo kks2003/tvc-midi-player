@@ -274,6 +274,7 @@ footer code, .hint code { font-family: var(--font-mono); font-size: 12.5px; }
         <div class="fields compact">
           <div class="field"><label for="drums">Dob (10. cs.)</label>
             <select id="drums"><option value="synth">szintetizált</option><option value="pitched">dallamhangként</option><option value="off">kimarad</option></select></div>
+          <div class="field"><label for="drumVolume" title="A szintetizált dob hangereje százalékban (100 = alap; a legnagyobb szint felett telít)">Dob hangerő %</label><input id="drumVolume" type="number" min="10" max="150" step="10" value="100"></div>
           <div class="field"><label for="transpose">Transzponálás</label><input id="transpose" type="number" min="-48" max="48" value="0"></div>
           <div class="field"><label for="speed">Tempószorzó</label><input id="speed" type="number" min="0.25" max="4" step="0.05" value="1"></div>
           <div class="field"><label for="decay" title="Lecsengés: ennyi tickenként halkul egy lépést">Lecsengés</label><input id="decay" type="number" min="0" max="15" value="4"></div>
@@ -282,7 +283,7 @@ footer code, .hint code { font-family: var(--font-mono); font-size: 12.5px; }
           <div class="field"><label for="curve" title="A leütési erősség görbéje">Erősség-görbe</label><input id="curve" type="number" min="0.2" max="3" step="0.1" value="0.7"></div>
           <div class="field"><label for="minVolume">Min. hangerő</label><input id="minVolume" type="number" min="1" max="15" value="6"></div>
           <div class="field"><label for="maxVolume">Max. hangerő</label><input id="maxVolume" type="number" min="1" max="15" value="15"></div>
-          <div class="field wide"><label for="title">Cím (BASIC sor)</label><input id="title" type="text" maxlength="32"></div>
+          <div class="field" style="grid-column: span 2"><label for="title">Cím (BASIC sor)</label><input id="title" type="text" maxlength="32"></div>
           <label class="check field wide"><input id="loop" type="checkbox"> Végtelenítve szóljon</label>
           <div class="check field wide pauserow"><input id="loopPauseOn" type="checkbox" disabled><label for="loopPauseOn">Szünet ismétlés előtt:</label>
             <input id="loopPause" type="number" min="1" max="9" step="1" value="2" disabled aria-label="Szünet hossza másodpercben"><span>mp</span></div>
@@ -527,6 +528,7 @@ footer code, .hint code { font-family: var(--font-mono); font-size: 12.5px; }
       transpose: num('transpose'), tuning: num('tuning'), speed: num('speed'),
       decay: num('decay'), decayFloor: num('decayFloor'), curve: num('curve'),
       minVolume: num('minVolume'), maxVolume: num('maxVolume'), loop: $('loop').checked,
+      drumVolume: Math.max(10, Math.min(150, num('drumVolume') || 100)),
       loopPause: $('loop').checked && $('loopPauseOn').checked ? Math.max(1, Math.min(9, Math.round(num('loopPause')) || 1)) : 0,
       background: mode !== 'poly' && $('background').checked,
       from: rangeFrom, to: rangeTo, trim: $('trim').checked,
@@ -1071,6 +1073,8 @@ footer code, .hint code { font-family: var(--font-mono); font-size: 12.5px; }
   // ---- események ------------------------------------------------------------------
   for (const el of document.querySelectorAll('input[name="mode"]')) el.addEventListener('change', () => { showModeFields(); regenerate(); });
   $('polyMix').addEventListener('change', showModeFields);
+  function syncDrums() { $('drumVolume').disabled = $('drums').value !== 'synth'; }
+  $('drums').addEventListener('change', syncDrums);
   function syncPause() {
     $('loopPauseOn').disabled = !$('loop').checked;
     $('loopPause').disabled = !($('loop').checked && $('loopPauseOn').checked);
@@ -1079,7 +1083,7 @@ footer code, .hint code { font-family: var(--font-mono); font-size: 12.5px; }
   $('loopPauseOn').addEventListener('change', syncPause);
   syncPause();
   for (const id of ['polyVolume', 'polyKnee', 'polyMix', 'maxNotes', 'arpSpeed', 'arpBass', 'prio', 'drums', 'transpose', 'decay',
-    'decayFloor', 'speed', 'title', 'tuning', 'curve', 'minVolume', 'maxVolume', 'loop', 'loopPauseOn', 'loopPause', 'background', 'wave', 'polyDiv', 'trim']) {
+    'decayFloor', 'speed', 'title', 'tuning', 'curve', 'minVolume', 'maxVolume', 'drumVolume', 'loop', 'loopPauseOn', 'loopPause', 'background', 'wave', 'polyDiv', 'trim']) {
     $(id).addEventListener(($(id).type === 'checkbox' || $(id).tagName === 'SELECT') ? 'change' : 'input', regenerate);
   }
   $('fileInput').addEventListener('change', (e) => {
@@ -1128,6 +1132,7 @@ footer code, .hint code { font-family: var(--font-mono); font-size: 12.5px; }
     }
   } catch (e) { /* alapbeállítások */ }
   syncPause();   // a visszaállított „Végtelenítve” szerint
+  syncDrums();
   window.addEventListener('pageshow', syncPause);   // a böngésző is visszatöltheti az űrlapot
   showModeFields();
   renderLegend();

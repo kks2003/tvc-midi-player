@@ -299,7 +299,12 @@ GM_DRUMS = {35: KICK, 36: KICK, 37: RIM, 38: SNARE, 40: SNARE, 39: CLAP,
 DRUM_PRIORITY = [KICK, SNARE, CLAP, CRASH, LOTOM, MIDTOM, HITOM, OPENHAT, RIDE, COWBELL, RIM, HAT]
 
 
-def drum_kit_bytes():
+def drum_level(v, pct):
+    """A dob egy hangereje (0..15) a --drum-volume százalékkal, 15-ön telít."""
+    return min(15, int(round(v * pct / 100.0)))
+
+
+def drum_kit_bytes(pct=100):
     """-> dobonként a lépések bájtjai (a címtáblát build_kit teszi elé)."""
     steps = []
     for _, kit in DRUM_KIT:
@@ -310,14 +315,14 @@ def drum_kit_bytes():
             else:
                 p = max(0, min(4094, int(round(pitch_value(hz)))))
                 lo, hi = p & 0xFF, p >> 8
-            b += bytes((tvol, lo, hi, (nvol << 4) | min(8, nlen)))
+            b += bytes((drum_level(tvol, pct), lo, hi, (drum_level(nvol, pct) << 4) | min(8, nlen)))
         b.append(0xFF)
         steps.append(bytes(b))
     return steps
 
 
-def build_kit(kit_offset):
-    steps = drum_kit_bytes()
+def build_kit(kit_offset, pct=100):
+    steps = drum_kit_bytes(pct)
     head = 1 + 2 * len(steps)
     out = bytearray([len(steps)])
     pos = kit_offset + head
@@ -511,7 +516,7 @@ def convert_poly(notes, drums, args, sr, tick_rate, ftab, ch_waves):
                     if end_hz is not None:
                         f1 = int(round(end_hz * 65536 / sr))
                         slide = int(round((f1 - ftab[note]) / float(dur))) & 0xFFFF
-                    vol = max(1, vol - att)
+                    vol = max(1, drum_level(vol, args.drum_volume) - att)
                     set_wave(v, wave)
                     emit(bytes((0xB8 + v, note, (vol << 4) | dec, slide & 0xFF, slide >> 8)))
                     reserved[v] = t + dur
@@ -732,6 +737,8 @@ def main():
     ap.add_argument("--min-volume", type=int, default=6)
     ap.add_argument("--max-volume", type=int, default=15)
     ap.add_argument("--loop", action="store_true", help="a dal végtelenítve szól")
+    ap.add_argument("--drum-volume", type=float, default=100, metavar="SZÁZALÉK",
+                    help="a szintetizált dob hangereje százalékban (alap: 100, a 15-ös szint felett telít)")
     ap.add_argument("--loop-pause", type=float, default=0, metavar="MP",
                     help="ismétlésnél ennyi másodperc szünet a dal vége után "
                          "(0 = csak a rövid alapszünet, --trim mellett az sincs)")
@@ -787,7 +794,7 @@ def main():
                          max(0, min(15, args.decay_floor)), 0, kit_offset)
     data = header + b"".join(struct.pack("<H", p) for p in table) + body
     if drums:
-        data += build_kit(kit_offset)
+        data += build_kit(kit_offset, args.drum_volume)
 
     os.makedirs(os.path.dirname(os.path.abspath(args.output)), exist_ok=True)
     with open(args.output, "wb") as f:

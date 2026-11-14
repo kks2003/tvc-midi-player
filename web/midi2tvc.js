@@ -286,7 +286,9 @@
     41: LOTOM, 43: LOTOM, 45: MIDTOM, 47: MIDTOM, 48: HITOM, 50: HITOM, 56: COWBELL };
   const DRUM_PRIORITY = [KICK, SNARE, CLAP, CRASH, LOTOM, MIDTOM, HITOM, OPENHAT, RIDE, COWBELL, RIM, HAT];
 
-  function buildKit(kitOffset) {
+  // a dob egy hangereje (0..15) a drumVolume százalékkal, 15-ön telít
+  const drumLevel = (v, pct) => Math.min(15, pyRound(v * pct / 100));
+  function buildKit(kitOffset, pct) {
     const steps = DRUM_KIT.map(([, kit]) => {
       const b = [];
       for (const [hz, tvol, nvol, nlen] of kit) {
@@ -295,7 +297,7 @@
           const p = clamp(pyRound(pitchValue(hz)), 0, 4094);
           lo = p & 0xFF; hi = p >> 8;
         }
-        b.push(tvol, lo, hi, (nvol << 4) | Math.min(8, nlen));
+        b.push(drumLevel(tvol, pct), lo, hi, (drumLevel(nvol, pct) << 4) | Math.min(8, nlen));
       }
       b.push(0xFF);
       return b;
@@ -528,7 +530,7 @@
             let slide = 0;
             if (endHz !== null) slide = pyRound((pyRound(endHz * 65536 / sr) - ftab[note]) / dur) & 0xFFFF;
             setWave(v, wave);
-            emit(0xB8 + v, note, (Math.max(1, vol0 - att) << 4) | dec, slide & 0xFF, slide >> 8);
+            emit(0xB8 + v, note, (Math.max(1, drumLevel(vol0, o.drumVolume) - att) << 4) | dec, slide & 0xFF, slide >> 8);
             reserved[v] = t + dur;
             cur[v] = null;
           }
@@ -576,7 +578,7 @@
   const DEFAULTS = {
     mode: 'arp', prio: 'high', maxNotes: 3, arpBass: false, arpSpeed: 1, polyVolume: 9, polyKnee: 10, polyMix: 'clean',
     channels: null, drums: 'synth', transpose: 0, tuning: 440.0, speed: 1.0, rate: FRAME_RATE,
-    decay: 0, decayFloor: 6, curve: 0.7, minVolume: 6, maxVolume: 15, loop: false, loopPause: 0, background: false, from: null, to: null, trim: false,
+    decay: 0, decayFloor: 6, curve: 0.7, minVolume: 6, maxVolume: 15, loop: false, loopPause: 0, drumVolume: 100, background: false, from: null, to: null, trim: false,
     polyDiv: 19, wave: 'square', channelWave: null,     // channelWave: {csatorna (1..16): hullámforma}
   };
 
@@ -635,7 +637,7 @@
       const data = [(o.loop ? 1 : 0) | (o.background ? 2 : 0), o.arpSpeed, o.decay, floor, 0, 0, kitOffset & 0xFF, kitOffset >> 8];
       for (const p of pitchTable(o.tuning)) data.push(p & 0xFF, p >> 8);
       let all = data.concat(r.body);
-      if (drums.size) all = all.concat(buildKit(kitOffset));
+      if (drums.size) all = all.concat(buildKit(kitOffset, o.drumVolume));
       song = Uint8Array.from(all);
       ({ total, stats } = r);
       rate = o.rate;
@@ -708,7 +710,7 @@
     ['arpSpeed', '--arp-speed'], ['polyVolume', '--poly-volume'], ['polyKnee', '--poly-knee'], ['polyMix', '--poly-mix'],
     ['channels', '--channels'], ['drums', '--drums'], ['transpose', '--transpose'], ['tuning', '--tuning'],
     ['speed', '--speed'], ['decay', '--decay'], ['decayFloor', '--decay-floor'], ['curve', '--curve'],
-    ['minVolume', '--min-volume'], ['maxVolume', '--max-volume'], ['loop', '--loop'], ['loopPause', '--loop-pause'],
+    ['minVolume', '--min-volume'], ['maxVolume', '--max-volume'], ['loop', '--loop'], ['loopPause', '--loop-pause'], ['drumVolume', '--drum-volume'],
     ['background', '--background'], ['from', '--from'], ['to', '--to'], ['trim', '--trim'], ['polyDiv', '--poly-div'], ['wave', '--wave'], ['channelWave', '--channel-wave'],
   ];
   function cliArgs(opts) {
