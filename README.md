@@ -132,7 +132,7 @@ ride > kolomp > perem > zárt cin). A dobütés erőssége halkítja a dobot.
 - Mindkét dobkészlet a dallal együtt kerül a gépre, így a lejátszó
   újrafordítása nélkül hangolható. A GM hangok hozzárendelése: `GM_DRUMS`.
 
-## Hardver (a [tvcdoc](https://github.com/kks2003/tvcdoc) alapján)
+## Hardver
 
 - 12 bites PITCH: alsó 8 bit a `04h`, felső 4 bit a `05h` b0–b3 bitjein.
   A frekvencia `f = 195312,5 / (4096 − PITCH)` Hz. A PITCH-táblát a konverter
@@ -200,8 +200,7 @@ ride > kolomp > perem > zárt cin). A dobütés erőssége halkítja a dobot.
 
 Az alapötlet (a hang-IT mint mintaóra, hullámtáblák, a zene feldolgozása a
 megszakításból, engedélyezett megszakítással) Szalontai Béla „Többcsatornás
-hanggeneráló programcsomag”-jából való (tvcdoc:
-`sources/3 csatornás asm lejátszó`, MIT licenc). Az első változat
+hanggeneráló programcsomag”-jából való (MIT licenc). Az első változat
 megszakítás nélküli, számolt idejű hurokban kevert: ott tick közben megállt
 a hang, a hangmagasságot kalibrálni kellett, és a teljes CPU-t elvitte.
 
@@ -328,5 +327,24 @@ FILE: eszköze ott keresi a fájlokat.
 
 - Poly: 4. szólam; csatornánkénti szólam-hozzárendelés (`--voice 1=melody`).
 - Poly: háttér-mód gépi kódú programok mellé (belépési pontok: indítás,
-  leállítás, képkocka-szinkron), a tvcdoc 2 csatornás, CRTC-szinkronos
+  leállítás, képkocka-szinkron), egy 2 csatornás, CRTC-szinkronos
   lejátszójának mintájára.
+
+## Köszönet
+
+Akiktől ötletet és tudást vettünk át:
+
+- **Szalontai Béla** (Fast & Force): „Többcsatornás hanggeneráló
+  programcsomag” (MIT licenc).
+  A többszólamú lejátszó alapötletei innen vannak: a hangszámláló mint
+  mintaóra, a hullámtáblák, a zene feldolgozása a megszakításból,
+  engedélyezett megszakítással.
+- **Ludányi László**: „A TV-Computer ROM programja” (1988) és **Kaszanyiczki
+  László**: „A Videoton TV-Computer ROM listája”: a ROM
+  megszakításkezelője, a `HIMEM` és a `HI-MEM-SET`, az USRTAB, a BASIC
+  tokenek és a programfájl formátuma.
+- **Benedek Antal, Monok Zoltán**: „TV-Computer Hardware” (1988): a
+  hanggenerátor, a portok és a megszakítások.
+- **Varga István**: [ep128emu](https://github.com/istvan-v/ep128emu), az
+  [Ep128web](https://github.com/kks2003/Ep128web) emulátormagja: a
+  hanggenerátor pontos működése (a `05h` b4 bit), és ezen futnak a tesztek.

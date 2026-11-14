@@ -165,7 +165,9 @@ pre.basic {
 .actions { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; }
 .note { font-size: 13px; color: var(--muted); }
 .status { font-size: 13px; min-height: 1.2em; }
-footer { color: var(--muted); font-size: 13px; }
+footer { color: var(--muted); font-size: 13px; display: grid; gap: 8px; }
+footer p { margin: 0; max-width: 110ch; }
+footer .credits b { color: var(--ink); font-weight: 500; }
 footer code, .hint code { font-family: var(--font-mono); font-size: 12.5px; }
 @media (prefers-reduced-motion: reduce) { * { transition: none !important; } }
 </style>
@@ -321,7 +323,12 @@ footer code, .hint code { font-family: var(--font-mono); font-size: 12.5px; }
   </div>
 
   <footer>
-    <a href="https://github.com/kks2003/tvc-midi-player" target="_blank" rel="noopener">tvc-midi-player</a> (forráskód, parancssori konverter, assembly lejátszók, leírás) · a konverter a <code>midi2tvc.py</code> bájtra azonos JavaScript-portja; a lejátszók: <code>player_poly.asm</code>, <code>player.asm</code>.
+    <p><a href="https://github.com/kks2003/tvc-midi-player" target="_blank" rel="noopener">tvc-midi-player</a> (forráskód, parancssori konverter, assembly lejátszók, leírás) · a konverter a <code>midi2tvc.py</code> bájtra azonos JavaScript-portja; a lejátszók: <code>player_poly.asm</code>, <code>player.asm</code>.</p>
+    <p class="credits"><b>Köszönet, akiktől ötletet és tudást vettünk át:</b>
+      Szalontai Béla (Fast &amp; Force): „Többcsatornás hanggeneráló programcsomag” (MIT licenc) – a többszólamú lejátszó alapötletei: a hangszámláló mint mintaóra, a hullámtáblák, a zene feldolgozása a megszakításból ·
+      Ludányi László: „A TV-Computer ROM programja” és Kaszanyiczki László: „A Videoton TV-Computer ROM listája” – a ROM megszakításkezelője, a HIMEM, az USRTAB, a BASIC tokenek ·
+      Benedek Antal, Monok Zoltán: „TV-Computer Hardware” – a hanggenerátor és a portok ·
+      Varga István: <a href="https://github.com/istvan-v/ep128emu" target="_blank" rel="noopener">ep128emu</a> – az Ep128web emulátormagja, a hanggenerátor pontos működése és a tesztek.</p>
   </footer>
 </div>
 
