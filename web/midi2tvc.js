@@ -329,13 +329,13 @@
     [MIDTOM]: ['square', 59, 120, 13, 1, 6],
     [HITOM]: ['square', 63, 160, 13, 1, 6],
     [COWBELL]: ['square', 79, 780, 10, 1, 4],
-    [SNARE]: ['noise', 96, null, 13, 1, 8],
-    [CLAP]: ['noise', 100, null, 12, 1, 6],
-    [HAT]: ['noise', 115, null, 7, 1, 2],
-    [OPENHAT]: ['noise', 113, null, 8, 2, 10],
-    [CRASH]: ['noise', 108, null, 11, 3, 30],
-    [RIDE]: ['noise', 117, null, 6, 2, 8],
-    [RIM]: ['noise', 104, null, 9, 1, 2],
+    [SNARE]: ['noise', 60, null, 13, 1, 8],
+    [CLAP]: ['noise', 62, null, 12, 1, 6],
+    [HAT]: ['noise', 57, null, 7, 1, 2],
+    [OPENHAT]: ['noise', 57, null, 8, 2, 10],
+    [CRASH]: ['noise', 45, null, 11, 3, 30],
+    [RIDE]: ['noise', 52, null, 6, 2, 8],
+    [RIM]: ['noise', 64, null, 9, 1, 2],
   };
 
   // -> [mintafrekvencia, minta/tick, tick/s]
