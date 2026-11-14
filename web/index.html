@@ -186,6 +186,10 @@ pre.basic {
   font: 13.5px/1.6 var(--font-mono); overflow-x: auto;
 }
 .actions { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; }
+.namerow { display: flex; align-items: center; gap: 6px; font-size: 13.5px; }
+.namerow label { color: var(--muted); }
+.namerow input { width: 13em; max-width: 60vw; font: 14px var(--font-mono); border: 1px solid var(--line); border-radius: var(--r); background: var(--surface); color: inherit; padding: 5px 7px; }
+.namerow span { font-family: var(--font-mono); color: var(--muted); }
 .note { font-size: 13px; color: var(--muted); }
 .status { font-size: 13px; min-height: 1.2em; }
 footer { color: var(--muted); font-size: 13px; display: grid; gap: 8px; }
@@ -339,6 +343,11 @@ footer code, .hint code { font-family: var(--font-mono); font-size: 12.5px; }
       <section class="panel" aria-labelledby="h-out">
         <h2 id="h-out">Kimenet</h2>
         <pre class="basic" id="basic"></pre>
+        <div class="namerow">
+          <label for="fname">Fájlnév</label>
+          <input id="fname" type="text" maxlength="16" spellcheck="false" autocomplete="off" aria-describedby="fnameHint"><span>.cas</span>
+        </div>
+        <p class="hint" id="fnameHint">Legfeljebb 16 karakter, ékezet és szóköz nélkül (a TVC így kezeli); üresen a MIDI-fájl nevét kapja.</p>
         <div class="actions">
           <button id="dlBtn" class="primary" type="button" disabled>.cas letöltése</button>
           <button id="srcBtn" type="button" disabled>Forrás letöltése (.zip)</button>
@@ -412,6 +421,8 @@ footer code, .hint code { font-family: var(--font-mono); font-size: 12.5px; }
     fileBase = name.replace(/\.[^.]*$/, '') || 'dal';
     $('srcName').textContent = name;
     $('title').value = fileBase.slice(0, 32);
+    $('fname').value = defaultName();
+    $('fname').placeholder = defaultName();
     const chans = channelInfo(p);
     channelSel = new Set(chans.map((c) => c.ch));
     channelWave = {};
@@ -1006,7 +1017,13 @@ footer code, .hint code { font-family: var(--font-mono); font-size: 12.5px; }
   $('rAll').addEventListener('click', () => setRange(null, null));
 
   // ---- kimenet -----------------------------------------------------------------
-  const baseName = () => (M.asciiName(fileBase).slice(0, 16) || 'dal').toLowerCase();   // a TVC 16 karakteres nevet kezel
+  // a TVC 16 karakteres, ékezet nélküli nevet kezel; alapból a MIDI-fájl neve, a Fájlnév mezőben átírható
+  function defaultName() { return (M.asciiName(fileBase).slice(0, 16) || 'dal').toLowerCase(); }
+  const baseName = () => M.asciiName($('fname').value.trim().replace(/\.cas$/i, '')).slice(0, 16) || defaultName();
+  $('fname').addEventListener('input', updateEmuLink);
+  $('fname').addEventListener('change', () => { $('fname').value = baseName(); updateEmuLink(); });
+  // az emulátor megnyitásakor az előnézet lejátszása álljon le
+  $('emuLink').addEventListener('click', () => { if (srcNode) stop(); });
   const casName = () => baseName() + '.cas';
   // fájl mentése: az artifact-nézetben a downloads képességgel (ott .cas
   // nem, .zip igen), különben hagyományos letöltéssel
