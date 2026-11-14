@@ -84,6 +84,7 @@ Helyben a `web/index.html` közvetlenül megnyitható (`file://` is jó). A
 | `--decay N`, `--decay-floor V` | lecsengés: N tickenként eggyel halkul, legfeljebb V-ig |
 | `--curve`, `--min-volume`, `--max-volume` | MIDI erősség (velocity × CC7 × CC11) leképezése a 4 bites hangerőre |
 | `--loop` | a dal végtelenítve szól |
+| `--loop-pause MP` | ismétlésnél ennyi másodperc szünet a dal vége után (a webes felületen 1–9 mp; 0 = csak a rövid alapszünet) |
 | `--background` | egycsatornás lejátszó: háttérben szól, a BASIC közben fut (lásd lent) |
 | `--from MP`, `--to MP` | csak a dal egy része (másodperc az eredeti MIDI idejében, a `--speed` előtt); a belelógó hangok a határon kezdődnek / végződnek |
 | `--trim` | az első hang előtti csend és az ismétlés előtti szünet kimarad |

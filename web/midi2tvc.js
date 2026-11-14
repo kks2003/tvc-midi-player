@@ -418,7 +418,7 @@
 
   function convert(notes, o, drums) {
     const ticks = buildTicks(notes, o.rate);
-    const total = maxOf(ticks.map((t) => t[1]).concat([...drums.keys()].map((t) => t + 6),
+    let total = maxOf(ticks.map((t) => t[1]).concat([...drums.keys()].map((t) => t + 6),
       o.minLen ? [pyRound(o.minLen * o.rate)] : []));
     const starts = groupStarts(ticks);
     const active = new Map();
@@ -458,14 +458,18 @@
     }
     encodeWait(out, pending, 0xA0);
     out.push(0x80);
-    if (o.loop && !o.trim) out.push(0xC0 + 0x0F);
+    if (o.loop && o.loopPause) {
+      const n = pyRound(o.loopPause * o.rate);
+      encodeWait(out, n, 0xA0);       // beállított szünet az ismétlés előtt
+      total += n;
+    } else if (o.loop && !o.trim) out.push(0xC0 + 0x0F);
     out.push(0xFF);
     return { body: out, total, stats };
   }
 
   function convertPoly(notes, drums, o, sr, tickRate, ftab, chWaves) {
     const ticks = buildTicks(notes, tickRate);
-    const total = maxOf(ticks.map((t) => t[1]).concat([...drums.keys()].map((t) => t + 8), [1],
+    let total = maxOf(ticks.map((t) => t[1]).concat([...drums.keys()].map((t) => t + 8), [1],
       o.minLen ? [pyRound(o.minLen * tickRate)] : []));
     const starts = groupStarts(ticks);
     const vmax = o.polyVolume;
@@ -559,7 +563,11 @@
     if (o.loop) {
       // ismétlés előtt a szólamok a kezdő hullámformára (a dal eleje a 0. helyet feltételezi)
       for (let v = 0; v < POLY_VOICES; v++) if (vslot[v] !== 0) out.push(0xBB + v, 0);
-      if (!o.trim) out.push(0xC0 + 0x0F);
+      if (o.loopPause) {
+        const n = pyRound(o.loopPause * tickRate);
+        encodeWait(out, n, 0xBF);     // beállított szünet az ismétlés előtt
+        total += n;
+      } else if (!o.trim) out.push(0xC0 + 0x0F);
     }
     out.push(0xFF);
     return { body: out, total, stats, slots };
@@ -568,7 +576,7 @@
   const DEFAULTS = {
     mode: 'arp', prio: 'high', maxNotes: 3, arpBass: false, arpSpeed: 1, polyVolume: 9, polyKnee: 10, polyMix: 'clean',
     channels: null, drums: 'synth', transpose: 0, tuning: 440.0, speed: 1.0, rate: FRAME_RATE,
-    decay: 0, decayFloor: 6, curve: 0.7, minVolume: 6, maxVolume: 15, loop: false, background: false, from: null, to: null, trim: false,
+    decay: 0, decayFloor: 6, curve: 0.7, minVolume: 6, maxVolume: 15, loop: false, loopPause: 0, background: false, from: null, to: null, trim: false,
     polyDiv: 19, wave: 'square', channelWave: null,     // channelWave: {csatorna (1..16): hullámforma}
   };
 
@@ -700,7 +708,7 @@
     ['arpSpeed', '--arp-speed'], ['polyVolume', '--poly-volume'], ['polyKnee', '--poly-knee'], ['polyMix', '--poly-mix'],
     ['channels', '--channels'], ['drums', '--drums'], ['transpose', '--transpose'], ['tuning', '--tuning'],
     ['speed', '--speed'], ['decay', '--decay'], ['decayFloor', '--decay-floor'], ['curve', '--curve'],
-    ['minVolume', '--min-volume'], ['maxVolume', '--max-volume'], ['loop', '--loop'],
+    ['minVolume', '--min-volume'], ['maxVolume', '--max-volume'], ['loop', '--loop'], ['loopPause', '--loop-pause'],
     ['background', '--background'], ['from', '--from'], ['to', '--to'], ['trim', '--trim'], ['polyDiv', '--poly-div'], ['wave', '--wave'], ['channelWave', '--channel-wave'],
   ];
   function cliArgs(opts) {

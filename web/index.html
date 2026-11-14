@@ -143,6 +143,9 @@ td.name .sub { display: block; font: 11.5px var(--font-mono); color: var(--muted
 .fields.compact .field label { font-size: 12px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .fields.compact .field input[type="number"], .fields.compact .field input[type="text"], .fields.compact .field select { padding: 4px 6px; font-size: 13px; }
 .fields.compact .check { font-size: 13px; }
+.pauserow label { font-size: 13px !important; color: inherit !important; overflow: visible !important; }
+.pauserow input[type="number"] { width: 4em !important; padding: 2px 6px !important; font-family: var(--font-mono); border: 1px solid var(--line); border-radius: var(--r); background: var(--surface); color: inherit; }
+.pauserow input:disabled + label, .pauserow input:disabled ~ span { opacity: .5; }
 .check { display: flex; align-items: center; gap: 8px; font-size: 14px; }
 details summary { cursor: pointer; font-size: 13.5px; color: var(--muted); }
 details[open] summary { margin-bottom: 10px; }
@@ -281,6 +284,8 @@ footer code, .hint code { font-family: var(--font-mono); font-size: 12.5px; }
           <div class="field"><label for="maxVolume">Max. hangerő</label><input id="maxVolume" type="number" min="1" max="15" value="15"></div>
           <div class="field wide"><label for="title">Cím (BASIC sor)</label><input id="title" type="text" maxlength="32"></div>
           <label class="check field wide"><input id="loop" type="checkbox"> Végtelenítve szóljon</label>
+          <div class="check field wide pauserow"><input id="loopPauseOn" type="checkbox" disabled><label for="loopPauseOn">Szünet ismétlés előtt:</label>
+            <input id="loopPause" type="number" min="1" max="9" step="1" value="2" disabled aria-label="Szünet hossza másodpercben"><span>mp</span></div>
           <label class="check field wide"><input id="trim" type="checkbox"> Csend kihagyása az elején és az ismétlés előtt</label>
         </div>
       </section>
@@ -522,6 +527,7 @@ footer code, .hint code { font-family: var(--font-mono); font-size: 12.5px; }
       transpose: num('transpose'), tuning: num('tuning'), speed: num('speed'),
       decay: num('decay'), decayFloor: num('decayFloor'), curve: num('curve'),
       minVolume: num('minVolume'), maxVolume: num('maxVolume'), loop: $('loop').checked,
+      loopPause: $('loop').checked && $('loopPauseOn').checked ? Math.max(1, Math.min(9, Math.round(num('loopPause')) || 1)) : 0,
       background: mode !== 'poly' && $('background').checked,
       from: rangeFrom, to: rangeTo, trim: $('trim').checked,
       wave: $('wave').value, polyDiv: num('polyDiv'),
@@ -1065,8 +1071,15 @@ footer code, .hint code { font-family: var(--font-mono); font-size: 12.5px; }
   // ---- események ------------------------------------------------------------------
   for (const el of document.querySelectorAll('input[name="mode"]')) el.addEventListener('change', () => { showModeFields(); regenerate(); });
   $('polyMix').addEventListener('change', showModeFields);
+  function syncPause() {
+    $('loopPauseOn').disabled = !$('loop').checked;
+    $('loopPause').disabled = !($('loop').checked && $('loopPauseOn').checked);
+  }
+  $('loop').addEventListener('change', syncPause);
+  $('loopPauseOn').addEventListener('change', syncPause);
+  syncPause();
   for (const id of ['polyVolume', 'polyKnee', 'polyMix', 'maxNotes', 'arpSpeed', 'arpBass', 'prio', 'drums', 'transpose', 'decay',
-    'decayFloor', 'speed', 'title', 'tuning', 'curve', 'minVolume', 'maxVolume', 'loop', 'background', 'wave', 'polyDiv', 'trim']) {
+    'decayFloor', 'speed', 'title', 'tuning', 'curve', 'minVolume', 'maxVolume', 'loop', 'loopPauseOn', 'loopPause', 'background', 'wave', 'polyDiv', 'trim']) {
     $(id).addEventListener(($(id).type === 'checkbox' || $(id).tagName === 'SELECT') ? 'change' : 'input', regenerate);
   }
   $('fileInput').addEventListener('change', (e) => {
