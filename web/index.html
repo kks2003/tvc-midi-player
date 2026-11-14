@@ -765,9 +765,9 @@ footer code, .hint code { font-family: var(--font-mono); font-size: 12.5px; }
     g.fillStyle = cssVar('--muted');
     g.fillText('dob', W - 28, H - 5);
     // a mentett rész: kívüle sötétebb, a határain vonal
-    const rs = effStart(), re = effStart() + duration();
+    const rs = effStart(), re = effStart() + rangeLen();
     const x0 = xOfS(rs), x1 = xOfS(re);
-    if (rs > 0.01 || re < dur - 0.01) {
+    if (rs > 0.01 || re < fullResult.range.start + fullResult.range.length - 0.01) {
       g.fillStyle = cssVar('--shade');
       g.fillRect(0, 0, x0, H);
       g.fillRect(x1, 0, W - x1, H);
@@ -789,6 +789,8 @@ footer code, .hint code { font-family: var(--font-mono); font-size: 12.5px; }
   // ---- lejátszás ---------------------------------------------------------------
   let ctx = null, srcNode = null, startAt = 0, offset = 0, raf = 0;
   function duration() { return sim ? sim.levels.length / sim.rate : 0; }
+  // a mentett rész hossza a zenében (az ismétlés előtti szünet nélkül)
+  function rangeLen() { return result && result.range ? Math.min(duration(), result.range.length) : duration(); }
   function position() {
     if (!srcNode) return offset;
     const t = ctx.currentTime - startAt;
@@ -986,7 +988,7 @@ footer code, .hint code { font-family: var(--font-mono); font-size: 12.5px; }
     $('rAll').disabled = whole || !fullSim;
     for (const id of ['rFrom', 'rTo', 'rFromHere', 'rToHere']) $(id).disabled = !fullSim;
     $('rInfo').textContent = !result ? '' : (whole && !$('trim').checked ? 'a teljes dal'
-      : 'mentve: ' + fmtTime(effStart()) + '–' + fmtTime(effStart() + duration()) + ' (' + duration().toFixed(1).replace('.', ',') + ' s)');
+      : 'mentve: ' + fmtTime(effStart()) + '–' + fmtTime(effStart() + rangeLen()) + ' (' + rangeLen().toFixed(1).replace('.', ',') + ' s)');
   }
   function rangeInput(id, isFrom) {
     $(id).addEventListener('change', () => {
