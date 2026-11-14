@@ -152,7 +152,11 @@ details[open] summary { margin-bottom: 10px; }
 .warns { display: grid; gap: 4px; margin: 0; padding: 0; list-style: none; font-size: 13.5px; color: var(--warn); }
 .error { color: var(--warn); font-weight: 500; }
 
-.rollbox { position: relative; border: 1px solid var(--line); border-radius: var(--r); background: var(--sunk); overflow: hidden; cursor: crosshair; }
+.rollbox { position: relative; border: 1px solid var(--line); border-radius: var(--r); background: var(--sunk); overflow: hidden; cursor: crosshair; touch-action: pan-y; }
+.zoomrow { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; font-size: 13px; color: var(--muted); }
+.zoomrow button { padding: 3px 10px; font-size: 13px; min-width: 32px; }
+.zoomrow input[type=range] { flex: 1 1 140px; min-width: 0; accent-color: var(--accent); }
+.zoomrow .zl { font-family: var(--font-mono); min-width: 3.5em; text-align: right; }
 #roll { display: block; width: 100%; height: 280px; }
 #selbox { position: absolute; top: 0; bottom: 0; background: var(--accent); opacity: .18; pointer-events: none; }
 .rangerow { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; font-size: 13.5px; }
@@ -290,6 +294,14 @@ footer code, .hint code { font-family: var(--font-mono); font-size: 12.5px; }
           <div id="selbox" hidden></div>
           <div id="playhead"></div>
         </div>
+        <div class="zoomrow">
+          <span>Nagyítás</span>
+          <button id="zOut" type="button" aria-label="Kicsinyítés" title="Kicsinyítés">−</button>
+          <button id="zIn" type="button" aria-label="Nagyítás" title="Nagyítás (Ctrl + görgő, telefonon két ujjal)">+</button>
+          <span class="zl" id="zLevel">1×</span>
+          <input id="zPan" type="range" min="0" max="1000" value="0" aria-label="A nézet helye a dalban" disabled>
+          <button id="zFit" type="button" title="A teljes dal látszik">Teljes nézet</button>
+        </div>
         <div class="rangerow">
           <label for="rFrom">Rész:</label>
           <input id="rFrom" type="text" inputmode="decimal" aria-label="A rész eleje (perc:másodperc)">
@@ -301,7 +313,7 @@ footer code, .hint code { font-family: var(--font-mono); font-size: 12.5px; }
           <span class="note" id="rInfo"></span>
         </div>
         <div class="legendrow" id="legend"></div>
-        <p class="hint">Halványan a kiválasztott csatornák MIDI-hangjai, színesen az, amit a TVC tényleg lejátszik. Kattintással oda lehet ugrani, húzással részt lehet kijelölni: csak a kijelölt rész szól és kerül a .cas-ba (a sötétebb rész kimarad). Lejátszás közben a beállítások változása azonnal hallható: a zene ugyanonnan folytatódik az új beállítással. Ismétlésnél a dal végén az elejéről folytatja, amíg le nem állítod.</p>
+        <p class="hint">Halványan a kiválasztott csatornák MIDI-hangjai, színesen az, amit a TVC tényleg lejátszik. Nagyítani a + / − gombbal, Ctrl + görgővel vagy telefonon két ujjal lehet; lejátszás közben a nézet követi a zenét. Kattintással oda lehet ugrani, húzással részt lehet kijelölni: csak a kijelölt rész szól és kerül a .cas-ba (a sötétebb rész kimarad). Lejátszás közben a beállítások változása azonnal hallható: a zene ugyanonnan folytatódik az új beállítással. Ismétlésnél a dal végén az elejéről folytatja, amíg le nem állítod.</p>
       </section>
 
       <section class="panel" aria-labelledby="h-out">
@@ -372,6 +384,7 @@ footer code, .hint code { font-family: var(--font-mono); font-size: 12.5px; }
     let p;
     try { p = M.parseMidi(bytes); }
     catch (e) { setStatus('A fájl nem olvasható: ' + e.message, true); return; }
+    view.z = 1; view.s = 0; pinCh = null; hoverCh = null;
     stop();
     offset = 0;
     setStatus('');
@@ -595,6 +608,8 @@ footer code, .hint code { font-family: var(--font-mono); font-size: 12.5px; }
     return isDark() ? 'hsl(' + h + ' 70% 66%)' : 'hsl(' + h + ' 68% 42%)';
   }
   let hoverCh = null, pinCh = null;
+  const view = { z: 1, s: 0 };   // a tekercs nagyítása és a nézet eleje (s)
+  const ZMAX = 64;
   function setHover(ch) {
     hoverCh = ch;
     const act = hoverCh != null ? hoverCh : pinCh;
@@ -610,7 +625,7 @@ footer code, .hint code { font-family: var(--font-mono); font-size: 12.5px; }
     g.setTransform(dpr, 0, 0, dpr, 0, 0);
     g.clearRect(0, 0, W, H);
     renderLegend();
-    if (!fullResult || !fullSim) return;
+    if (!fullResult || !fullSim) { clampView(); return; }
     const frames = fullSim.roll.length, dur = fullDur();
     const notes = fullResult.notes;
     let lo = 127, hi = 0;
@@ -621,7 +636,9 @@ footer code, .hint code { font-family: var(--font-mono); font-size: 12.5px; }
     const drumH = 18, plotH = H - drumH - 4;
     const rowH = plotH / (hi - lo + 1);
     const yOf = (n) => (hi - n) * rowH;
-    const xOfS = (s) => s / dur * W;
+    clampView();
+    const vd = dur / view.z, vs = view.s;
+    const xOfS = (s) => (s - vs) / vd * W;
     // oktávvonalak
     g.fillStyle = cssVar('--line');
     g.font = '11px ' + cssVar('--font-mono');
@@ -632,6 +649,21 @@ footer code, .hint code { font-family: var(--font-mono); font-size: 12.5px; }
       g.fillStyle = cssVar('--line');
     }
     // MIDI-forrás
+    // időrács (nagyításkor sűrűbb)
+    {
+      const steps = [0.1, 0.25, 0.5, 1, 2, 5, 10, 15, 30, 60, 120];
+      const step = steps.find((x) => x * W / vd >= 70) || 300;
+      g.font = '10.5px ' + cssVar('--font-mono');
+      for (let t = Math.ceil(vs / step) * step; t <= vs + vd; t += step) {
+        const x = Math.round(xOfS(t));
+        g.fillStyle = cssVar('--line');
+        g.fillRect(x, 0, 1, H - drumH - 2);
+        g.fillStyle = cssVar('--muted');
+        const lab = step < 1 ? fmtTime(t) : Math.floor(t / 60) + ':' + String(Math.round(t % 60)).padStart(2, '0');
+        if (x > 24) g.fillText(lab, x + 3, 11);
+      }
+      g.font = '11px ' + cssVar('--font-mono');
+    }
     // MIDI-forrás, csatornánként színezve; a kiemelt csatorna erősebben
     const act = hoverCh != null ? hoverCh : pinCh;
     const chCols = new Map();
@@ -644,15 +676,15 @@ footer code, .hint code { font-family: var(--font-mono); font-size: 12.5px; }
     g.globalAlpha = 1;
     const dimOut = act != null && act !== 9;   // a dobcsatornánál a dobsáv marad erős
     // a TVC kimenete: tickenként, egyforma hangokból szakaszok
-    const fx = W / frames;
+    const fx = W / frames * view.z, fx0 = -vs / dur * frames * fx;
     const colors = VOICE_COLORS.map(cssVar);
     const open = new Map();
     const flush = (key, endF) => {
       const o = open.get(key);
       g.fillStyle = colors[o.v];
       g.globalAlpha = (0.45 + 0.55 * Math.min(1, o.vol / 12)) * (dimOut ? 0.35 : 1);
-      if (o.drum) g.fillRect(o.f * fx, H - drumH + (o.noise ? 9 : 2), Math.max(1.5, (endF - o.f) * fx), 6);
-      else g.fillRect(o.f * fx, yOf(o.note) + 0.5, Math.max(1, (endF - o.f) * fx), Math.max(1.5, rowH - 1));
+      if (o.drum) g.fillRect(fx0 + o.f * fx, H - drumH + (o.noise ? 9 : 2), Math.max(1.5, (endF - o.f) * fx), 6);
+      else g.fillRect(fx0 + o.f * fx, yOf(o.note) + 0.5, Math.max(1, (endF - o.f) * fx), Math.max(1.5, rowH - 1));
       g.globalAlpha = 1;
       open.delete(key);
     };
@@ -672,8 +704,9 @@ footer code, .hint code { font-family: var(--font-mono); font-size: 12.5px; }
     g.fillStyle = cssVar('--muted');
     g.fillText('dob', W - 28, H - 5);
     // a mentett rész: kívüle sötétebb, a határain vonal
-    const x0 = xOfS(effStart()), x1 = Math.min(W, xOfS(effStart() + duration()));
-    if (x0 > 0.5 || x1 < W - 0.5) {
+    const rs = effStart(), re = effStart() + duration();
+    const x0 = xOfS(rs), x1 = xOfS(re);
+    if (rs > 0.01 || re < dur - 0.01) {
       g.fillStyle = cssVar('--shade');
       g.fillRect(0, 0, x0, H);
       g.fillRect(x1, 0, W - x1, H);
@@ -743,8 +776,62 @@ footer code, .hint code { font-family: var(--font-mono); font-size: 12.5px; }
   function updatePlayhead() {
     const d = fullDur(), p = fullPos();
     $('time').textContent = fmtTime(p) + ' / ' + fmtTime(d);
-    $('playhead').style.left = (d ? (p / d) * $('roll').clientWidth : 0) + 'px';
+    const W = $('roll').clientWidth, vd = d / view.z;
+    if (d && srcNode && view.z > 1 && (p < view.s || p > view.s + vd)) {   // lejátszáskor lapoz
+      view.s = p - 0.05 * vd;
+      drawRoll();
+      return;
+    }
+    const x = d ? (p - view.s) / vd * W : 0;
+    $('playhead').style.left = x + 'px';
+    $('playhead').hidden = x < -2 || x > W + 2;
   }
+  // ---- nagyítás: view.z = nagyítás, view.s = a nézet eleje (s) ------------------
+  function clampView() {
+    const d = fullDur();
+    view.z = Math.max(1, Math.min(ZMAX, view.z));
+    view.s = Math.max(0, Math.min(d - d / view.z, view.s)) || 0;
+    const pan = $('zPan');
+    pan.disabled = view.z <= 1;
+    pan.value = d - d / view.z > 0 ? Math.round(view.s / (d - d / view.z) * 1000) : 0;
+    $('zLevel').textContent = (view.z < 10 ? Math.round(view.z * 10) / 10 : Math.round(view.z)) + '×';
+    $('zOut').disabled = view.z <= 1;
+    $('zIn').disabled = view.z >= ZMAX || !fullSim;
+    $('zFit').disabled = view.z <= 1;
+  }
+  // nagyítás egy pont körül (frac: a pont helye a nézetben, 0..1)
+  function zoomAt(factor, frac) {
+    const d = fullDur();
+    if (!d) return;
+    const t = view.s + frac * d / view.z;
+    view.z = Math.max(1, Math.min(ZMAX, view.z * factor));
+    view.s = t - frac * d / view.z;
+    drawRoll();
+  }
+  function zoomCenter() {   // a lejátszási pont körül, ha látszik; különben a nézet közepén
+    const d = fullDur(), p = fullPos(), vd = d / view.z;
+    return p >= view.s && p <= view.s + vd ? (p - view.s) / vd : 0.5;
+  }
+  $('zIn').addEventListener('click', () => zoomAt(2, zoomCenter()));
+  $('zOut').addEventListener('click', () => zoomAt(0.5, zoomCenter()));
+  $('zFit').addEventListener('click', () => { view.z = 1; view.s = 0; drawRoll(); });
+  $('zPan').addEventListener('input', (e) => {
+    const d = fullDur();
+    view.s = e.target.value / 1000 * (d - d / view.z);
+    drawRoll();
+  });
+  $('rollbox').addEventListener('wheel', (e) => {
+    if (!fullSim) return;
+    const r = $('roll').getBoundingClientRect();
+    if (e.ctrlKey || e.metaKey) {            // Ctrl + görgő, érintőpadon csippentés
+      e.preventDefault();
+      zoomAt(Math.exp(-e.deltaY * 0.01), (e.clientX - r.left) / r.width);
+    } else if (view.z > 1 && (Math.abs(e.deltaX) > Math.abs(e.deltaY) || e.shiftKey)) {   // vízszintes görgetés
+      e.preventDefault();
+      view.s += (e.shiftKey && !e.deltaX ? e.deltaY : e.deltaX) / r.width * fullDur() / view.z;
+      drawRoll();
+    }
+  }, { passive: false });
   $('playBtn').addEventListener('click', () => (srcNode ? stop() : play()));
   $('restartBtn').addEventListener('click', () => {
     if (!sim) return;
@@ -756,14 +843,34 @@ footer code, .hint code { font-family: var(--font-mono); font-size: 12.5px; }
   let drag = null;
   const rollTime = (clientX) => {
     const r = $('roll').getBoundingClientRect();
-    return Math.max(0, Math.min(1, (clientX - r.left) / r.width)) * fullDur();
+    return view.s + Math.max(0, Math.min(1, (clientX - r.left) / r.width)) * fullDur() / view.z;
   };
+  const touches = new Map();   // két ujjas csippentés
+  let pinch = null;
   $('rollbox').addEventListener('pointerdown', (e) => {
     if (!fullSim) return;
+    if (e.pointerType === 'touch') {
+      touches.set(e.pointerId, e.clientX);
+      if (touches.size === 2) {
+        const [a, b] = [...touches.values()], r = $('roll').getBoundingClientRect();
+        pinch = { dist: Math.max(10, Math.abs(a - b)), z: view.z, t: view.s + ((a + b) / 2 - r.left) / r.width * fullDur() / view.z };
+        drag = null; $('selbox').hidden = true;
+        return;
+      }
+    }
     drag = { x0: e.clientX, moved: false };
     $('rollbox').setPointerCapture(e.pointerId);
   });
   $('rollbox').addEventListener('pointermove', (e) => {
+    if (touches.has(e.pointerId)) touches.set(e.pointerId, e.clientX);
+    if (pinch && touches.size === 2) {
+      const [a, b] = [...touches.values()], r = $('roll').getBoundingClientRect();
+      const frac = ((a + b) / 2 - r.left) / r.width;
+      view.z = Math.max(1, Math.min(ZMAX, pinch.z * Math.max(10, Math.abs(a - b)) / pinch.dist));
+      view.s = pinch.t - frac * fullDur() / view.z;
+      drawRoll();
+      return;
+    }
     if (!drag) return;
     if (Math.abs(e.clientX - drag.x0) > 5) drag.moved = true;
     if (!drag.moved) return;
@@ -775,6 +882,8 @@ footer code, .hint code { font-family: var(--font-mono); font-size: 12.5px; }
     box.style.width = Math.max(1, b - a) + 'px';
   });
   $('rollbox').addEventListener('pointerup', (e) => {
+    touches.delete(e.pointerId);
+    if (pinch) { if (touches.size < 2) pinch = null; drag = null; return; }
     if (!drag) return;
     const d = drag;
     drag = null;
@@ -790,7 +899,7 @@ footer code, .hint code { font-family: var(--font-mono); font-size: 12.5px; }
     updatePlayhead();
     if (was) play();
   });
-  $('rollbox').addEventListener('pointercancel', () => { drag = null; $('selbox').hidden = true; });
+  $('rollbox').addEventListener('pointercancel', (e) => { touches.delete(e.pointerId); pinch = null; drag = null; $('selbox').hidden = true; });
 
   // ---- a kijelölt rész ------------------------------------------------------------
   const spd = () => num('speed') || 1;
