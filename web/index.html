@@ -145,6 +145,10 @@ details[open] summary { margin-bottom: 10px; }
 .membar i { display: block; height: 100%; }
 .mem .legend { display: flex; flex-wrap: wrap; gap: 4px 14px; font-size: 12.5px; color: var(--muted); font-family: var(--font-mono); }
 .dot { display: inline-block; width: 8px; height: 8px; border-radius: 2px; margin-right: 5px; vertical-align: 0; }
+.chdot { display: inline-block; width: 10px; height: 10px; border-radius: 50%; margin-right: 6px; vertical-align: -1px; flex: none; }
+#chBody tr { transition: background .1s; }
+#chBody tr.hl { background: var(--sunk); }
+#chBody td.num.chn { cursor: pointer; white-space: nowrap; }
 .warns { display: grid; gap: 4px; margin: 0; padding: 0; list-style: none; font-size: 13.5px; color: var(--warn); }
 .error { color: var(--warn); font-weight: 500; }
 
@@ -406,7 +410,16 @@ footer code, .hint code { font-family: var(--font-mono); font-size: 12.5px; }
       const tr = document.createElement('tr');
       const id = 'ch-' + c.ch;
       tr.innerHTML = '<td><input type="checkbox" id="' + id + '" checked></td><td class="num"></td><td class="name"></td><td class="num"></td><td></td><td class="wavecol"></td>';
-      tr.children[1].textContent = c.ch;
+      const dot = document.createElement('i');
+      dot.className = 'chdot';
+      dot.style.background = chColor(c.ch - 1);
+      tr.children[1].className = 'num chn';
+      tr.children[1].title = 'Kiemelés a tekercsen';
+      tr.children[1].append(dot, String(c.ch));
+      tr.dataset.ch = c.ch - 1;
+      tr.addEventListener('mouseenter', () => setHover(c.ch - 1));
+      tr.addEventListener('mouseleave', () => setHover(null));
+      tr.children[1].addEventListener('click', () => { pinCh = pinCh === c.ch - 1 ? null : c.ch - 1; setHover(null); });
       const nm = tr.children[2];
       nm.textContent = c.names.join(', ') || '–';
       nm.title = nm.textContent;
@@ -571,6 +584,23 @@ footer code, .hint code { font-family: var(--font-mono); font-size: 12.5px; }
 
   // ---- zongoratekercs --------------------------------------------------------
   function cssVar(n) { return getComputedStyle(document.documentElement).getPropertyValue(n).trim(); }
+  // csatornaszínek: egymástól messze eső színárnyalatok, sötét témán világosabban
+  function isDark() {
+    const m = /^#?([0-9a-f]{2})([0-9a-f]{2})([0-9a-f]{2})/i.exec(cssVar('--bg'));
+    return m ? (parseInt(m[1], 16) + parseInt(m[2], 16) + parseInt(m[3], 16)) < 3 * 128 : false;
+  }
+  function chColor(ch) {   // ch: 0..15
+    if (ch === 9) return isDark() ? '#9aa1ad' : '#6b7280';
+    const h = Math.round((ch * 137.508 + 210) % 360);
+    return isDark() ? 'hsl(' + h + ' 70% 66%)' : 'hsl(' + h + ' 68% 42%)';
+  }
+  let hoverCh = null, pinCh = null;
+  function setHover(ch) {
+    hoverCh = ch;
+    const act = hoverCh != null ? hoverCh : pinCh;
+    for (const tr of $('chBody').children) tr.classList.toggle('hl', act != null && Number(tr.dataset.ch) === act);
+    drawRoll();
+  }
   function drawRoll() {
     const cv = $('roll');
     const dpr = window.devicePixelRatio || 1;
@@ -602,8 +632,17 @@ footer code, .hint code { font-family: var(--font-mono); font-size: 12.5px; }
       g.fillStyle = cssVar('--line');
     }
     // MIDI-forrás
-    g.fillStyle = cssVar('--src');
-    for (const [s, e, n] of notes) g.fillRect(xOfS(s), yOf(n), Math.max(1, xOfS(e) - xOfS(s)), Math.max(1.5, rowH));
+    // MIDI-forrás, csatornánként színezve; a kiemelt csatorna erősebben
+    const act = hoverCh != null ? hoverCh : pinCh;
+    const chCols = new Map();
+    for (const [s, e, n, , ch] of notes) {
+      if (!chCols.has(ch)) chCols.set(ch, chColor(ch));
+      g.fillStyle = chCols.get(ch);
+      g.globalAlpha = act == null ? 0.3 : ch === act ? 0.95 : 0.08;
+      g.fillRect(xOfS(s), yOf(n), Math.max(1, xOfS(e) - xOfS(s)), Math.max(1.5, rowH));
+    }
+    g.globalAlpha = 1;
+    const dimOut = act != null && act !== 9;   // a dobcsatornánál a dobsáv marad erős
     // a TVC kimenete: tickenként, egyforma hangokból szakaszok
     const fx = W / frames;
     const colors = VOICE_COLORS.map(cssVar);
@@ -611,7 +650,7 @@ footer code, .hint code { font-family: var(--font-mono); font-size: 12.5px; }
     const flush = (key, endF) => {
       const o = open.get(key);
       g.fillStyle = colors[o.v];
-      g.globalAlpha = 0.45 + 0.55 * Math.min(1, o.vol / 12);
+      g.globalAlpha = (0.45 + 0.55 * Math.min(1, o.vol / 12)) * (dimOut ? 0.35 : 1);
       if (o.drum) g.fillRect(o.f * fx, H - drumH + (o.noise ? 9 : 2), Math.max(1.5, (endF - o.f) * fx), 6);
       else g.fillRect(o.f * fx, yOf(o.note) + 0.5, Math.max(1, (endF - o.f) * fx), Math.max(1.5, rowH - 1));
       g.globalAlpha = 1;
@@ -650,7 +689,7 @@ footer code, .hint code { font-family: var(--font-mono); font-size: 12.5px; }
       ? [['--v0', '1. szólam'], ['--v1', '2. szólam'], ['--v2', '3. szólam']]
       : [['--v0', 'hangoszcillátor'], ['--v3', 'dob']];
     $('legend').innerHTML = items.map(([c, t]) => '<span><i class="dot" style="background:var(' + c + ')"></i>' + t + '</span>').join('') +
-      '<span><i class="dot" style="background:var(--src)"></i>MIDI</span>';
+      '<span><i class="dot" style="background:linear-gradient(90deg,' + [0, 1, 2, 3].map(chColor).join(',') + ');opacity:.6"></i>MIDI (a csatorna színével; a csatornasor fölé állva kiemeli, a számra kattintva rögzíti)</span>';
   }
 
   // ---- lejátszás ---------------------------------------------------------------
@@ -885,7 +924,10 @@ footer code, .hint code { font-family: var(--font-mono); font-size: 12.5px; }
   });
   let rz = 0;
   window.addEventListener('resize', () => { clearTimeout(rz); rz = setTimeout(drawRoll, 100); });
-  if (window.matchMedia) window.matchMedia('(prefers-color-scheme: dark)').addEventListener('change', drawRoll);
+  if (window.matchMedia) window.matchMedia('(prefers-color-scheme: dark)').addEventListener('change', () => {
+    for (const tr of $('chBody').children) { const d = tr.querySelector('.chdot'); if (d) d.style.background = chColor(Number(tr.dataset.ch)); }
+    drawRoll();
+  });
   new MutationObserver(drawRoll).observe(document.documentElement, { attributes: true, attributeFilter: ['data-theme'] });
 
   function loadSample() {
