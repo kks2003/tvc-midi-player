@@ -61,7 +61,10 @@ azonos (`python3 test/web_parity.py` ellenőrzi 22 beállítással, a tesztdalon
 python3 tools/export_players.py
 ```
 
-Helyben a `web/index.html` közvetlenül megnyitható (`file://` is jó).
+Helyben a `web/index.html` közvetlenül megnyitható (`file://` is jó). A
+`.github/workflows/pages.yml` minden `main`-re kerülő változásnál kiteszi a
+`web/` mappát a GitHub Pages-re: https://kks2003.github.io/tvc-midi-player/
+(a repó beállításaiban: Settings → Pages → Source: GitHub Actions).
 
 ## A konverter (`midi2tvc.py`)
 
