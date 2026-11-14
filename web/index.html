@@ -1121,11 +1121,14 @@ footer code, .hint code { font-family: var(--font-mono); font-size: 12.5px; }
       if (r) r.checked = true;
       for (const [k, v] of Object.entries(o)) {
         const el = $(k);
-        if (!el || k === 'title' || k === 'mode') continue;
+        if (!el || k === 'title' || k === 'mode' || k === 'loopPause') continue;
         if (el.type === 'checkbox') el.checked = !!v; else if (v !== undefined) el.value = v;
       }
+      if (o.loopPause > 0) { $('loopPauseOn').checked = true; $('loopPause').value = o.loopPause; }
     }
   } catch (e) { /* alapbeállítások */ }
+  syncPause();   // a visszaállított „Végtelenítve” szerint
+  window.addEventListener('pageshow', syncPause);   // a böngésző is visszatöltheti az űrlapot
   showModeFields();
   renderLegend();
   loadSample();
