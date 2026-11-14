@@ -7,7 +7,7 @@
 ;     2 X=USR(<start>)
 ; majd a lejátszó gépi kódja és a dal adatai (build/song.bin, midi2tvc.py).
 ;
-; Hardver (tvcdoc: tvchardver.md, tvcrom.md, ROM-lista):
+; Hardver ("TV-Computer Hardware", "A TV-Computer ROM programja", ROM-lista):
 ;   04h        PITCH b0..b7
 ;   05h        b0..b3 PITCH b8..b11, b4 hangjel (1 = oszcillátor, 0 = állandó
 ;              szint -> DAC), b5 hang-IT, b6/b7 magnómotorok

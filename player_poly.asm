@@ -20,7 +20,7 @@
 ;
 ; Az ötlet (hang-IT mint mintaóra, hullámtáblák, a zenefeldolgozás a
 ; megszakításból, EI mellett) Szalontai Béla "Többcsatornás hanggeneráló
-; programcsomag"-jából való (tvcdoc: sources/3 csatornás asm lejátszó, MIT).
+; programcsomag"-jából való (MIT licenc).
 ;
 ; Lejátszás közben a ROM megszakításkezelője nem fut (a 0038h-n a mi
 ; kezelőnk van), a kurzor-IT tiltva; a végén minden visszaáll.

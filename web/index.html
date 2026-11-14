@@ -66,7 +66,11 @@ body {
 }
 header { display: flex; flex-wrap: wrap; align-items: baseline; gap: 6px 16px; }
 h1 { font: 700 28px/1.1 var(--font-head); letter-spacing: 0.01em; margin: 0; text-wrap: balance; }
-header p { margin: 0; color: var(--muted); max-width: 70ch; }
+header p { margin: 0; color: var(--muted); max-width: 70ch; flex-basis: 100%; }
+a.repo { display: inline-flex; align-items: center; gap: 6px; font-size: 13.5px; color: var(--accent); text-decoration: none;
+  border: 1px solid var(--line); border-radius: 999px; padding: 3px 10px; background: var(--surface); }
+a.repo:hover { border-color: var(--accent); }
+footer a { color: var(--accent); }
 h2 {
   font: 600 12px/1.2 var(--font-head); text-transform: uppercase; letter-spacing: 0.09em;
   color: var(--muted); margin: 0;
@@ -161,7 +165,9 @@ pre.basic {
 .actions { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; }
 .note { font-size: 13px; color: var(--muted); }
 .status { font-size: 13px; min-height: 1.2em; }
-footer { color: var(--muted); font-size: 13px; }
+footer { color: var(--muted); font-size: 13px; display: grid; gap: 8px; }
+footer p { margin: 0; max-width: 110ch; }
+footer .credits b { color: var(--ink); font-weight: 500; }
 footer code, .hint code { font-family: var(--font-mono); font-size: 12.5px; }
 @media (prefers-reduced-motion: reduce) { * { transition: none !important; } }
 </style>
@@ -170,6 +176,7 @@ footer code, .hint code { font-family: var(--font-mono); font-size: 12.5px; }
 <div class="wrap">
   <header>
     <h1>TVC MIDI-lejátszó</h1>
+    <a class="repo" href="https://github.com/kks2003/tvc-midi-player" target="_blank" rel="noopener"><svg class="gh" viewBox="0 0 16 16" width="16" height="16" aria-hidden="true"><path fill="currentColor" d="M8 0C3.58 0 0 3.58 0 8c0 3.54 2.29 6.53 5.47 7.59.4.07.55-.17.55-.38 0-.19-.01-.82-.01-1.49-2.01.37-2.53-.49-2.69-.94-.09-.23-.48-.94-.82-1.13-.28-.15-.68-.52-.01-.53.63-.01 1.08.58 1.23.82.72 1.21 1.87.87 2.33.66.07-.52.28-.87.51-1.07-1.78-.2-3.64-.89-3.64-3.95 0-.87.31-1.59.82-2.15-.08-.2-.36-1.02.08-2.12 0 0 .67-.21 2.2.82.64-.18 1.32-.27 2-.27.68 0 1.36.09 2 .27 1.53-1.04 2.2-.82 2.2-.82.44 1.1.16 1.92.08 2.12.51.56.82 1.27.82 2.15 0 3.07-1.87 3.75-3.65 3.95.29.25.54.73.54 1.48 0 1.07-.01 1.93-.01 2.2 0 .21.15.46.55.38A8.013 8.013 0 0 0 16 8c0-4.42-3.58-8-8-8z"/></svg>forráskód: kks2003/tvc-midi-player ↗</a>
     <p>MIDI-fájlból Videoton TV-Computerre betölthető, magától induló <code>.cas</code> program. A beállítások változására azonnal újraszámol; az előnézet a TVC lejátszóját szimulálja.</p>
   </header>
 
@@ -316,7 +323,12 @@ footer code, .hint code { font-family: var(--font-mono); font-size: 12.5px; }
   </div>
 
   <footer>
-    tvc-midi-player · a konverter a <code>midi2tvc.py</code> bájtra azonos JavaScript-portja; a lejátszók: <code>player_poly.asm</code>, <code>player.asm</code>.
+    <p><a href="https://github.com/kks2003/tvc-midi-player" target="_blank" rel="noopener">tvc-midi-player</a> (forráskód, parancssori konverter, assembly lejátszók, leírás) · a konverter a <code>midi2tvc.py</code> bájtra azonos JavaScript-portja; a lejátszók: <code>player_poly.asm</code>, <code>player.asm</code>.</p>
+    <p class="credits"><b>Köszönet, akiktől ötletet és tudást vettünk át:</b>
+      Szalontai Béla (Fast &amp; Force): „Többcsatornás hanggeneráló programcsomag” (MIT licenc) – a többszólamú lejátszó alapötletei: a hangszámláló mint mintaóra, a hullámtáblák, a zene feldolgozása a megszakításból ·
+      Ludányi László: „A TV-Computer ROM programja” és Kaszanyiczki László: „A Videoton TV-Computer ROM listája” – a ROM megszakításkezelője, a HIMEM, az USRTAB, a BASIC tokenek ·
+      Benedek Antal, Monok Zoltán: „TV-Computer Hardware” – a hanggenerátor és a portok ·
+      Varga István: <a href="https://github.com/istvan-v/ep128emu" target="_blank" rel="noopener">ep128emu</a> – az Ep128web emulátormagja, a hanggenerátor pontos működése és a tesztek.</p>
   </footer>
 </div>
 
