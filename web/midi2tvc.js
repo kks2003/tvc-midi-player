@@ -81,7 +81,7 @@
       const end = Math.min(p + tlen, data.length);
       pos = p + tlen;
       let tick = 0, status = 0;
-      const info = { name: '', channels: {} };
+      const info = { name: '', channels: {}, programs: {} };
       tracks.push(info);
       while (p < end) {
         let delta;
@@ -115,7 +115,11 @@
           continue;
         }
         const hi = status & 0xF0, ch = status & 0x0F;
-        if (hi === 0xC0 || hi === 0xD0) { p++; continue; }
+        if (hi === 0xC0 || hi === 0xD0) {
+          if (hi === 0xC0 && !(ch in info.programs)) info.programs[ch] = data[p];   // az első hangszer (csak kijelzéshez)
+          p++;
+          continue;
+        }
         const a = data[p], v = data[p + 1];
         p += 2;
         if (hi === 0x90 && v > 0) {
