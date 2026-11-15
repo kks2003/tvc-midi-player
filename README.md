@@ -142,8 +142,8 @@ ride > kolomp > perem > zárt cin). A dobütés erőssége halkítja a dobot.
   számolja (`round(4096 − 195312,5 / f)`), és a dallal együtt kerül a gépre.
 - `05h` b4: **1 = az oszcillátor négyszögjele megy a hangerő-szabályzóra,
   0 = állandó „1” szint**, ekkor a `06h` amplitúdóregiszter 4 bites DAC-ként
-  működik. A források itt ellentmondanak egymásnak. A `tvcrom.md` szövege és a
-  ROM kódja (`FA95h`: `AND EFh`, „hangjel tiltás”) ezt mondja, az ep128emu
+  működik. A források itt ellentmondanak egymásnak. Ludányi László „A TV-Computer ROM
+  programja” című könyve és a ROM kódja (`FA95h`: `AND EFh`, „hangjel tiltás”) ezt mondja, az ep128emu
   `tvc64vm.cpp` is így emulálja, és a lenti emulátoros teszt is ezt igazolja.
   Valódi gépen még ki kell próbálni. A `05h` b5 a hang-IT-t engedélyezi
   (a lejátszó tiltja), a b6/b7 a magnómotorokat vezérli (ezeket megőrzi).
