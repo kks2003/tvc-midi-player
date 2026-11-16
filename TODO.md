@@ -66,10 +66,17 @@ kiválasztható, hogy csak egy adott kártyára készüljön. A kártyák
 lejátszói is külön modulok (0. pont), így a `.cas`-ba csak a kiválasztott
 kártyák kódja kerül.
 
+Mindhárom kártyát emulálja az Ep128web (a `web/src/tvc_soundcards.cpp`,
+`tvc256kpp.cpp`, `card/tvc-sid.c`), a gépbeállításoknál bővítőhelyre tehetők,
+így a tesztek emulátorban futhatnak. A bővítőhely `n` (0..3) I/O portjai:
+`10h + 10h·n` … `1Fh + 10h·n`.
+
 - [ ] **TVC Multichip Soundcard**
   ([dikdom/TVC-Multichip-Soundcard](https://github.com/dikdom/TVC-Multichip-Soundcard)):
   SN76489, SAA1099 és YM3812 (OPL2) hangchip, akár egyszerre. A repó `doc/`
-  könyvtárában van a kártya leírása és a chipek adatlapjai.
+  könyvtárában van a kártya leírása és a chipek adatlapjai. Portok (a
+  bővítőhely alapcímétől): `+0` SN76489, `+2`/`+3` SAA1099 adat/cím,
+  `+4`/`+5` OPL2 regiszterválasztás/adat.
   - SN76489: 3 négyszög + zaj, MIDI → 3 szólam + dob.
   - SAA1099: 6 csatorna + 2 zaj, burkológörbe-generátor.
   - YM3812: 9 FM-csatorna (vagy 6 + 5 dob), General MIDI-hangszerek FM-hangszínekkel:
@@ -79,13 +86,18 @@ kártyák kódja kerül.
     leírásából magunk írjuk meg.
 - [ ] **TVC 256k++ kártya, vSID**: a kártya egy C64 SID-et (MOS 6581/8580)
   emulál, 985 337 Hz-es SID-órajellel, 41 kHz-es mintavétellel, szűrők
-  nélkül; a regiszterek ($00–$18) a kártya `WriteSID` hívásán át írhatók
-  (TVC256K_Help). 3 szólam hullámformával (háromszög, fűrész, impulzus PWM-mel,
+  nélkül (TVC256K_Help). A SID-regiszterek ($00–$18) a kártya `E0h + n`
+  regiszterei: a bővítőhely `+0` portjára a regiszter sorszáma, a `+1`-re az
+  érték (az `+2`-n beállított lépéssel automatikusan továbblép, így egy
+  `OTIR`-ral egyben írható). 3 szólam hullámformával (háromszög, fűrész, impulzus PWM-mel,
   zaj) és ADSR-rel: a burkológörbék (`--envelopes`) a SID ADSR-jére is
-  leképezhetők. A pontos hívási mód és portok a kártya dokumentációjából.
-- [ ] **GameCard**: SN76489 hangchip (ugyanaz, mint a Multichip kártyán), ezért
-  a meghajtó közös lehet, csak a port más.
+  leképezhetők.
+- [ ] **GameCard**: SN76489 hangchip a bővítőhely `+0` portján (ugyanaz, mint a
+  Multichip kártyán, ugyanazon a porton), ezért a meghajtó közös; a `+2`/`+3`
+  a 3. és 4. botkormány.
 - [ ] Felismerés indításkor: a kártyahelyek azonosítója (`5Ah` port, a
   0040h/0070h/00A0h/00D0h táblák) és a kártyák saját jelzései alapján.
-- [ ] Emulátoros teszt: ha az Ep128web / ep128emu valamelyik kártyát tudja,
-  azzal; különben valódi gépen kell kipróbálni.
+- [ ] Emulátoros teszt mindhárom kártyával (az Ep128web harness kártyával is
+  induljon, és a kártyák hangja is kerüljön a felvételbe); a webes előnézetbe
+  a chipek hangja (SN76489, SAA1099, OPL2, SID) szimulálva vagy az Ep128web
+  moduljaiból.
