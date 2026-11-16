@@ -353,17 +353,23 @@
   const polyPeak = (vol) => (vol > 0 ? 2 * ((vol + 1) >> 1) - 1 : 0);
   // clean: a három szólam teljes összege arányosan 0..15-re (nem telít);
   // soft: a térdig 1:1, fölötte lágy telítés
-  function polyMixTable(knee, ceiling = 15, mode = 'clean', vmax = 9) {
+  // gain: globális hangerő százalékban (a keverés előtt szoroz)
+  function polyMixTable(knee, ceiling = 15, mode = 'clean', vmax = 9, gain = 100) {
     const out = [];
     const full = 3 * polyPeak(vmax);
     for (let s = 0; s < 64; s++) {
-      const v = mode === 'clean' ? s * ceiling / full
-        : s <= knee ? s : knee + (ceiling - knee) * (1 - Math.exp(-(s - knee) / 12.0));
+      const g = s * gain / 100.0;
+      const v = mode === 'clean' ? g * ceiling / full
+        : g <= knee ? g : knee + (ceiling - knee) * (1 - Math.exp(-(g - knee) / 12.0));
       out.push(clamp(pyRound(v), 0, ceiling));
     }
     return out;
   }
 
+  // az egyszólamú lejátszó hangereje a globális hangerővel; 15-ön megáll
+  const gainVolume = (vol, gain) => clamp(pyRound(vol * gain / 100.0), 1, 15);
+  // a torzítás nélküli legnagyobb globális hangerő (%)
+  const maxGain = (full, peak) => (peak ? Math.floor(100 * full / peak) : 100);
   function velocityToVolume(vel, curve, vmin, vmax) {
     const x = Math.pow(clamp(vel / 127.0, 0.0, 1.0), curve);
     return clamp(pyRound(vmin + x * (vmax - vmin)), vmin, vmax);
@@ -427,7 +433,7 @@
     const active = new Map();
     const out = [];
     let prev = null, curVol = null, pending = 0;
-    const stats = { chords: 0, notes: 0, rests: 0, drums: drums.size };
+    const stats = { chords: 0, notes: 0, rests: 0, drums: drums.size, max_vol: 0 };
     for (let t = 0; t <= total; t++) {
       expire(active, t);
       for (const [st, en, n, v, , idx] of starts.get(t) || []) active.set(idx, [st, en, n, v]);
@@ -443,7 +449,9 @@
           pending = 0;
           if (!sel.length) { out.push(0x80); stats.rests++; }
           else {
-            const vol = velocityToVolume(Math.max(...sel.map((s) => s[1])), o.curve, o.minVolume, o.maxVolume);
+            let vol = velocityToVolume(Math.max(...sel.map((s) => s[1])), o.curve, o.minVolume, o.maxVolume);
+            stats.max_vol = Math.max(stats.max_vol, vol);
+            vol = gainVolume(vol, o.gain);
             if (vol !== curVol) { out.push(0x90 | vol); curVol = vol; }
             if (sel.length === 1) { out.push(sel[0][0]); stats.notes++; }
             else { out.push(0x80 | sel.length, ...sel.map((s) => s[0])); stats.chords++; }
@@ -481,7 +489,8 @@
     const vmin = Math.max(1, Math.min(vmax, pyRound(o.minVolume * vmax / 15.0)));
     const out = [];
     let pending = 0;
-    const stats = { notes: 0, drums: drums.size, voices_max: 0, chords: 0, rests: 0 };
+    const stats = { notes: 0, drums: drums.size, voices_max: 0, chords: 0, rests: 0, peak_sum: 0 };
+    const lvl = new Array(POLY_VOICES).fill(0);   // a szólamok hangereje a megszólaláskor (felső becslés)
     const slots = [];
     const slotOf = (wave) => {
       const w = WAVES.indexOf(wave);
@@ -506,7 +515,7 @@
       expire(active, t);
       for (const [st, en, n, v, ch, idx] of starts.get(t) || []) active.set(idx, [st, en, n, v, ch]);
       for (let v = 0; v < POLY_VOICES; v++) {
-        if (reserved[v] && reserved[v] <= t) { reserved[v] = 0; emit(0xB0 + v); cur[v] = null; }
+        if (reserved[v] && reserved[v] <= t) { reserved[v] = 0; emit(0xB0 + v); cur[v] = null; lvl[v] = 0; }
       }
       const uniq = new Map();
       for (const [idx, [st, , n, v]] of active) {
@@ -533,7 +542,9 @@
             let slide = 0;
             if (endHz !== null) slide = pyRound((pyRound(endHz * 65536 / sr) - ftab[note]) / dur) & 0xFFFF;
             setWave(v, wave);
-            emit(0xB8 + v, note, (Math.max(1, drumLevel(vol0, o.drumVolume) - att) << 4) | dec, slide & 0xFF, slide >> 8);
+            const dv = Math.max(1, drumLevel(vol0, o.drumVolume) - att);
+            emit(0xB8 + v, note, (dv << 4) | dec, slide & 0xFF, slide >> 8);
+            lvl[v] = dv;
             reserved[v] = t + dur;
             cur[v] = null;
           }
@@ -554,13 +565,15 @@
         const vol = velocityToVolume(a[3], o.curve, vmin, vmax);
         setWave(v, chWaves[a[4]] || o.wave);
         emit(0x80 + 16 * v + vol, n);
+        lvl[v] = vol;
         stats.notes++;
         newCur.set(v, [idx, n]);
       }
       for (const v of free) {
-        if (!newCur.has(v) && cur[v] !== null) emit(0xB0 + v);
+        if (!newCur.has(v) && cur[v] !== null) { emit(0xB0 + v); lvl[v] = 0; }
         cur[v] = newCur.has(v) ? newCur.get(v) : null;
       }
+      stats.peak_sum = Math.max(stats.peak_sum, lvl.reduce((a, x) => a + polyPeak(x), 0));
       pending++;
     }
     encodeWait(out, pending, 0xBF);
@@ -582,7 +595,7 @@
   const DEFAULTS = {
     mode: 'arp', prio: 'high', maxNotes: 3, arpBass: false, arpSpeed: 1, polyVolume: 9, polyKnee: 10, polyMix: 'clean',
     channels: null, drums: 'synth', transpose: 0, tuning: 440.0, speed: 1.0, rate: FRAME_RATE,
-    decay: 0, decayFloor: 6, curve: 0.7, minVolume: 6, maxVolume: 15, loop: false, loopPause: 0, drumVolume: 100, background: false, from: null, to: null, trim: false,
+    decay: 0, decayFloor: 6, curve: 0.7, minVolume: 6, maxVolume: 15, loop: false, loopPause: 0, drumVolume: 100, gain: 100, background: false, from: null, to: null, trim: false,
     polyDiv: 19, wave: 'square', channelWave: null,     // channelWave: {csatorna (1..16): hullámforma}
   };
 
@@ -607,7 +620,12 @@
     const drums = useDrums ? drumHits(drumNotes, o.rate, o.curve) : new Map();
     if (!notes.length && !drums.size) throw new Error('a kiválasztott csatornákon (és részben) nincs hang');
     const floor = clamp(o.decayFloor, 0, 15);
-    let song, total, stats, pause = 0, rate, sr = null, polyInfo = null;
+    let song, total, stats, pause = 0, rate, sr = null, polyInfo = null, gainMax = 100;
+    // gain: globális hangerő (%); 'max' = a legnagyobb, ami még nem torzít
+    const gainAuto = o.gain === 'max';
+    if (gainAuto) o.gain = 100;
+    o.gain = Number(o.gain);
+    if (!(o.gain >= 1 && o.gain <= 1000)) throw new Error('globális hangerő: 1..1000%');
     if (o.mode === 'poly') {
       if (!(o.polyDiv >= POLY_DIV_MIN && o.polyDiv <= POLY_DIV_MAX))
         throw new Error('mintaóra-osztó: ' + POLY_DIV_MIN + '..' + POLY_DIV_MAX);
@@ -627,21 +645,25 @@
       }
       if (!TONE_WAVES.includes(o.wave)) throw new Error('ismeretlen hullámforma: ' + o.wave);
       const r = convertPoly(notes, pd, o, sr, tickRate, ftab, chWaves);
+      gainMax = maxGain(3 * polyPeak(o.polyVolume), r.stats.peak_sum);
+      if (gainAuto) o.gain = gainMax;
       const sl = r.slots.concat(new Array(MAX_SLOTS - r.slots.length).fill(0));
       const data = [o.loop ? 1 : 0, o.decay, floor, o.polyDiv, 0, 0, tickn, r.slots.length, ...sl, 0, 0, 0,
-        ...polyMixTable(o.polyKnee, 15, o.polyMix, o.polyVolume)];
+        ...polyMixTable(o.polyKnee, 15, o.polyMix, o.polyVolume, o.gain)];
       for (const f of ftab) data.push(f & 0xFF, f >> 8);
       song = Uint8Array.from(data.concat(r.body));
       ({ total, stats, pause } = r);
       polyInfo = { div: o.polyDiv, tickn, slots: r.slots, cpu: polyCpuLoad(o.polyDiv), tableBytes: 256 * (1 + 8 * r.slots.length) };
       rate = tickRate;
     } else {
-      const r = convert(notes, o, drums);
+      let r = convert(notes, o, drums);
+      gainMax = maxGain(15, r.stats.max_vol);
+      if (gainAuto) { o.gain = gainMax; r = convert(notes, o, drums); }
       const kitOffset = drums.size ? 8 + 256 + r.body.length : 0;
       const data = [(o.loop ? 1 : 0) | (o.background ? 2 : 0), o.arpSpeed, o.decay, floor, 0, 0, kitOffset & 0xFF, kitOffset >> 8];
       for (const p of pitchTable(o.tuning)) data.push(p & 0xFF, p >> 8);
       let all = data.concat(r.body);
-      if (drums.size) all = all.concat(buildKit(kitOffset, o.drumVolume));
+      if (drums.size) all = all.concat(buildKit(kitOffset, o.drumVolume * o.gain / 100.0));
       song = Uint8Array.from(all);
       ({ total, stats, pause } = r);
       rate = o.rate;
@@ -655,7 +677,7 @@
     // range: a mentett rész helye a teljes dal lejátszási idejében (másodperc),
     // a hossza az ismétlés előtti szünet nélkül
     return { song, mode: o.mode, total, rate, sampleRate: sr, stats, notes, used, warnings, options: o, poly: polyInfo,
-      range: { start: shift, length: (total - pause) / rate }, pause: pause / rate };
+      range: { start: shift, length: (total - pause) / rate }, pause: pause / rate, gain: o.gain, gainMax };
   }
 
   // ---- .cas összeállítása ---------------------------------------------------------
@@ -715,7 +737,7 @@
     ['arpSpeed', '--arp-speed'], ['polyVolume', '--poly-volume'], ['polyKnee', '--poly-knee'], ['polyMix', '--poly-mix'],
     ['channels', '--channels'], ['drums', '--drums'], ['transpose', '--transpose'], ['tuning', '--tuning'],
     ['speed', '--speed'], ['decay', '--decay'], ['decayFloor', '--decay-floor'], ['curve', '--curve'],
-    ['minVolume', '--min-volume'], ['maxVolume', '--max-volume'], ['loop', '--loop'], ['loopPause', '--loop-pause'], ['drumVolume', '--drum-volume'],
+    ['minVolume', '--min-volume'], ['maxVolume', '--max-volume'], ['loop', '--loop'], ['loopPause', '--loop-pause'], ['drumVolume', '--drum-volume'], ['gain', '--gain'],
     ['background', '--background'], ['from', '--from'], ['to', '--to'], ['trim', '--trim'], ['polyDiv', '--poly-div'], ['wave', '--wave'], ['channelWave', '--channel-wave'],
   ];
   function cliArgs(opts) {

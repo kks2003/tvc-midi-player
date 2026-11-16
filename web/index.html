@@ -143,6 +143,10 @@ td.name .sub { display: block; font: 11.5px var(--font-mono); color: var(--muted
 .fields.compact .field label { font-size: 12px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .fields.compact .field input[type="number"], .fields.compact .field input[type="text"], .fields.compact .field select { padding: 4px 6px; font-size: 13px; }
 .fields.compact .check { font-size: 13px; }
+.gainrow { display: flex; gap: 4px; min-width: 0; }
+.gainrow input { min-width: 0; flex: 1; }
+.gainrow button { padding: 2px 7px; font-size: 12px; }
+#gainInfo.over { color: var(--warn); }
 .pauserow label { font-size: 13px !important; color: inherit !important; overflow: visible !important; }
 .pauserow input[type="number"] { width: 4em !important; padding: 2px 6px !important; font-family: var(--font-mono); border: 1px solid var(--line); border-radius: var(--r); background: var(--surface); color: inherit; }
 .pauserow input:disabled + label, .pauserow input:disabled ~ span { opacity: .5; }
@@ -278,6 +282,8 @@ footer code, .hint code { font-family: var(--font-mono); font-size: 12.5px; }
         <div class="fields compact">
           <div class="field"><label for="drums">Dob (10. cs.)</label>
             <select id="drums"><option value="synth">szintetizált</option><option value="pitched">dallamhangként</option><option value="off">kimarad</option></select></div>
+          <div class="field"><label for="gain" title="Az egész dal hangereje százalékban (100 = alap)">Hangerő %</label>
+            <div class="gainrow"><input id="gain" type="number" min="10" max="400" step="5" value="100"><button id="gainMax" type="button" title="A legnagyobb hangerő, ami még nem torzít">Max</button></div></div>
           <div class="field"><label for="drumVolume" title="A szintetizált dob hangereje százalékban (100 = alap; a legnagyobb szint felett telít)">Dob hangerő %</label><input id="drumVolume" type="number" min="10" max="150" step="10" value="100"></div>
           <div class="field"><label for="transpose">Transzponálás</label><input id="transpose" type="number" min="-48" max="48" value="0"></div>
           <div class="field"><label for="speed">Tempószorzó</label><input id="speed" type="number" min="0.25" max="4" step="0.05" value="1"></div>
@@ -287,6 +293,7 @@ footer code, .hint code { font-family: var(--font-mono); font-size: 12.5px; }
           <div class="field"><label for="curve" title="A leütési erősség görbéje">Erősség-görbe</label><input id="curve" type="number" min="0.2" max="3" step="0.1" value="0.7"></div>
           <div class="field"><label for="minVolume">Min. hangerő</label><input id="minVolume" type="number" min="1" max="15" value="6"></div>
           <div class="field"><label for="maxVolume">Max. hangerő</label><input id="maxVolume" type="number" min="1" max="15" value="15"></div>
+          <p class="hint field wide" id="gainInfo"></p>
           <div class="field" style="grid-column: span 2"><label for="title">Cím (BASIC sor)</label><input id="title" type="text" maxlength="32"></div>
           <label class="check field wide"><input id="loop" type="checkbox"> Végtelenítve szóljon</label>
           <div class="check field wide pauserow"><input id="loopPauseOn" type="checkbox" disabled><label for="loopPauseOn">Szünet ismétlés előtt:</label>
@@ -539,6 +546,7 @@ footer code, .hint code { font-family: var(--font-mono); font-size: 12.5px; }
       transpose: num('transpose'), tuning: num('tuning'), speed: num('speed'),
       decay: num('decay'), decayFloor: num('decayFloor'), curve: num('curve'),
       minVolume: num('minVolume'), maxVolume: num('maxVolume'), loop: $('loop').checked,
+      gain: Math.max(10, Math.min(400, num('gain') || 100)),
       drumVolume: Math.max(10, Math.min(150, num('drumVolume') || 100)),
       loopPause: $('loop').checked && $('loopPauseOn').checked ? Math.max(1, Math.min(9, Math.round(num('loopPause')) || 1)) : 0,
       background: mode !== 'poly' && $('background').checked,
@@ -602,12 +610,42 @@ footer code, .hint code { font-family: var(--font-mono); font-size: 12.5px; }
     if (wasPlaying) play();
     renderRange();
     renderStats(player, warns);
+    renderGain();
     renderBasic(player);
     drawRoll();
     setOutputsEnabled(true);
     updateEmuLink();
     store.set('opts', JSON.stringify(Object.assign({}, o, { channels: undefined })));
   }
+  // a globális hangerő: a torzítás nélküli legnagyobb érték, és ha afölött
+  // van, a minták hány százaléka telít (poly: a keverés előtti összeg szerint)
+  function renderGain() {
+    const el = $('gainInfo'), r = result;
+    if (!r) { el.textContent = ''; return; }
+    let t = 'Torzítás nélkül legfeljebb ' + r.gainMax + '%.';
+    let over = false;
+    if (r.gain > r.gainMax) {
+      over = true;
+      if (r.mode === 'poly') {
+        const song = Uint8Array.from(r.song);
+        for (let i = 0; i < 64; i++) song[16 + i] = i;       // a keverőtábla helyén az összeg
+        const lv = PV.simulate(song, 'poly', 44100).levels;
+        const full = 3 * (2 * ((r.options.polyVolume + 1) >> 1) - 1);
+        const lim = 15.5 * 100 * full / (15 * r.gain);
+        let n = 0;
+        for (const v of lv) if (v >= lim) n++;
+        t += ' Most a minták ' + (100 * n / lv.length).toFixed(2).replace('.', ',') + '%-a telít' +
+          (r.options.polyMix === 'soft' ? ' (a hangos keverés ezt lágyan összenyomja).' : '.');
+      } else t += ' Fölötte a leghangosabb hangok a 15-ös szinten megállnak (nem torzul, de a dinamika szűkül).';
+    }
+    el.textContent = t;
+    el.classList.toggle('over', over);
+  }
+  $('gainMax').addEventListener('click', () => {
+    if (!result) return;
+    $('gain').value = result.gainMax;
+    regenerate();
+  });
   function renderStats(player, warns) {
     const r = result, s = r.stats;
     const secs = r.total / r.rate;
@@ -1102,7 +1140,7 @@ footer code, .hint code { font-family: var(--font-mono); font-size: 12.5px; }
   $('loopPauseOn').addEventListener('change', syncPause);
   syncPause();
   for (const id of ['polyVolume', 'polyKnee', 'polyMix', 'maxNotes', 'arpSpeed', 'arpBass', 'prio', 'drums', 'transpose', 'decay',
-    'decayFloor', 'speed', 'title', 'tuning', 'curve', 'minVolume', 'maxVolume', 'drumVolume', 'loop', 'loopPauseOn', 'loopPause', 'background', 'wave', 'polyDiv', 'trim']) {
+    'decayFloor', 'speed', 'title', 'tuning', 'curve', 'minVolume', 'maxVolume', 'gain', 'drumVolume', 'loop', 'loopPauseOn', 'loopPause', 'background', 'wave', 'polyDiv', 'trim']) {
     $(id).addEventListener(($(id).type === 'checkbox' || $(id).tagName === 'SELECT') ? 'change' : 'input', regenerate);
   }
   $('fileInput').addEventListener('change', (e) => {
