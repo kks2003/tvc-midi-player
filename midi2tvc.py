@@ -729,7 +729,7 @@ def convert_poly(notes, drums, args, sr, tick_rate, ftab, ch_waves):
     vmax = args.poly_volume
     vmin = max(1, min(vmax, int(round(args.min_volume * vmax / 15.0))))
     ticks, seqs = poly_envelope_ticks(ticks, args, vmin, vmax)
-    total = max([t[1] for t in ticks] + [t + 8 for t in drums] + [1] +
+    total = max([t[1] for t in ticks] + [t + max(8, POLY_KIT[k][5] if k in POLY_KIT else 8) for t, (k, _) in drums.items()] + [1] +
                 ([int(round(args.min_len * tick_rate))] if args.min_len else []))
     starts = {}
     for t in ticks:

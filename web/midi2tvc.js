@@ -666,7 +666,7 @@
     const vmin = Math.max(1, Math.min(vmax, pyRound(o.minVolume * vmax / 15.0)));
     const [ticks, seqs] = polyEnvelopeTicks(buildTicks(notes, tickRate), o, vmin, vmax);
     let pause = 0;
-    let total = maxOf(ticks.map((t) => t[1]).concat([...drums.keys()].map((t) => t + 8), [1],
+    let total = maxOf(ticks.map((t) => t[1]).concat([...drums].map(([t, [k]]) => t + Math.max(8, POLY_KIT[k] ? POLY_KIT[k][5] : 8)), [1],
       o.minLen ? [pyRound(o.minLen * tickRate)] : []));
     const starts = groupStarts(ticks);
     const out = [];
