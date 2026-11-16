@@ -85,6 +85,7 @@ Helyben a `web/index.html` közvetlenül megnyitható (`file://` is jó). A
 | `--decay N`, `--decay-floor V` | lecsengés: N tickenként eggyel halkul, legfeljebb V-ig |
 | `--curve`, `--min-volume`, `--max-volume` | MIDI erősség (velocity × CC7 × CC11) leképezése a 4 bites hangerőre |
 | `--loop` | a dal végtelenítve szól |
+| `--envelopes NÉV\|FÁJL` | többszólamú mód: hangszer-burkológörbék a midiplay formátumában: `midiplay` (a midiplay 2.4-es készlete), `tvc` (a TVC-s dav2play változat) vagy egy saját `envelope.txt` (lásd lent) |
 | `--gain SZÁZALÉK` | globális hangerő (alap: 100; `max` = a legnagyobb, ami még nem torzít). Többszólamú módban a keverőtáblát szorozza; egyszólamúban a hangerőket, 15-ön megállva |
 | `--drum-volume SZÁZALÉK` | a szintetizált dob hangereje (alap: 100; a webes felületen 10–150%) |
 | `--loop-pause MP` | ismétlésnél ennyi másodperc szünet a dal vége után (a webes felületen 1–9 mp; alap: 0 = szünet nélkül folytatódik) |
@@ -207,6 +208,42 @@ megszakításból, engedélyezett megszakítással) Szalontai Béla „Többcsat
 hanggeneráló programcsomag”-jából való (MIT licenc). Az első változat
 megszakítás nélküli, számolt idejű hurokban kevert: ott tick közben megállt
 a hang, a hangmagasságot kalibrálni kellett, és a teljes CPU-t elvitte.
+
+### Hangszer-burkológörbék (`--envelopes`)
+
+A többszólamú módban a hangok hangszerenként (a MIDI programváltás szerint)
+kaphatnak burkológörbét: felfutás, lecsengés, kitartás és elengedés. A
+formátum és a működés Varga István
+[midiplay](https://github.com/istvan-v/midiplay) programjából való (GPL 2
+vagy későbbi); a két mellékelt készlet az `envelopes/` könyvtárban van:
+
+- `midiplay-2.4.txt`: a midiplay repó `envelope/envelope-2.4.txt` fájlja,
+- `tvc-dav2play.txt`: a midiplay TVC-s változatához (`dav2play_digi`)
+  használt készlet.
+
+Egy hangszer leírása:
+
+```
+6 P D, 33 {               # programszámok, jelzők (D: elengedés után végigfut)
+   0, 58, 58, 1464, 16;   # hossz (1/50 s), bal, jobb hangerő (0..63), hangmagasság, torzítás
+   4, 39, 39, 1464, 16;   # 4 képkocka alatt lineárisan 39-ig
+R 50, *107, *107, 1464, 16;   # R: ismétlés vége / elengedés; *n: szorzás n/128-cal
+}
+```
+
+`L` = ismétlés eleje (a hang lenyomva tartása alatt `L` és `R` között
+ismétlődik), `S` = egy képkockán kitart. A görbét a konverter a midiplay
+`midiconv` fordítójával bájtra azonosan számolja (ellenőrizve az eredeti C++
+forrással), a lejátszást a `daveplay` szerint követi. A TVC-n a bal és jobb
+hangerő nagyobbika számít, a hangmagasság-változás és a torzítás nincs
+használva, a dobok (negatív számok) helyett a saját dobkészlet szól. Ahol a
+fájl egy programot nem ír le, ott a megszokott lecsengés marad.
+
+A hangerőváltásokat a konverter tickenként a meglévő hangindító paranccsal
+küldi (a fázis nem ugrik), a lejátszó változatlan. Az elengedés utáni
+lecsengéshez a hang tovább foglalja a szólamot, de csak akkor, ha az új
+hangoknak nem kell. A dal adata így nagyobb: a DuckTales 4,2 helyett 4,9–6,7
+KB (a beállításoktól függően).
 
 ## Az egycsatornás lejátszó (`player.asm`)
 
@@ -351,4 +388,22 @@ Akiktől ötletet és tudást vettünk át:
   hanggenerátor, a portok és a megszakítások.
 - **Varga István**: [ep128emu](https://github.com/istvan-v/ep128emu), az
   [Ep128web](https://github.com/kks2003/Ep128web) emulátormagja: a
-  hanggenerátor pontos működése (a `05h` b4 bit), és ezen futnak a tesztek.
+  hanggenerátor pontos működése (a `05h` b4 bit), és ezen futnak a tesztek;
+  valamint a [midiplay](https://github.com/istvan-v/midiplay) (GPL 2 vagy
+  későbbi): a hangszer-burkológörbék formátuma, működése és a két mellékelt
+  készlet (`envelopes/`).
+
+## Licenc
+
+Copyright (C) 2026 kks2003 és a közreműködők.
+
+A tvc-midi-player szabad szoftver: terjeszthető és módosítható a Free
+Software Foundation által kiadott **GNU General Public License 2. vagy
+(választás szerint) bármely későbbi változata** szerint (a szöveg:
+[`COPYING`](COPYING)). A programot a hasznosság reményében adjuk közre, de
+mindenféle garancia nélkül.
+
+Az `envelopes/` fájljai és a burkológörbe-kezelés Varga István midiplay
+programjából valók (GPL 2 vagy későbbi). Az elkészült `.cas` fájlok a
+felhasználóéi; a bennük lévő lejátszókód ugyanezen licenc alatt szabadon
+továbbadható.

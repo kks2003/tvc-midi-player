@@ -1,3 +1,11 @@
+// tvc-midi-player - MIDI-lejátszó és konverter Videoton TVC-re
+// Copyright (C) 2026 kks2003 és a közreműködők
+//
+// Ez a program szabad szoftver: terjeszthető és módosítható a Free Software
+// Foundation által kiadott GNU General Public License 2. vagy (választás
+// szerint) bármely későbbi változata szerint. A programot a hasznosság
+// reményében adjuk közre, de MINDENFÉLE GARANCIA NÉLKÜL. Részletek: COPYING.
+//
 // preview.js - a két TVC lejátszó szimulációja a böngészőben (előnézet).
 // A song.bin-t ugyanúgy értelmezi, mint a player.asm / player_poly.asm:
 //   poly: mintára pontosan (fázisakkumulátorok, hullámtáblák, keverőtábla,

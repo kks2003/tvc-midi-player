@@ -1,4 +1,12 @@
 #!/usr/bin/env python3
+# tvc-midi-player - MIDI-lejátszó és konverter Videoton TVC-re
+# Copyright (C) 2026 kks2003 és a közreműködők
+#
+# Ez a program szabad szoftver: terjeszthető és módosítható a Free Software
+# Foundation által kiadott GNU General Public License 2. vagy (választás
+# szerint) bármely későbbi változata szerint. A programot a hasznosság
+# reményében adjuk közre, de MINDENFÉLE GARANCIA NÉLKÜL. Részletek: COPYING.
+#
 """A két lejátszó gépi kódja a webes felülethez: web/players.js.
 
 Mindkét lejátszót üres dallal fordítja le (sjasmplus). A .cas-ból a BASIC
@@ -63,6 +71,7 @@ def main():
     out = os.path.join(ROOT, "web", "players.js")
     with open(out, "w") as f:
         f.write("// generálta: tools/export_players.py (ne szerkeszd kézzel)\n")
+        f.write("// tvc-midi-player, GPL 2 vagy későbbi (COPYING)\n")
         f.write("// a lejátszók gépi kódja a BASIC programtól a dal elejéig\n")
         f.write("globalThis.TVC_PLAYERS = " + json.dumps(result, separators=(",", ":"), ensure_ascii=False) + ";\n")
         f.write("if (typeof module !== 'undefined') module.exports = globalThis.TVC_PLAYERS;\n")
