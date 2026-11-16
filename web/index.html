@@ -154,6 +154,7 @@ td.name .sub { display: block; font: 11.5px var(--font-mono); color: var(--muted
 .fields.compact .check { font-size: 13px; }
 .gainrow { display: flex; gap: 4px; min-width: 0; }
 .gainrow input { min-width: 0; flex: 1; }
+.gainrow.wide input { flex: 0 1 7em; }
 .gainrow button { padding: 2px 7px; font-size: 12px; }
 #gainInfo.over { color: var(--warn); }
 .pauserow label { font-size: 13px !important; color: inherit !important; overflow: visible !important; }
@@ -297,10 +298,11 @@ footer code, .hint code { font-family: var(--font-mono); font-size: 12.5px; }
       <section class="panel" aria-labelledby="h-snd">
         <h2 id="h-snd">Hang</h2>
         <div class="fields compact">
+          <div class="field wide"><label for="gain" title="Az egész dal hangereje százalékban (100 = alap)">Összhangerő (az egész dal) %</label>
+            <div class="gainrow wide"><input id="gain" type="number" min="10" max="400" step="5" value="100"><button id="gainMax" type="button" title="A legnagyobb hangerő, ami még nem torzít">Max (torzítás nélkül)</button></div></div>
+          <p class="hint field wide" id="gainInfo"></p>
           <div class="field"><label for="drums">Dob (10. cs.)</label>
             <select id="drums"><option value="synth">szintetizált</option><option value="pitched">dallamhangként</option><option value="off">kimarad</option></select></div>
-          <div class="field"><label for="gain" title="Az egész dal hangereje százalékban (100 = alap)">Hangerő %</label>
-            <div class="gainrow"><input id="gain" type="number" min="10" max="400" step="5" value="100"><button id="gainMax" type="button" title="A legnagyobb hangerő, ami még nem torzít">Max</button></div></div>
           <div class="field"><label for="drumVolume" title="A szintetizált dob hangereje százalékban (100 = alap; a legnagyobb szint felett telít)">Dob hangerő %</label><input id="drumVolume" type="number" min="10" max="150" step="10" value="100"></div>
           <div class="field"><label for="transpose">Transzponálás</label><input id="transpose" type="number" min="-48" max="48" value="0"></div>
           <div class="field"><label for="speed">Tempószorzó</label><input id="speed" type="number" min="0.25" max="4" step="0.05" value="1"></div>
@@ -310,7 +312,6 @@ footer code, .hint code { font-family: var(--font-mono); font-size: 12.5px; }
           <div class="field"><label for="curve" title="A leütési erősség görbéje">Erősség-görbe</label><input id="curve" type="number" min="0.2" max="3" step="0.1" value="0.7"></div>
           <div class="field"><label for="minVolume">Min. hangerő</label><input id="minVolume" type="number" min="1" max="15" value="6"></div>
           <div class="field"><label for="maxVolume">Max. hangerő</label><input id="maxVolume" type="number" min="1" max="15" value="15"></div>
-          <p class="hint field wide" id="gainInfo"></p>
           <div class="field" style="grid-column: span 2"><label for="title">Cím (BASIC sor)</label><input id="title" type="text" maxlength="32"></div>
           <label class="check field wide"><input id="loop" type="checkbox"> Végtelenítve szóljon</label>
           <div class="check field wide pauserow"><input id="loopPauseOn" type="checkbox" disabled><label for="loopPauseOn">Szünet ismétlés előtt:</label>
