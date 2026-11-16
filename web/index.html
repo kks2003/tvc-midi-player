@@ -156,6 +156,9 @@ td.name .sub { display: block; font: 11.5px var(--font-mono); color: var(--muted
 .gainrow input { min-width: 0; flex: 1; }
 .gainrow.wide input { flex: 0 1 7em; }
 .gainrow button { padding: 2px 7px; font-size: 12px; }
+.gainrow button, .gainrow select { white-space: nowrap; }
+.gainrow button { flex: none; }
+.gainrow select { min-width: 0; flex: 1; text-overflow: ellipsis; }
 #gainInfo.over { color: var(--warn); }
 .pauserow label { font-size: 13px !important; color: inherit !important; overflow: visible !important; }
 .pauserow input[type="number"] { width: 4em !important; padding: 2px 6px !important; font-family: var(--font-mono); border: 1px solid var(--line); border-radius: var(--r); background: var(--surface); color: inherit; }
