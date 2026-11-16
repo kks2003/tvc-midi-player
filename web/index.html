@@ -619,16 +619,21 @@ footer code, .hint code { font-family: var(--font-mono); font-size: 12.5px; }
     const wasPlaying = !!srcNode, oldFullDur = fullDur(), oldFullPos = fullPos();
     const o = options();
     const warns = [];
-    let full;
+    let full = null;
     try {
       if (!o.channels.length) throw new Error('nincs kiválasztott csatorna');
-      result = M.convertMidi(parsed, o);
-      full = (o.from === null && o.to === null && !o.trim) ? result
-        : M.convertMidi(parsed, Object.assign({}, o, { from: null, to: null, trim: false }));
+      const whole = o.from === null && o.to === null && !o.trim;
+      full = M.convertMidi(parsed, Object.assign({}, o, { from: null, to: null, trim: false }));
+      try { result = whole ? full : M.convertMidi(parsed, o); }
+      catch (e) { throw new Error(e.message + '. A kijelölt rész a „Teljes” gombbal visszaállítható'); }
     } catch (e) {
       stop();
       offset = 0;
-      result = null; sim = null; casBytes = null; fullResult = null; fullSim = null;
+      result = null; sim = null; casBytes = null;
+      // a teljes dal tekercse megmarad, ha csak a kijelölt rész üres: így a
+      // rész átállítható vagy a „Teljes” gombbal visszaállítható
+      fullResult = full;
+      fullSim = full ? PV.simulate(full.song, o.mode, 44100) : null;
       renderRange();
       $('stats').textContent = '';
       $('mem').textContent = '';
@@ -858,7 +863,9 @@ footer code, .hint code { font-family: var(--font-mono); font-size: 12.5px; }
     g.fillStyle = cssVar('--muted');
     g.fillText('dob', W - 28, H - 5);
     // a mentett rész: kívüle sötétebb, a határain vonal
-    const rs = effStart(), re = effStart() + rangeLen();
+    // a kijelölt rész; ha belőle nem készült program, a beállított határok
+    const rs = result ? effStart() : (rangeFrom === null ? 0 : rangeFrom / spd());
+    const re = result ? effStart() + rangeLen() : (rangeTo === null ? dur : rangeTo / spd());
     const x0 = xOfS(rs), x1 = xOfS(re);
     if (rs > 0.01 || re < fullResult.range.start + fullResult.range.length - 0.01) {
       g.fillStyle = cssVar('--shade');
@@ -1078,7 +1085,7 @@ footer code, .hint code { font-family: var(--font-mono); font-size: 12.5px; }
     if (document.activeElement !== $('rFrom')) $('rFrom').value = fmtTime(rangeFrom === null ? 0 : rangeFrom / spd());
     if (document.activeElement !== $('rTo')) $('rTo').value = rangeTo === null ? '' : fmtTime(rangeTo / spd());
     const whole = rangeFrom === null && rangeTo === null;
-    $('rAll').disabled = whole || !fullSim;
+    $('rAll').disabled = whole || !parsed;
     for (const id of ['rFrom', 'rTo', 'rFromHere', 'rToHere']) $(id).disabled = !fullSim;
     $('rInfo').textContent = !result ? '' : (whole && !$('trim').checked ? 'a teljes dal'
       : 'mentve: ' + fmtTime(effStart()) + '–' + fmtTime(effStart() + rangeLen()) + ' (' + rangeLen().toFixed(1).replace('.', ',') + ' s)');
