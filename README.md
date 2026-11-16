@@ -366,10 +366,8 @@ FILE: eszköze ott keresi a fájlokat.
 
 ## Tervek
 
-- Poly: 4. szólam; csatornánkénti szólam-hozzárendelés (`--voice 1=melody`).
-- Poly: háttér-mód gépi kódú programok mellé (belépési pontok: indítás,
-  leállítás, képkocka-szinkron), egy 2 csatornás, CRTC-szinkronos
-  lejátszójának mintájára.
+A tervezett bővítések (moduláris, választható funkciók; mintavételezett
+dobok; pitch bend; hangkártyák: Multichip, 256k++ vSID, GameCard): [`TODO.md`](TODO.md).
 
 ## Köszönet
 
