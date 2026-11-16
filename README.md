@@ -85,6 +85,7 @@ Helyben a `web/index.html` közvetlenül megnyitható (`file://` is jó). A
 | `--decay N`, `--decay-floor V` | lecsengés: N tickenként eggyel halkul, legfeljebb V-ig |
 | `--curve`, `--min-volume`, `--max-volume` | MIDI erősség (velocity × CC7 × CC11) leképezése a 4 bites hangerőre |
 | `--loop` | a dal végtelenítve szól |
+| `--gain SZÁZALÉK` | globális hangerő (alap: 100; `max` = a legnagyobb, ami még nem torzít). Többszólamú módban a keverőtáblát szorozza; egyszólamúban a hangerőket, 15-ön megállva |
 | `--drum-volume SZÁZALÉK` | a szintetizált dob hangereje (alap: 100; a webes felületen 10–150%) |
 | `--loop-pause MP` | ismétlésnél ennyi másodperc szünet a dal vége után (a webes felületen 1–9 mp; alap: 0 = szünet nélkül folytatódik) |
 | `--background` | egycsatornás lejátszó: háttérben szól, a BASIC közben fut (lásd lent) |

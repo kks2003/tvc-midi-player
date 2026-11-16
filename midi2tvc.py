@@ -409,22 +409,24 @@ def poly_peak(vol):
     return 2 * ((vol + 1) >> 1) - 1 if vol > 0 else 0
 
 
-def poly_mix_table(knee, ceiling=15, mode="clean", vmax=9):
+def poly_mix_table(knee, ceiling=15, mode="clean", vmax=9, gain=100):
     """A szólamok összege (0..45) -> 4 bites kimenet.
     clean: a három szólam teljes összege (3 x a szólam legnagyobb csúcsa)
            lineárisan 0..15-re, így nem telít (a dobok csúcsán legfeljebb
            egy pillanatra)
     soft:  a térdig 1:1, fölötte lágy telítés: hangosabb, de erősen
-           összenyom (szinusznál, háromszögnél torzításként hallható)"""
+           összenyom (szinusznál, háromszögnél torzításként hallható)
+    gain: globális hangerő százalékban (a keverés előtt szoroz)"""
     out = []
     full = 3 * poly_peak(vmax)
     for s in range(64):
+        g = s * gain / 100.0
         if mode == "clean":
-            v = s * ceiling / float(full)
-        elif s <= knee:
-            v = s
+            v = g * ceiling / float(full)
+        elif g <= knee:
+            v = g
         else:
-            v = knee + (ceiling - knee) * (1 - math.exp(-(s - knee) / 12.0))
+            v = knee + (ceiling - knee) * (1 - math.exp(-(g - knee) / 12.0))
         out.append(max(0, min(ceiling, int(round(v)))))
     return out
 
@@ -453,7 +455,8 @@ def convert_poly(notes, drums, args, sr, tick_rate, ftab, ch_waves):
     vmin = max(1, min(vmax, int(round(args.min_volume * vmax / 15.0))))
     out = bytearray()
     pending = [0]
-    stats = {"notes": 0, "drums": len(drums), "voices_max": 0}
+    stats = {"notes": 0, "drums": len(drums), "voices_max": 0, "peak_sum": 0}
+    lvl = [0] * POLY_VOICES           # a szólamok hangereje a megszólaláskor (felső becslés)
     slots = []                        # hullámforma-helyek a megjelenés sorrendjében
 
     def slot_of(wave):
@@ -492,6 +495,7 @@ def convert_poly(notes, drums, args, sr, tick_rate, ftab, ch_waves):
                 reserved[v] = 0
                 emit(bytes((0xB0 + v,)))
                 cur[v] = None
+                lvl[v] = 0
         # a hangok sorrendje: legmagasabb, legmélyebb, majd a többi lefelé
         uniq = {}
         for idx, (st, en, n, v, ch) in active.items():
@@ -522,6 +526,7 @@ def convert_poly(notes, drums, args, sr, tick_rate, ftab, ch_waves):
                     vol = max(1, drum_level(vol, args.drum_volume) - att)
                     set_wave(v, wave)
                     emit(bytes((0xB8 + v, note, (vol << 4) | dec, slide & 0xFF, slide >> 8)))
+                    lvl[v] = vol
                     reserved[v] = t + dur
                     cur[v] = None
         free = [v for v in range(POLY_VOICES) if not reserved[v]]
@@ -543,12 +548,15 @@ def convert_poly(notes, drums, args, sr, tick_rate, ftab, ch_waves):
             vol = velocity_to_volume(vel, args.curve, vmin, vmax)
             set_wave(v, ch_waves.get(ch, args.wave))
             emit(bytes((0x80 + 16 * v + vol, n)))
+            lvl[v] = vol
             stats["notes"] += 1
             new_cur[v] = (idx, n)
         for v in free:
             if v not in new_cur and cur[v] is not None:
                 emit(bytes((0xB0 + v,)))
+                lvl[v] = 0
             cur[v] = new_cur.get(v)
+        stats["peak_sum"] = max(stats["peak_sum"], sum(poly_peak(x) for x in lvl))
         pending[0] += 1
     encode_wait_poly(out, pending[0])
     out += bytes([0xB0, 0xB1, 0xB2])
@@ -580,6 +588,17 @@ def velocity_to_volume(vel, curve, vmin, vmax):
     """MIDI erősség (0..127, a CC7/CC11 már benne) -> 1..15."""
     x = max(0.0, min(1.0, vel / 127.0)) ** curve
     return max(vmin, min(vmax, int(round(vmin + x * (vmax - vmin)))))
+
+
+def gain_volume(vol, gain):
+    """az egyszólamú lejátszó hangereje (1..15) a globális hangerővel; 15-ön
+    megáll (a négyszögjel ott sem torzul, csak a dinamika szűkül)"""
+    return max(1, min(15, int(round(vol * gain / 100.0))))
+
+
+def max_gain(full, peak):
+    """a torzítás nélküli legnagyobb globális hangerő százalékban"""
+    return int(100 * full // peak) if peak else 100
 
 
 def build_ticks(notes, rate):
@@ -643,7 +662,7 @@ def convert(notes, args, drums=None):
     prev = None          # (notes tuple, idx set) az előző tickben
     cur_vol = None
     pending_wait = 0
-    stats = {"chords": 0, "notes": 0, "rests": 0, "drums": len(drums)}
+    stats = {"chords": 0, "notes": 0, "rests": 0, "drums": len(drums), "max_vol": 0}
     for t in range(total + 1):
         for k in [k for k, a in active.items() if a[1] <= t]:
             del active[k]
@@ -663,6 +682,8 @@ def convert(notes, args, drums=None):
                 else:
                     vol = velocity_to_volume(max(s[1] for s in sel), args.curve,
                                              args.min_volume, args.max_volume)
+                    stats["max_vol"] = max(stats["max_vol"], vol)
+                    vol = gain_volume(vol, args.gain)
                     if vol != cur_vol:
                         out.append(0x90 | vol)
                         cur_vol = vol
@@ -736,6 +757,9 @@ def main():
     ap.add_argument("--min-volume", type=int, default=6)
     ap.add_argument("--max-volume", type=int, default=15)
     ap.add_argument("--loop", action="store_true", help="a dal végtelenítve szól")
+    ap.add_argument("--gain", default="100", metavar="SZÁZALÉK",
+                    help="globális hangerő százalékban (alap: 100); 'max' = a legnagyobb, "
+                         "ami még nem torzít")
     ap.add_argument("--drum-volume", type=float, default=100, metavar="SZÁZALÉK",
                     help="a szintetizált dob hangereje százalékban (alap: 100, a 15-ös szint felett telít)")
     ap.add_argument("--loop-pause", type=float, default=0, metavar="MP",
@@ -753,6 +777,13 @@ def main():
     ap.add_argument("--max-size", type=int, default=20000,
                     help="figyelmeztet, ha az adat ennél nagyobb (a 32k-s TVC miatt)")
     args = ap.parse_args()
+    gain_auto = args.gain == "max"
+    try:
+        args.gain = 100.0 if gain_auto else float(args.gain)
+    except ValueError:
+        ap.error("--gain: százalék vagy 'max'")
+    if not 1 <= args.gain <= 1000:
+        ap.error("--gain: 1..1000")
 
     if args.channels:
         channels = {int(c) - 1 for c in args.channels.split(",")}
@@ -782,9 +813,14 @@ def main():
     if args.mode == "poly":
         if args.background:
             print("figyelem: a háttér-mód csak az egycsatornás lejátszóval működik (a poly a teljes CPU-t használja)")
-        write_poly(args, notes, drums)
+        write_poly(args, notes, drums, gain_auto)
         return
     body, total, stats = convert(notes, args, drums)
+    top = max_gain(15, stats["max_vol"])
+    if gain_auto:
+        args.gain = top
+        body, total, stats = convert(notes, args, drums)
+    print("hangerő: %g%% (torzítás nélkül legfeljebb %d%%)" % (args.gain, top))
 
     flags = (1 if args.loop else 0) | (2 if args.background else 0)
     table = pitch_table(args.tuning)
@@ -793,7 +829,7 @@ def main():
                          max(0, min(15, args.decay_floor)), 0, kit_offset)
     data = header + b"".join(struct.pack("<H", p) for p in table) + body
     if drums:
-        data += build_kit(kit_offset, args.drum_volume)
+        data += build_kit(kit_offset, args.drum_volume * args.gain / 100.0)
 
     os.makedirs(os.path.dirname(os.path.abspath(args.output)), exist_ok=True)
     with open(args.output, "wb") as f:
@@ -843,7 +879,7 @@ def write_title(args):
             f.write(tvc_title(title))
 
 
-def write_poly(args, notes, drums_sec):
+def write_poly(args, notes, drums_sec, gain_auto=False):
     if not POLY_DIV_MIN <= args.poly_div <= POLY_DIV_MAX:
         sys.exit("--poly-div: %d..%d" % (POLY_DIV_MIN, POLY_DIV_MAX))
     sr, tickn, tick_rate = poly_rates(args.poly_div)
@@ -860,10 +896,15 @@ def write_poly(args, notes, drums_sec):
         body, total, stats, slots = convert_poly(notes, drums, args, sr, tick_rate, ftab, ch_waves)
     except ValueError as e:
         sys.exit(str(e))
+    top = max_gain(3 * poly_peak(args.poly_volume), stats["peak_sum"])
+    if gain_auto:
+        args.gain = top
+    print("hangerő: %g%% (torzítás nélkül legfeljebb %d%%)" % (args.gain, top))
     header = struct.pack("<BBBBHBB", 1 if args.loop else 0, args.decay,
                          max(0, min(15, args.decay_floor)), args.poly_div, 0, tickn, len(slots))
     header += bytes(slots + [0] * (MAX_SLOTS - len(slots))) + bytes(3)
-    data = header + bytes(poly_mix_table(args.poly_knee, mode=args.poly_mix, vmax=args.poly_volume)) + \
+    data = header + bytes(poly_mix_table(args.poly_knee, mode=args.poly_mix, vmax=args.poly_volume,
+                                         gain=args.gain)) + \
         b"".join(struct.pack("<H", f) for f in ftab) + body
     os.makedirs(os.path.dirname(os.path.abspath(args.output)), exist_ok=True)
     with open(args.output, "wb") as f:
