@@ -273,7 +273,7 @@ footer code, .hint code { font-family: var(--font-mono); font-size: 12.5px; }
               <option value="midiplay">midiplay 2.4</option>
               <option value="tvc">midiplay, TVC-s (dav2play) változat</option>
               <option value="file">saját envelope.txt…</option>
-            </select><input id="envFile" type="file" accept=".txt,text/plain" hidden></div></div>
+            </select><button id="envLoad" type="button" title="Másik envelope.txt betöltése" hidden>Másik fájl…</button><input id="envFile" type="file" accept=".txt,text/plain" hidden></div></div>
           <p class="hint field wide" id="envHint" hidden>Hangszerenként felfutás, lecsengés, kitartás és elengedés, Varga István midiplay programjának hangszer-burkológörbéivel (GPL 2). A hangmagasság-változásokat és a torzítást a TVC nem használja; a dobok a saját dobkészlettel szólnak. A görbék tickenkénti hangerőváltásai miatt a dal adata nagyobb.</p>
           <div class="field"><label for="wave">Hullámforma</label><select id="wave"><option value="square">négyszög</option><option value="pulse">impulzus (25%)</option><option value="triangle">háromszög</option><option value="saw">fűrész</option><option value="sine">szinusz</option></select></div>
           <div class="field"><label for="polyDiv">Mintavétel</label>
@@ -582,18 +582,24 @@ footer code, .hint code { font-family: var(--font-mono); font-size: 12.5px; }
     if (v === 'file') return envCustom;
     return v || null;
   }
+  $('envLoad').addEventListener('click', () => $('envFile').click());
   $('envSel').addEventListener('change', () => {
     $('envHint').hidden = !$('envSel').value;
+    $('envLoad').hidden = $('envSel').value !== 'file';
     if ($('envSel').value === 'file' && !envCustom) { $('envFile').click(); return; }
     regenerate();
   });
   $('envFile').addEventListener('change', (e) => {
     const f = e.target.files[0];
     e.target.value = '';
-    if (!f) { if (!envCustom) { $('envSel').value = ''; $('envHint').hidden = true; } return; }
+    if (!f) { if (!envCustom) { $('envSel').value = ''; $('envHint').hidden = true; $('envLoad').hidden = true; } return; }
     f.text().then((text) => {
       try { M.compileEnvelopes(text); }
-      catch (err) { setStatus('A burkológörbe-fájl hibás: ' + err.message + '.', true); if (!envCustom) $('envSel').value = ''; return; }
+      catch (err) {
+        setStatus('A burkológörbe-fájl hibás: ' + err.message + '.', true);
+        if (!envCustom) { $('envSel').value = ''; $('envHint').hidden = true; $('envLoad').hidden = true; }
+        return;
+      }
       envCustom = { name: M.asciiName(f.name.replace(/\.[^.]*$/, '')) + '.txt', text };
       $('envSel').querySelector('option[value="file"]').textContent = 'saját: ' + f.name;
       setStatus('');
