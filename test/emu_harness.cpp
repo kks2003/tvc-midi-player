@@ -1,3 +1,11 @@
+// tvc-midi-player - MIDI-lejátszó és konverter Videoton TVC-re
+// Copyright (C) 2026 kks2003 és a közreműködők
+//
+// Ez a program szabad szoftver: terjeszthető és módosítható a Free Software
+// Foundation által kiadott GNU General Public License 2. vagy (választás
+// szerint) bármely későbbi változata szerint. A programot a hasznosság
+// reményében adjuk közre, de MINDENFÉLE GARANCIA NÉLKÜL. Részletek: COPYING.
+//
 // Ep128web (ep128emu) natív tesztmeghajtó a TVC MIDI-lejátszóhoz.
 //   emu_harness <rom-csomag> <név> <másodperc> <out.wav> <portlog.txt> [stop-mp]
 // A /files/<név>.cas fájlnak léteznie kell (a FILE: eszköz könyvtára).

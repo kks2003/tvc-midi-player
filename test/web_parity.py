@@ -1,4 +1,12 @@
 #!/usr/bin/env python3
+# tvc-midi-player - MIDI-lejátszó és konverter Videoton TVC-re
+# Copyright (C) 2026 kks2003 és a közreműködők
+#
+# Ez a program szabad szoftver: terjeszthető és módosítható a Free Software
+# Foundation által kiadott GNU General Public License 2. vagy (választás
+# szerint) bármely későbbi változata szerint. A programot a hasznosság
+# reményében adjuk közre, de MINDENFÉLE GARANCIA NÉLKÜL. Részletek: COPYING.
+#
 """A webes konverter (web/midi2tvc.js) és a Python változat bájtra azonos
 kimenetének ellenőrzése: ugyanazokkal a beállításokkal a build.sh és a
 node is elkészíti a .cas fájlt.  A weboldal forráscsomagját is ellenőrzi:
@@ -38,6 +46,11 @@ CASES = [
     (["--loop", "--loop-pause", "3"], {"loop": True, "loopPause": 3}),
     (["--drum-volume", "60"], {"drumVolume": 60}),
     (["--gain", "150"], {"gain": 150}),
+    (["--mode", "poly", "--envelopes", "midiplay"], {"mode": "poly", "envelopes": "midiplay"}),
+    (["--mode", "poly", "--envelopes", "tvc", "--loop", "--decay", "3", "--gain", "max"],
+     {"mode": "poly", "envelopes": "tvc", "loop": True, "decay": 3, "gain": "max"}),
+    (["--mode", "poly", "--envelopes", "tvc", "--wave", "triangle", "--from", "3", "--to", "20"],
+     {"mode": "poly", "envelopes": "tvc", "wave": "triangle", "from": 3, "to": 20}),
     (["--gain", "60", "--mode", "poly"], {"gain": 60, "mode": "poly"}),
     (["--gain", "max", "--mode", "poly", "--poly-mix", "soft"], {"gain": "max", "mode": "poly", "polyMix": "soft"}),
     (["--gain", "max", "--mode", "arp"], {"gain": "max", "mode": "arp"}),
@@ -58,6 +71,7 @@ RUNNER = r"""
 const fs = require('fs');
 const M = require(process.argv[2] + '/web/midi2tvc.js');
 const P = require(process.argv[2] + '/web/players.js');
+require(process.argv[2] + '/web/envelopes.js');
 const job = JSON.parse(fs.readFileSync(process.argv[3], 'utf8'));
 const r = M.convertMidi(new Uint8Array(fs.readFileSync(job.midi)), job.opts);
 const cas = M.buildCas(r.mode === 'poly' ? P.poly : P.mono, r.song, job.title);

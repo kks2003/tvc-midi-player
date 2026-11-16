@@ -1,4 +1,12 @@
 #!/usr/bin/env python3
+# tvc-midi-player - MIDI-lejátszó és konverter Videoton TVC-re
+# Copyright (C) 2026 kks2003 és a közreműködők
+#
+# Ez a program szabad szoftver: terjeszthető és módosítható a Free Software
+# Foundation által kiadott GNU General Public License 2. vagy (választás
+# szerint) bármely későbbi változata szerint. A programot a hasznosság
+# reményében adjuk közre, de MINDENFÉLE GARANCIA NÉLKÜL. Részletek: COPYING.
+#
 """Végponttól végpontig tartó teszt a valódi TVC ROM-mal, az Ep128web
 emulátormagjával (ep128emu, natívan fordítva).
 

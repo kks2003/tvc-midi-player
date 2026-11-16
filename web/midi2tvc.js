@@ -1,3 +1,11 @@
+// tvc-midi-player - MIDI-lejátszó és konverter Videoton TVC-re
+// Copyright (C) 2026 kks2003 és a közreműködők
+//
+// Ez a program szabad szoftver: terjeszthető és módosítható a Free Software
+// Foundation által kiadott GNU General Public License 2. vagy (választás
+// szerint) bármely későbbi változata szerint. A programot a hasznosság
+// reményében adjuk közre, de MINDENFÉLE GARANCIA NÉLKÜL. Részletek: COPYING.
+//
 // midi2tvc.js - a midi2tvc.py JavaScript-portja (böngészőben és node-ban).
 // A kimenete bájtra azonos a Python változatéval (test/web_parity.js
 // ellenőrzi), ezért a függvények és a sorrendek a Python kódot követik.
@@ -116,7 +124,11 @@
         }
         const hi = status & 0xF0, ch = status & 0x0F;
         if (hi === 0xC0 || hi === 0xD0) {
-          if (hi === 0xC0 && !(ch in info.programs)) info.programs[ch] = data[p];   // az első hangszer (csak kijelzéshez)
+          if (hi === 0xC0) {
+            if (!(ch in info.programs)) info.programs[ch] = data[p];   // az első hangszer (kijelzéshez)
+            events.push([tick, order, 'prog', ch, data[p], 0]);
+            order++;
+          }
           p++;
           continue;
         }
@@ -163,20 +175,22 @@
     };
   }
 
-  // -> [[start, end, note, vel, ch]]
+  // -> [[start, end, note, vel, ch, program]] (program: a leütéskor érvényes hangszer)
   function collectNotes(division, events, channels, transpose, speed) {
     const conv = tickToSeconds(division, events);
     const open = new Map(), held = new Map();
     const sustain = new Array(16).fill(false);
     const volume = new Array(16).fill(100), expression = new Array(16).fill(127);
+    const program = new Array(16).fill(0);
     const notes = [];
     const K = (ch, n) => ch * 256 + n;
-    const finish = (ch, note, start, vel, end) =>
-      notes.push([start, end, note, vel * volume[ch] * expression[ch] / (127 * 127), ch]);
+    const finish = (ch, note, start, [vel, pg], end) =>
+      notes.push([start, end, note, vel * volume[ch] * expression[ch] / (127 * 127), ch, pg]);
     for (const [tick, , kind, ch, a, b] of events) {
       const t = conv(tick) / speed;
       if (kind === 'tempo') continue;
       if (channels && !channels.has(ch)) continue;
+      if (kind === 'prog') { program[ch] = a; continue; }
       if (kind === 'cc') {
         if (a === 7) volume[ch] = b;
         else if (a === 11) expression[ch] = b;
@@ -208,7 +222,7 @@
           held.delete(key);
         }
         if (!open.has(key)) open.set(key, []);
-        open.get(key).push([t, b]);
+        open.get(key).push([t, [b, program[ch]]]);
       } else {
         const lst = open.get(key);
         if (!lst || !lst.length) continue;
@@ -235,9 +249,9 @@
     const hi = end !== null && end !== undefined ? end / speed : Infinity;
     const clip = (lst, onsetOnly) => {
       const out = [];
-      for (const [s, e, n, v, ch] of lst) {
-        if (onsetOnly) { if (lo <= s && s < hi) out.push([s, Math.min(e, hi), n, v, ch]); }
-        else if (s < hi && e > lo) out.push([Math.max(s, lo), Math.min(e, hi), n, v, ch]);
+      for (const [s, e, n, v, ch, pg] of lst) {
+        if (onsetOnly) { if (lo <= s && s < hi) out.push([s, Math.min(e, hi), n, v, ch, pg]); }
+        else if (s < hi && e > lo) out.push([Math.max(s, lo), Math.min(e, hi), n, v, ch, pg]);
       }
       return out;
     };
@@ -249,7 +263,7 @@
       if (onsets.length) shift = onsets.reduce((a, b) => Math.min(a, b));
     }
     const minLen = (end !== null && end !== undefined && !trim) ? hi - lo : null;
-    const move = (lst) => lst.map(([s, e, n, v, ch]) => [s - shift, e - shift, n, v, ch]).sort(cmpTuple);
+    const move = (lst) => lst.map(([s, e, n, v, ch, pg]) => [s - shift, e - shift, n, v, ch, pg]).sort(cmpTuple);
     return [move(notes), move(drumNotes), shift, minLen];
   }
 
@@ -375,9 +389,9 @@
     return clamp(pyRound(vmin + x * (vmax - vmin)), vmin, vmax);
   }
   function buildTicks(notes, rate) {
-    return notes.map(([s, e, n, v, ch], i) => {
+    return notes.map(([s, e, n, v, ch, pg], i) => {
       const st = pyRound(s * rate);
-      return [st, Math.max(st + 1, pyRound(e * rate)), n, v, ch, i];
+      return [st, Math.max(st + 1, pyRound(e * rate)), n, v, ch, i, pg];
     });
   }
   function choose(active, mode, prio, maxNotes, keepBass) {
@@ -479,14 +493,182 @@
     return { body: out, total, stats, pause };
   }
 
+  // ---- hangszer-burkológörbék (a midiplay envelope.txt formátuma) ---------------
+  // A formátum és a működés Varga István midiplay programjából való (GPL 2 vagy
+  // későbbi; https://github.com/istvan-v/midiplay, midiconv.cpp, daveplay.cpp);
+  // ugyanaz, mint a midi2tvc.py compile_envelopes / envelope_levels.
+  const ENV_TAIL_MAX = 250;
+  const isDigit = (c) => c >= '0' && c <= '9';
+  // -> Map(program -> [képkockák [[bal, jobb]], jelzők])
+  function compileEnvelopes(text) {
+    let buf = '', comment = false;
+    for (const c of text) {
+      if (comment && c !== '\r' && c !== '\n' && c !== '\0') continue;
+      comment = false;
+      if (c.codePointAt(0) <= 32) continue;
+      if (c === '#') { comment = true; continue; }
+      buf += c;
+    }
+    buf += '\0';
+    let pos = 0;
+    const fail = (m) => { throw new Error(m + ' a burkológörbe-fájlban'); };
+    const readChar = () => {
+      const c = buf[pos];
+      if (isDigit(c) || c === '+' || c === '-') return '0';
+      if (c !== '\0') pos++;
+      return c;
+    };
+    const readNumber = () => {
+      let neg = false, c = buf[pos];
+      if (c === '+' || c === '-') { neg = c === '-'; c = buf[++pos]; }
+      if (!isDigit(c)) fail('hibás szám');
+      let n = 0;
+      while (isDigit(buf[pos])) n = n * 10 + (buf.charCodeAt(pos++) - 48);
+      return neg ? -n : n;
+    };
+    const expect = (ch) => { if (readChar() !== ch) fail('szintaktikai hiba'); };
+    const out = new Map();
+    while (buf[pos] !== '\0') {
+      let flags = 0x20;
+      const progs = [];
+      for (;;) {
+        const n = readNumber();
+        if (n < -127 || n > 127) fail('hibás programszám');
+        progs.push(n);
+        let c = readChar();
+        while (c.toLowerCase() === 'p' || c.toLowerCase() === 'd') {
+          if (c.toLowerCase() === 'd') flags = 0x30;
+          c = readChar();
+        }
+        if (c === ':') { expect('0'); readNumber(); expect(','); expect('0'); readNumber(); c = readChar(); }
+        if (c === '{') break;
+        if (c !== ',') fail('szintaktikai hiba');
+      }
+      let vl = 0x80, vlInc = 0, vlMult = 0, vr = 0x80, vrInc = 0, vrMult = 0, d = 0;
+      const frames = [];
+      for (;;) {
+        if (d) {
+          frames.push([(vl >> 8) & 0xFF, (vr >> 8) & 0xFF]);
+          d--;
+          vl &= 0x3FFF;
+          vl = vlMult ? (vl * vlMult + 64) >> 7 : vl + vlInc;
+          vl = vl < 0 ? 0 : Math.min(vl, 0x3FFF);
+          vr &= 0x3FFF;
+          vr = vrMult ? (vr * vrMult + 64) >> 7 : vr + vrInc;
+          vr = vr < 0 ? 0 : Math.min(vr, 0x3FFF);
+          continue;
+        }
+        let c = readChar();
+        if (c === '}') break;
+        expect('0');
+        const n = readNumber();
+        if (n < 0 || n > 255) fail('hibás szakaszhossz');
+        d = n;
+        if (c !== '0' && n) {
+          const m = c.toLowerCase();
+          if (m === 'l') { if (flags !== 0x20) fail('hibás ismétlés'); vl |= 0x4000; flags = 0x00; }
+          else if (m === 'r') { if (flags === 0x10) fail('hibás ismétlés'); vl |= flags ? 0xC000 : 0x8000; flags = 0x10; }
+          else if (m === 's') { if (flags !== 0x20) fail('hibás ismétlés'); vl |= 0xC000; }
+          else fail('szintaktikai hiba');
+          c = '0';
+        }
+        if (c !== '0' || readChar() !== ',') fail('szintaktikai hiba');
+        for (const side of [0, 1]) {
+          c = readChar();
+          const mult = c === '*';
+          if (mult) c = readChar();
+          if (c !== '0') fail('szintaktikai hiba');
+          const v = readNumber();
+          if (mult ? !(v >= 1 && v < 256) : !(v >= 0 && v < 64)) fail('hibás hangerő');
+          const step = (cur) => {
+            let x = ((v << 8) | 0x80) - (cur & 0x3FFF);
+            x += x < 0 ? -(d >> 1) : d >> 1;
+            return Math.trunc(x / d);
+          };
+          if (side === 0) {
+            if (mult) vlMult = v;
+            else { vlMult = 0; if (!d) vl = (vl & 0xC000) | (v << 8) | 0x80; else vlInc = step(vl); }
+          } else if (mult) vrMult = v;
+          else { vrMult = 0; if (!d) vr = (v << 8) | 0x80; else vrInc = step(vr); }
+          if (readChar() !== ',') fail('szintaktikai hiba');
+        }
+        expect('0'); readNumber(); expect(',');      // hangmagasság
+        expect('0'); readNumber(); expect(';');      // torzítás
+      }
+      frames.push([0x80, flags ? 0xFF : 0x00]);
+      for (const n of progs) if (n >= 0) out.set(n, [frames, flags]);
+    }
+    return out;
+  }
+  // a hang burkológörbéje képkockánként (0..63); held képkocka után engedik el
+  function envelopeLevels([frames, flags], held) {
+    let state = flags & 0xB0, releasing = false, ptr = 0, loop = null, t = 0;
+    const out = [];
+    while (out.length < held + ENV_TAIL_MAX) {
+      if (t === held && !releasing) {
+        if (!(state & 0x10)) break;
+        releasing = true;
+        if (frames[ptr][0] >= 0xC0) ptr++;
+      }
+      if (ptr >= frames.length) break;
+      let [b0, b1] = frames[ptr];
+      if (b0 & 0xC0) {
+        if (b1 === 0xFF) break;
+        if (!releasing) {
+          const m = b0 & 0xC0;
+          if (m === 0x40) { loop = ptr; ptr++; }
+          else if (m === 0x80) {
+            if (loop === null) break;
+            [b0, b1] = frames[loop];
+            ptr = loop + 1;
+          } else state = 0x10;
+        } else ptr++;
+        b0 &= 0x3F;
+      } else ptr++;
+      out.push(Math.max(b0, b1));
+      t++;
+    }
+    return out;
+  }
+  // -> [tickek, Map(idx -> [hangerő tickenként, az elengedés tickje])]
+  function polyEnvelopeTicks(ticks, o, vmin, vmax) {
+    const env = o.envelopeData;
+    const seqs = new Map();
+    if (!env) return [ticks, seqs];
+    const out = [];
+    const floor = clamp(o.decayFloor, 0, 15);
+    for (const [st, en, n, v, ch, idx, pg] of ticks) {
+      const base = velocityToVolume(v, o.curve, vmin, vmax);
+      let seq;
+      if (env.has(pg)) seq = envelopeLevels(env.get(pg), en - st).map((x) => Math.floor((x * base * 2 + 63) / 126));
+      else if (o.decay) seq = Array.from({ length: en - st }, (_, k) => Math.max(Math.min(base, floor), base - Math.floor(k / o.decay)));
+      else seq = new Array(en - st).fill(base);
+      while (seq.length && !seq[seq.length - 1]) seq.pop();
+      if (!seq.length) continue;
+      seqs.set(idx, [seq, en]);
+      out.push([st, st + seq.length, n, v, ch, idx, pg]);
+    }
+    return [out, seqs];
+  }
+  // 'midiplay' / 'tvc' (a mellékelt fájlok, envelopes.js) vagy {name, text}
+  function envelopeSource(spec) {
+    if (!spec) return null;
+    if (typeof spec === 'string') {
+      const lib = (typeof globalThis !== 'undefined' && globalThis.TVC_ENVELOPES) || {};
+      if (!(spec in lib)) throw new Error('ismeretlen burkológörbe-készlet: ' + spec);
+      return lib[spec];
+    }
+    return spec.text;
+  }
+
   function convertPoly(notes, drums, o, sr, tickRate, ftab, chWaves) {
-    const ticks = buildTicks(notes, tickRate);
+    const vmax = o.polyVolume;
+    const vmin = Math.max(1, Math.min(vmax, pyRound(o.minVolume * vmax / 15.0)));
+    const [ticks, seqs] = polyEnvelopeTicks(buildTicks(notes, tickRate), o, vmin, vmax);
     let pause = 0;
     let total = maxOf(ticks.map((t) => t[1]).concat([...drums.keys()].map((t) => t + 8), [1],
       o.minLen ? [pyRound(o.minLen * tickRate)] : []));
     const starts = groupStarts(ticks);
-    const vmax = o.polyVolume;
-    const vmin = Math.max(1, Math.min(vmax, pyRound(o.minVolume * vmax / 15.0)));
     const out = [];
     let pending = 0;
     const stats = { notes: 0, drums: drums.size, voices_max: 0, chords: 0, rests: 0, peak_sum: 0 };
@@ -517,13 +699,18 @@
       for (let v = 0; v < POLY_VOICES; v++) {
         if (reserved[v] && reserved[v] <= t) { reserved[v] = 0; emit(0xB0 + v); cur[v] = null; lvl[v] = 0; }
       }
-      const uniq = new Map();
+      // (burkológörbével az elengedett, még lecsengő hangok csak a szabad
+      // szólamokra jutnak, a lenyomva tartottak után)
+      const uniq = new Map(), tails = [];
       for (const [idx, [st, , n, v]] of active) {
-        if (!uniq.has(n) || st > uniq.get(n)[0]) uniq.set(n, [st, idx, v]);
+        if (seqs.has(idx) && t >= seqs.get(idx)[1]) tails.push([st, idx, n]);
+        else if (!uniq.has(n) || st > uniq.get(n)[0]) uniq.set(n, [st, idx, v]);
       }
       const ordered = [...uniq.keys()].sort((a, b) => b - a);
       const prio = ordered.length > 1
         ? [ordered[0], ordered[ordered.length - 1], ...ordered.slice(1, -1)] : ordered;
+      const cands = prio.map((n) => [uniq.get(n)[1], n]);
+      for (const [, idx, n] of tails.sort((a, b) => cmpTuple(b, a))) if (!uniq.has(n)) cands.push([idx, n]);
       if (drums.has(t)) {
         const [k, att] = drums.get(t);
         const kit = POLY_KIT[k];
@@ -551,27 +738,36 @@
         }
       }
       const free = range.filter((v) => !reserved[v]);
-      const want = prio.slice(0, free.length);
-      const wantIdx = new Map(want.map((n) => [uniq.get(n)[1], n]));
+      const want = cands.slice(0, free.length);
+      const wantIdx = new Map(want);
       stats.voices_max = Math.max(stats.voices_max, want.length);
       const newCur = new Map();
       for (const v of free) if (cur[v] !== null && wantIdx.has(cur[v][0])) newCur.set(v, cur[v]);
       const placed = new Set([...newCur.values()].map((c) => c[0]));
+      const fresh = new Set();
       const empty = free.filter((v) => !newCur.has(v));
       for (const [idx, n] of wantIdx) {
         if (placed.has(idx)) continue;
         const v = empty.shift();
         const a = active.get(idx);
-        const vol = velocityToVolume(a[3], o.curve, vmin, vmax);
+        const vol = seqs.has(idx) ? seqs.get(idx)[0][t - a[0]] : velocityToVolume(a[3], o.curve, vmin, vmax);
         setWave(v, chWaves[a[4]] || o.wave);
         emit(0x80 + 16 * v + vol, n);
         lvl[v] = vol;
         stats.notes++;
         newCur.set(v, [idx, n]);
+        placed.add(idx);
+        fresh.add(v);
       }
       for (const v of free) {
         if (!newCur.has(v) && cur[v] !== null) { emit(0xB0 + v); lvl[v] = 0; }
         cur[v] = newCur.has(v) ? newCur.get(v) : null;
+        // burkológörbe: ha a hangerő változik, a hang újra (a fázis marad)
+        if (cur[v] !== null && !fresh.has(v) && seqs.has(cur[v][0])) {
+          const [idx, n] = cur[v];
+          const lev = seqs.get(idx)[0][t - active.get(idx)[0]];
+          if (lev !== lvl[v]) { emit(0x80 + 16 * v + lev, n); lvl[v] = lev; }
+        }
       }
       stats.peak_sum = Math.max(stats.peak_sum, lvl.reduce((a, x) => a + polyPeak(x), 0));
       pending++;
@@ -595,7 +791,7 @@
   const DEFAULTS = {
     mode: 'arp', prio: 'high', maxNotes: 3, arpBass: false, arpSpeed: 1, polyVolume: 9, polyKnee: 10, polyMix: 'clean',
     channels: null, drums: 'synth', transpose: 0, tuning: 440.0, speed: 1.0, rate: FRAME_RATE,
-    decay: 0, decayFloor: 6, curve: 0.7, minVolume: 6, maxVolume: 15, loop: false, loopPause: 0, drumVolume: 100, gain: 100, background: false, from: null, to: null, trim: false,
+    decay: 0, decayFloor: 6, curve: 0.7, minVolume: 6, maxVolume: 15, loop: false, loopPause: 0, drumVolume: 100, gain: 100, envelopes: null, background: false, from: null, to: null, trim: false,
     polyDiv: 19, wave: 'square', channelWave: null,     // channelWave: {csatorna (1..16): hullámforma}
   };
 
@@ -626,6 +822,7 @@
     if (gainAuto) o.gain = 100;
     o.gain = Number(o.gain);
     if (!(o.gain >= 1 && o.gain <= 1000)) throw new Error('globális hangerő: 1..1000%');
+    o.envelopeData = o.mode === 'poly' && o.envelopes ? compileEnvelopes(envelopeSource(o.envelopes)) : null;
     if (o.mode === 'poly') {
       if (!(o.polyDiv >= POLY_DIV_MIN && o.polyDiv <= POLY_DIV_MAX))
         throw new Error('mintaóra-osztó: ' + POLY_DIV_MIN + '..' + POLY_DIV_MAX);
@@ -648,7 +845,7 @@
       gainMax = maxGain(3 * polyPeak(o.polyVolume), r.stats.peak_sum);
       if (gainAuto) o.gain = gainMax;
       const sl = r.slots.concat(new Array(MAX_SLOTS - r.slots.length).fill(0));
-      const data = [o.loop ? 1 : 0, o.decay, floor, o.polyDiv, 0, 0, tickn, r.slots.length, ...sl, 0, 0, 0,
+      const data = [o.loop ? 1 : 0, o.envelopeData ? 0 : o.decay, floor, o.polyDiv, 0, 0, tickn, r.slots.length, ...sl, 0, 0, 0,
         ...polyMixTable(o.polyKnee, 15, o.polyMix, o.polyVolume, o.gain)];
       for (const f of ftab) data.push(f & 0xFF, f >> 8);
       song = Uint8Array.from(data.concat(r.body));
@@ -669,6 +866,8 @@
       rate = o.rate;
     }
     const warnings = [];
+    if (o.mode !== 'poly' && o.envelopes)
+      warnings.push('a burkológörbék csak a többszólamú lejátszóval működnek');
     if (o.mode === 'poly' && o.background)
       warnings.push('a háttér-mód csak az egycsatornás lejátszóval működik (a poly a teljes CPU-t használja)');
     const used = [...new Set(notes.map((n) => n[2]))].sort((a, b) => a - b);
@@ -737,7 +936,7 @@
     ['arpSpeed', '--arp-speed'], ['polyVolume', '--poly-volume'], ['polyKnee', '--poly-knee'], ['polyMix', '--poly-mix'],
     ['channels', '--channels'], ['drums', '--drums'], ['transpose', '--transpose'], ['tuning', '--tuning'],
     ['speed', '--speed'], ['decay', '--decay'], ['decayFloor', '--decay-floor'], ['curve', '--curve'],
-    ['minVolume', '--min-volume'], ['maxVolume', '--max-volume'], ['loop', '--loop'], ['loopPause', '--loop-pause'], ['drumVolume', '--drum-volume'], ['gain', '--gain'],
+    ['minVolume', '--min-volume'], ['maxVolume', '--max-volume'], ['loop', '--loop'], ['loopPause', '--loop-pause'], ['drumVolume', '--drum-volume'], ['gain', '--gain'], ['envelopes', '--envelopes'],
     ['background', '--background'], ['from', '--from'], ['to', '--to'], ['trim', '--trim'], ['polyDiv', '--poly-div'], ['wave', '--wave'], ['channelWave', '--channel-wave'],
   ];
   function cliArgs(opts) {
@@ -751,6 +950,7 @@
         if (items.length) out.push(flag, items.join(','));
         continue;
       }
+      if (k === 'envelopes') { if (v) out.push(flag, typeof v === 'string' ? v : (v.name || 'envelope.txt')); continue; }
       if (typeof v === 'boolean') { if (v) out.push(flag); continue; }
       if (v !== DEFAULTS[k]) out.push(flag, String(v));
     }
@@ -807,7 +1007,8 @@
       [name + '/build/title.bin', tb],
       [name + '/build.sh', enc(build)],
       [name + '/README.txt', enc(readme)],
-    ];
+    ].concat(result.options.envelopes && typeof result.options.envelopes !== 'string'
+      ? [[name + '/' + (result.options.envelopes.name || 'envelope.txt'), enc(result.options.envelopes.text)]] : []);
   }
 
   // tömörítetlen (stored) ZIP; files: [[útvonal, Uint8Array], ...]
@@ -857,7 +1058,7 @@
 
   const api = {
     TVC_CLOCK, FRAME_RATE, CPU_CLOCK, POLY_VOICES, WAVES, WAVE_NAMES, DRUM_CHANNEL, DRUM_KIT, POLY_KIT, DEFAULTS,
-    pyRound, parseMidi, collectNotes, pitchTable, polyFreqTable, polyMixTable, polyRates, noteFreq,
+    compileEnvelopes, envelopeLevels, pyRound, parseMidi, collectNotes, pitchTable, polyFreqTable, polyMixTable, polyRates, noteFreq,
     convertMidi, buildCas, titleBytes, asciiName, selectRange, cliArgs, sourcePackage, zipFiles,
   };
   if (typeof module !== 'undefined' && module.exports) module.exports = api;

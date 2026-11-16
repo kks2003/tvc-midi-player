@@ -1,4 +1,13 @@
 <!doctype html>
+<!--
+  tvc-midi-player - MIDI-lejátszó és konverter Videoton TVC-re
+  Copyright (C) 2026 kks2003 és a közreműködők
+
+  Ez a program szabad szoftver: terjeszthető és módosítható a Free Software
+  Foundation által kiadott GNU General Public License 2. vagy (választás
+  szerint) bármely későbbi változata szerint. A programot a hasznosság
+  reményében adjuk közre, de MINDENFÉLE GARANCIA NÉLKÜL. Részletek: COPYING.
+-->
 <html lang="hu">
 <head>
 <meta charset="utf-8">
@@ -257,6 +266,14 @@ footer code, .hint code { font-family: var(--font-mono); font-size: 12.5px; }
           <div class="field"><label for="polyMix">Keverés</label>
             <select id="polyMix"><option value="clean" selected>tiszta</option><option value="soft">hangos (telít)</option></select></div>
           <div class="field" id="kneeField" hidden><label for="polyKnee">Telítés térde</label><input id="polyKnee" type="number" min="1" max="15" value="10"></div>
+          <div class="field wide"><label for="envSel">Hangszerek (burkológörbék)</label>
+            <div class="gainrow"><select id="envSel">
+              <option value="">nincs (egyszerű lecsengés)</option>
+              <option value="midiplay">midiplay 2.4</option>
+              <option value="tvc">midiplay, TVC-s (dav2play) változat</option>
+              <option value="file">saját envelope.txt…</option>
+            </select><input id="envFile" type="file" accept=".txt,text/plain" hidden></div></div>
+          <p class="hint field wide" id="envHint" hidden>Hangszerenként felfutás, lecsengés, kitartás és elengedés, Varga István midiplay programjának hangszer-burkológörbéivel (GPL 2). A hangmagasság-változásokat és a torzítást a TVC nem használja; a dobok a saját dobkészlettel szólnak. A görbék tickenkénti hangerőváltásai miatt a dal adata nagyobb.</p>
           <div class="field"><label for="wave">Hullámforma</label><select id="wave"><option value="square">négyszög</option><option value="pulse">impulzus (25%)</option><option value="triangle">háromszög</option><option value="saw">fűrész</option><option value="sine">szinusz</option></select></div>
           <div class="field"><label for="polyDiv">Mintavétel</label>
             <select id="polyDiv"><option value="17">11 489 Hz · CPU 93%</option><option value="19" selected>10 280 Hz · CPU 83%</option><option value="21">9 301 Hz · CPU 75%</option><option value="23">8 492 Hz · CPU 69%</option><option value="28">6 975 Hz · CPU 56%</option></select></div>
@@ -380,12 +397,14 @@ footer code, .hint code { font-family: var(--font-mono); font-size: 12.5px; }
       Szalontai Béla (Fast &amp; Force): „Többcsatornás hanggeneráló programcsomag” (MIT licenc) – a többszólamú lejátszó alapötletei: a hangszámláló mint mintaóra, a hullámtáblák, a zene feldolgozása a megszakításból ·
       Ludányi László: „A TV-Computer ROM programja” és Kaszanyiczki László: „A Videoton TV-Computer ROM listája” – a ROM megszakításkezelője, a HIMEM, az USRTAB, a BASIC tokenek ·
       Benedek Antal, Monok Zoltán: „TV-Computer Hardware” – a hanggenerátor és a portok ·
-      Varga István: <a href="https://github.com/istvan-v/ep128emu" target="_blank" rel="noopener">ep128emu</a> – az Ep128web emulátormagja, a hanggenerátor pontos működése és a tesztek.</p>
+      Varga István: <a href="https://github.com/istvan-v/ep128emu" target="_blank" rel="noopener">ep128emu</a> – az Ep128web emulátormagja, a hanggenerátor pontos működése és a tesztek; <a href="https://github.com/istvan-v/midiplay" target="_blank" rel="noopener">midiplay</a> (GPL 2) – a hangszer-burkológörbék.</p>
+    <p>Licenc: <a href="https://github.com/kks2003/tvc-midi-player/blob/main/COPYING" target="_blank" rel="noopener">GNU GPL 2 vagy későbbi</a> · Copyright © 2026 kks2003 és a közreműködők · az elkészült .cas fájlok a tieid.</p>
   </footer>
 </div>
 
 <script src="midi2tvc.js"></script>
 <script src="players.js"></script>
+<script src="envelopes.js"></script>
 <script src="preview.js"></script>
 <script>
 (function () {
@@ -551,10 +570,35 @@ footer code, .hint code { font-family: var(--font-mono); font-size: 12.5px; }
       loopPause: $('loop').checked && $('loopPauseOn').checked ? Math.max(1, Math.min(9, Math.round(num('loopPause')) || 1)) : 0,
       background: mode !== 'poly' && $('background').checked,
       from: rangeFrom, to: rangeTo, trim: $('trim').checked,
-      wave: $('wave').value, polyDiv: num('polyDiv'),
+      wave: $('wave').value, polyDiv: num('polyDiv'), envelopes: envOption(),
       channelWave: mode === 'poly' ? Object.fromEntries(Object.entries(channelWave).filter(([ch]) => channelSel.has(+ch))) : null,
     };
   }
+  // hangszer-burkológörbék: a mellékelt készletek vagy egy betöltött fájl
+  let envCustom = null;
+  function envOption() {
+    const v = $('envSel').value;
+    if (v === 'file') return envCustom;
+    return v || null;
+  }
+  $('envSel').addEventListener('change', () => {
+    $('envHint').hidden = !$('envSel').value;
+    if ($('envSel').value === 'file' && !envCustom) { $('envFile').click(); return; }
+    regenerate();
+  });
+  $('envFile').addEventListener('change', (e) => {
+    const f = e.target.files[0];
+    e.target.value = '';
+    if (!f) { if (!envCustom) { $('envSel').value = ''; $('envHint').hidden = true; } return; }
+    f.text().then((text) => {
+      try { M.compileEnvelopes(text); }
+      catch (err) { setStatus('A burkológörbe-fájl hibás: ' + err.message + '.', true); if (!envCustom) $('envSel').value = ''; return; }
+      envCustom = { name: M.asciiName(f.name.replace(/\.[^.]*$/, '')) + '.txt', text };
+      $('envSel').querySelector('option[value="file"]').textContent = 'saját: ' + f.name;
+      setStatus('');
+      regenerate();
+    });
+  });
   function showModeFields() {
     const mode = document.querySelector('input[name="mode"]:checked').value;
     for (const m of ['poly', 'arp', 'mono']) $('f-' + m).hidden = m !== mode;
@@ -615,7 +659,7 @@ footer code, .hint code { font-family: var(--font-mono); font-size: 12.5px; }
     drawRoll();
     setOutputsEnabled(true);
     updateEmuLink();
-    store.set('opts', JSON.stringify(Object.assign({}, o, { channels: undefined })));
+    store.set('opts', JSON.stringify(Object.assign({}, o, { channels: undefined, envelopes: typeof o.envelopes === 'string' ? o.envelopes : undefined })));
   }
   // a globális hangerő: a torzítás nélküli legnagyobb érték, és ha afölött
   // van, a minták hány százaléka telít (poly: a keverés előtti összeg szerint)
@@ -1182,10 +1226,11 @@ footer code, .hint code { font-family: var(--font-mono); font-size: 12.5px; }
       if (r) r.checked = true;
       for (const [k, v] of Object.entries(o)) {
         const el = $(k);
-        if (!el || k === 'title' || k === 'mode' || k === 'loopPause') continue;
+        if (!el || k === 'title' || k === 'mode' || k === 'loopPause' || k === 'envelopes') continue;
         if (el.type === 'checkbox') el.checked = !!v; else if (v !== undefined) el.value = v;
       }
       if (o.loopPause > 0) { $('loopPauseOn').checked = true; $('loopPause').value = o.loopPause; }
+      if (o.envelopes === 'midiplay' || o.envelopes === 'tvc') { $('envSel').value = o.envelopes; $('envHint').hidden = false; }
     }
   } catch (e) { /* alapbeállítások */ }
   syncPause();   // a visszaállított „Végtelenítve” szerint
