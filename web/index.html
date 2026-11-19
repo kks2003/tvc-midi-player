@@ -224,6 +224,7 @@ footer { color: var(--muted); font-size: 13px; display: grid; gap: 8px; }
 #eeList li + li { border-top: 1px solid var(--line); }
 #eeList button { display: block; width: 100%; text-align: left; border: 0; border-radius: 0; padding: 5px 8px; font-size: 12.5px; font-weight: 400; background: transparent; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 #eeList button.on { background: var(--accent); color: var(--accent-ink); }
+#eeList button.missing { color: var(--muted); font-style: italic; }
 #envDlg .eeside { display: grid; gap: 6px; align-content: start; }
 #envDlg .eeside .row2 { display: flex; gap: 6px; flex-wrap: wrap; }
 #envDlg .eeside .row2 button { padding: 3px 8px; font-size: 12.5px; }
@@ -447,6 +448,7 @@ footer code, .hint code { font-family: var(--font-mono); font-size: 12.5px; }
       <p id="eeMsg" role="status"></p>
       <div class="eemain">
         <div class="eeside">
+          <label class="check" id="eeOnlySongRow" hidden><input id="eeOnlySong" type="checkbox" checked> Csak a dalban szereplők</label>
           <span class="hint" id="eeCount"></span>
           <ul id="eeList"></ul>
           <div class="row2"><button id="eeAdd" type="button">+ Új</button><button id="eeDup" type="button">Másolat</button><button id="eeDel" type="button">Törlés</button></div>
@@ -457,6 +459,7 @@ footer code, .hint code { font-family: var(--font-mono); font-size: 12.5px; }
             <label class="check"><input id="eeDecay" type="checkbox"> D: elengedés után végigfut</label>
             <span id="eeNames"></span>
           </div>
+          <div class="eeprogs"><button id="eeSplit" type="button" hidden></button><span class="hint" id="eeShared"></span></div>
           <div class="segwrap"><table class="segs">
             <thead><tr><th title="L = ismétlés eleje, R = ismétlés vége / elengedés, S = egy képkockán kitart">Jel</th><th title="képkocka, 1/50 s">Hossz</th><th title="0..63, vagy *n = szorzás n/128-cal képkockánként">Bal</th><th>Jobb</th><th title="a TVC-n nincs használva">Hangm.</th><th title="a TVC-n nincs használva">Torz.</th><th></th></tr></thead>
             <tbody id="eeSegs"></tbody>
@@ -698,6 +701,24 @@ footer code, .hint code { font-family: var(--font-mono); font-size: 12.5px; }
       ['tvc', 'midiplay, TVC-s (dav2play) változat', window.TVC_ENVELOPES.tvc]]
       .concat(envCustom ? [['file', 'saját: ' + envCustom.name, envCustom.text]] : [], [['', 'üres (új készlet)', '']]),
     options: () => options(),
+    // a dal hangszerei (a kiválasztott csatornák, dob nélkül): program -> csatornák, hangok száma
+    songPrograms: () => {
+      const m = new Map();
+      if (!fullResult) return m;
+      for (const n of fullResult.notes) {
+        if (n[4] === 9) continue;
+        const e = m.get(n[5]) || { chs: [], notes: 0, pitches: [] };
+        if (!e.chs.includes(n[4] + 1)) e.chs.push(n[4] + 1);
+        e.notes++;
+        e.pitches.push(n[2]);
+        m.set(n[5], e);
+      }
+      for (const e of m.values()) {
+        e.chs.sort((a, b) => a - b);
+        e.mid = e.pitches.sort((a, b) => a - b)[e.pitches.length >> 1];   // a jellemző hangmagasság
+      }
+      return m;
+    },
     stopMain: () => { if (srcNode) stop(); },
     apply: (name, text) => {
       envCustom = { name, text };

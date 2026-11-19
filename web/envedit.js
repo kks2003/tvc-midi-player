@@ -96,7 +96,14 @@
     const $ = (id) => document.getElementById(id);
     const dlg = $('envDlg');
     const KEY = 'tvcmidi.envEditor';
-    let blocks = [], sel = 0, ctx = null, src = null, fileName = 'szerkesztett';
+    let blocks = [], sel = 0, selProg = null, ctx = null, src = null, fileName = 'szerkesztett';
+    // a dalban szereplő hangszerek: Map(program -> {chs: [csatorna], notes})
+    const song = () => (opts.songPrograms ? opts.songPrograms() : new Map());
+    // a meghallgatás hangja: a hangszer jellemző hangmagassága a dalban
+    const useSongNote = (n) => { const u = song().get(n); if (u && u.mid !== undefined) $('eeNote').value = u.mid; };
+    const blockOf = (n) => blocks.findIndex((b) => b.progs.some((p) => p.n === n));
+    const newSegs = () => [{ mark: '', len: 0, l: { mult: false, v: 62 }, r: { mult: false, v: 62 }, pitch: 0, dist: 0 },
+      { mark: '', len: 25, l: { mult: false, v: 20 }, r: { mult: false, v: 20 }, pitch: 0, dist: 0 }];
 
     const names = (n) => (n < 0 ? 'Dob ' + (-n) : opts.gmName(n));
     const save = () => { try { localStorage.setItem(KEY, JSON.stringify({ text: envText(blocks, names), fileName })); } catch (e) { /* nincs tároló */ } };
@@ -106,6 +113,7 @@
       blocks = parseEnvText(text);
       if (name) fileName = name;
       sel = 0;
+      selProg = null;
       renderList();
       renderBlock();
       save();
@@ -119,17 +127,50 @@
     function renderList() {
       const ul = $('eeList');
       ul.textContent = '';
-      blocks.forEach((b, i) => {
+      const used = song();
+      $('eeOnlySongRow').hidden = !used.size;
+      const onlySong = used.size && $('eeOnlySong').checked;
+      const item = (text, title, on, cls, click) => {
         const li = document.createElement('li');
         const btn = document.createElement('button');
         btn.type = 'button';
-        btn.className = i === sel ? 'on' : '';
-        const nums = b.progs.map((p) => p.n).join(', ');
-        btn.textContent = nums + ' · ' + b.progs.map((p) => names(p.n)).join(', ');
-        btn.title = btn.textContent;
-        btn.addEventListener('click', () => { sel = i; renderList(); renderBlock(); });
+        btn.className = (on ? 'on ' : '') + (cls || '');
+        btn.textContent = text;
+        btn.title = title || text;
+        btn.addEventListener('click', click);
         li.appendChild(btn);
         ul.appendChild(li);
+      };
+      const inSong = (n) => { const u = used.get(n); return u ? u.notes + ' hang, ' + u.chs.join(', ') + '. cs.' : ''; };
+      if (onlySong) {
+        // a dal hangszerei: a görbéjük blokkja, vagy ha nincs, felvehető
+        let missing = 0;
+        for (const n of [...used.keys()].sort((a, b) => a - b)) {
+          const i = blockOf(n);
+          const label = n + ' · ' + names(n);
+          if (i >= 0) {
+            const shared = blocks[i].progs.length > 1 ? ' (közös: ' + blocks[i].progs.map((p) => p.n).join(', ') + ')' : '';
+            item(label + ' — ' + inSong(n), label + shared + ' — a dalban: ' + inSong(n), i === sel && selProg === n, '',
+              () => { sel = i; selProg = n; useSongNote(n); renderList(); renderBlock(); });
+          } else {
+            missing++;
+            item('+ ' + label + ' — nincs görbe', label + ': a készletben nincs görbéje, most a megszokott lecsengéssel szól (' + inSong(n) +
+              '). Kattintásra új görbét kap.', false, 'missing', () => {
+              blocks.push({ progs: [{ n, flags: '', layer: null }], segs: newSegs() });
+              sel = blocks.length - 1; selProg = n; useSongNote(n); renderList(); renderBlock(); changed();
+            });
+          }
+        }
+        $('eeCount').textContent = 'A dalban ' + used.size + ' hangszer' + (missing ? ', ebből ' + missing + ' görbe nélkül' : '') +
+          ' · a készletben ' + blocks.length;
+        return;
+      }
+      blocks.forEach((b, i) => {
+        const nums = b.progs.map((p) => p.n).join(', ');
+        const songMark = b.progs.some((p) => used.has(p.n)) ? '♪ ' : '';
+        item(songMark + nums + ' · ' + b.progs.map((p) => names(p.n)).join(', '),
+          (songMark ? 'a dalban is szerepel · ' : '') + nums + ' · ' + b.progs.map((p) => names(p.n)).join(', '), i === sel, '',
+          () => { sel = i; selProg = null; renderList(); renderBlock(); });
       });
       $('eeCount').textContent = blocks.length + ' hangszer';
     }
@@ -141,6 +182,12 @@
       $('eeProgs').value = b.progs.map((p) => p.n + p.flags.replace(/D/g, '') + (p.layer ? ':' + p.layer.join(',') : '')).join(', ');
       $('eeDecay').checked = b.progs.some((p) => p.flags.includes('D'));
       $('eeNames').textContent = b.progs.map((p) => names(p.n)).join(', ');
+      const sp = $('eeSplit');
+      sp.hidden = !(b.progs.length > 1 && selProg !== null && b.progs.some((p) => p.n === selProg));
+      if (!sp.hidden) {
+        sp.textContent = 'Leválasztás: csak a(z) ' + selProg + '. (' + names(selProg) + ')';
+        $('eeShared').textContent = 'Ezen a görbén ' + b.progs.length + ' hangszer osztozik; a változtatás mindegyikre hat.';
+      } else $('eeShared').textContent = '';
       const tb = $('eeSegs');
       tb.textContent = '';
       b.segs.forEach((s, i) => {
@@ -353,6 +400,19 @@
       renderBlock(); changed();
     });
     $('eeProgs').addEventListener('change', readProgs);
+    $('eeOnlySong').addEventListener('change', () => { renderList(); renderBlock(); });
+    // egy közös görbéről a kiválasztott hangszer saját másolatot kap
+    $('eeSplit').addEventListener('click', () => {
+      const b = blocks[sel];
+      if (!b || selProg === null) return;
+      const p = b.progs.find((x) => x.n === selProg);
+      b.progs = b.progs.filter((x) => x.n !== selProg);
+      const c = { progs: [{ n: p.n, flags: p.flags, layer: p.layer }], segs: JSON.parse(JSON.stringify(b.segs)) };
+      blocks.splice(sel + 1, 0, c);
+      sel++;
+      renderList(); renderBlock(); changed();
+      msg('A(z) ' + p.n + '. hangszer most már saját görbét kapott.');
+    });
     $('eeDecay').addEventListener('change', readProgs);
     for (const id of ['eeHeld', 'eeNote', 'eeVel']) $(id).addEventListener('input', () => drawGraph());
     $('eePlay').addEventListener('click', playSound);
@@ -372,6 +432,12 @@
           } catch (e) { msg('A mentett szerkesztés nem olvasható: ' + e.message + '.', true); }
         }
         dlg.showModal();
+        const used = song();
+        $('eeOnlySong').checked = used.size > 0;
+        if (used.size && !(selProg !== null && used.has(selProg) && blockOf(selProg) === sel)) {
+          const first = [...used.keys()].sort((a, b) => a - b).find((n) => blockOf(n) >= 0);
+          if (first !== undefined) { sel = blockOf(first); selProg = first; useSongNote(first); }
+        }
         renderList();
         renderBlock();
         changed();
