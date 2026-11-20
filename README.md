@@ -166,6 +166,7 @@ kerül, amit a dal használ. A konverter a dalból dönti el, és a
 | többszólamú | `FEAT_WAVE_PULSE`, `_TRI`, `_SAW`, `_NOISE`, `_SINE` | ha a dal használja az adott hullámformát (a négyszög mindig) |
 | többszólamú | `FEAT_IRQ0038` | `--fast-irq`: a mintakezelő a 0038h-n (−10 ciklus mintánként; a 0038h–0088h területet a lejátszás alatt használja, a végén visszaállítja) |
 | többszólamú | `FEAT_PITCH` | `--bend`, ha a dalban van hajlítás, vibrato vagy burkológörbe-hangmagasság (`B3+s lo hi` parancs) |
+| többszólamú | `FEAT_CARDS`, `FEAT_SN` | `--cards sn`: hangkártya-felismerés és SN76489-meghajtó (`chips.inc`) |
 | egycsatornás | `FEAT_DRUMS` | ha van dobkészlet |
 | egycsatornás | `FEAT_BG` | `--background` |
 
@@ -284,6 +285,29 @@ küldi (a fázis nem ugrik), a lejátszó változatlan. Az elengedés utáni
 lecsengéshez a hang tovább foglalja a szólamot, de csak akkor, ha az új
 hangoknak nem kell. A dal adata így nagyobb: a DuckTales 4,2 helyett 4,9–6,7
 KB (a beállításoktól függően).
+
+### Hangkártyák (`--cards`, `chips.inc`)
+
+A többszólamú lejátszóba hangkártya-meghajtók is kerülhetnek. Indításkor a
+program a bővítőhelyek RAM-területén (`0040h + 30h·hely`) megkeresi a kártya
+nevét; ha talál ilyet, a dal a kártyán szól, különben a beépített hangon. A
+kártyán ugyanazok az események és szólamállapotok futnak (hangerő,
+lecsengés, csúszás, hajlítás, burkológörbék), csak a mintánkénti DAC-keverés
+helyett tickenként a chip regisztereibe kerül a három szólam: a processzor
+szinte szabad. A zaj-hullámformájú szólam (dobok) a chip zajcsatornáján
+szól.
+
+| kártya | név a slot területén | chip, port |
+| --- | --- | --- |
+| GameCard | `JOY+SN` | SN76489 a hely `+0` portján |
+| Multichip Soundcard | `SndMx` | SN76489 `+0` (SAA1099 `+2`/`+3`, OPL2 `+4`/`+5`: tervben) |
+
+Az SN76489 órajele 3 579 545 Hz, az osztó `N = órajel / (32 f)`, a
+lejátszó tickenként 24/16 bites osztással számolja a fázisnövekményből; a
+hangerő 2 dB-es csillapítás. A webes előnézet a kártya hangját is tudja
+(„Az előnézet a kártya hangjával”). Az emulátoros teszt GameCarddal,
+Multichip kártyával és kártya nélkül is lefut (`CARDS=hely:kártya` a
+harnessben).
 
 ## Az egycsatornás lejátszó (`player.asm`)
 

@@ -99,10 +99,12 @@ Mindhárom kártyát emulálja az Ep128web (a `web/src/tvc_soundcards.cpp`,
   `OTIR`-ral egyben írható). 3 szólam hullámformával (háromszög, fűrész, impulzus PWM-mel,
   zaj) és ADSR-rel: a burkológörbék (`--envelopes`) a SID ADSR-jére is
   leképezhetők.
-- [ ] **GameCard**: SN76489 hangchip a bővítőhely `+0` portján (ugyanaz, mint a
+- [x] **SN76489 meghajtó** (`--cards sn`, `chips.inc`): GameCard és Multichip,
+  felismeréssel, emulátorban tesztelve, előnézettel.
+- [x] **GameCard**: SN76489 hangchip a bővítőhely `+0` portján (ugyanaz, mint a
   Multichip kártyán, ugyanazon a porton), ezért a meghajtó közös; a `+2`/`+3`
   a 3. és 4. botkormány.
-- [ ] Felismerés indításkor: a kártyahelyek azonosítója (`5Ah` port, a
+- [x] Felismerés indításkor: a kártyahelyek azonosítója (`5Ah` port, a
   0040h/0070h/00A0h/00D0h táblák) és a kártyák saját jelzései alapján.
 - [ ] Emulátoros teszt mindhárom kártyával (az Ep128web harness kártyával is
   induljon, és a kártyák hangja is kerüljön a felvételbe); a webes előnézetbe

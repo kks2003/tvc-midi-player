@@ -54,7 +54,39 @@
     });
     return t;
   }
-  function simulatePoly(song) {
+  // SN76489 (chips.inc sn_update): tickenként a szólamállapotból; a hang a
+  // mintavétel ütemében, négyszög és zaj, 2 dB-es csillapítással
+  const SN_CLOCK = 3579545, SN_ATT = [15, 12, 9, 7, 6, 5, 4, 3, 3, 2, 2, 1, 1, 1, 0, 0];
+  function snTick(st, vs, waves, volScale, k, sr, n) {
+    const out = new Float32Array(n);
+    const ch = [];
+    let noise = 0;
+    for (const v of vs) {
+      const vol = volScale[v.vol];
+      if (waves[v.slot] === 4) { noise = Math.max(noise, vol); ch.push({ amp: 0, inc: 0 }); continue; }
+      let N = v.f ? Math.floor(k / v.f) : 1023;
+      if (N > 1023) N = 1023;
+      ch.push({ amp: SN_ATT[vol] === 15 ? 0 : Math.pow(10, -SN_ATT[vol] / 10), inc: N ? SN_CLOCK / (32 * N) / sr : 0 });
+    }
+    const namp = SN_ATT[noise] === 15 ? 0 : Math.pow(10, -SN_ATT[noise] / 10), ninc = SN_CLOCK / 512 / sr;
+    for (let i = 0; i < n; i++) {
+      let x = 0;
+      for (let c = 0; c < 3; c++) {
+        st.ph[c] = (st.ph[c] + ch[c].inc) % 1;
+        if (ch[c].amp && st.ph[c] < 0.5) x += ch[c].amp;
+      }
+      st.nph += ninc;
+      while (st.nph >= 1) {
+        st.nph -= 1;
+        const bit = (st.lfsr ^ (st.lfsr >> 1)) & 1;
+        st.lfsr = (st.lfsr >> 1) | (bit << 14);
+      }
+      if (namp && (st.lfsr & 1)) x += namp;
+      out[i] = x * 15 / 4;
+    }
+    return out;
+  }
+  function simulatePoly(song, card) {
     const flags = song[0], decay = song[1], floor = song[2], div = song[3];
     const loopOff = song[4] | (song[5] << 8), tickn = song[6], nslots = song[7];
     const waves = Array.from(song.subarray(8, 8 + nslots));
@@ -107,8 +139,20 @@
     const chunks = [], roll = [];
     const acc = [0, 0, 0];
     let tick = 0;
+    // kártyán (card = 'sn'): a hangerő v * 15 / vmax, a frekvencia a 24 bites osztással
+    const vmax = song[13] || 15;
+    const volScale = Array.from({ length: 16 }, (_, v) => Math.min(15, Math.floor(v * 15 / vmax)));
+    const snK = 37535 * div, snSt = { ph: [0, 0, 0], nph: 0, lfsr: 0x4000 };
     events(); voices();
     while (!done && tick < maxTicks) {
+      if (card === 'sn') {
+        chunks.push(snTick(snSt, vs, waves, volScale, snK, sr, tickn));
+        roll.push(vs.map((v, i) => ({ v: i, note: v.note, vol: v.vol, drum: v.drum, noise: waves[v.slot] === 4 }))
+          .filter((x) => x.vol > 0 && x.note >= 0));
+        events(); voices();
+        tick++;
+        continue;
+      }
       const buf = new Uint8Array(tickn);
       const f0 = vs[0].f, f1 = vs[1].f, f2 = vs[2].f;
       const p0 = vs[0].page, p1 = vs[1].page, p2 = vs[2].page;
@@ -242,7 +286,7 @@
   function join(chunks) {
     let n = 0;
     for (const c of chunks) n += c.length;
-    const out = new Uint8Array(n);
+    const out = chunks.length && chunks[0] instanceof Float32Array ? new Float32Array(n) : new Uint8Array(n);
     let p = 0;
     for (const c of chunks) { out.set(c, p); p += c.length; }
     return out;
@@ -262,8 +306,9 @@
     return out;
   }
 
-  function simulate(song, mode, outRate) {
-    return mode === 'poly' ? simulatePoly(song) : simulateMono(song, outRate || 44100);
+  // card: 'sn' = a hangkártya hangja (csak a többszólamú lejátszónál)
+  function simulate(song, mode, outRate, card) {
+    return mode === 'poly' ? simulatePoly(song, card) : simulateMono(song, outRate || 44100);
   }
 
   const api = { simulate, toAudio };
