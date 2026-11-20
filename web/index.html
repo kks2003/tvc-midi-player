@@ -321,7 +321,7 @@ footer code, .hint code { font-family: var(--font-mono); font-size: 12.5px; }
               <option value="file">saját envelope.txt…</option>
             </select><button id="envLoad" type="button" title="Másik envelope.txt betöltése" hidden>Másik fájl…</button><button id="envEdit" type="button" title="Burkológörbe-szerkesztő: hangszerenként szerkeszthető, meghallgatható, menthető">Szerkesztő…</button><input id="envFile" type="file" accept=".txt,text/plain" hidden></div></div>
           <p class="hint field wide" id="envHint" hidden>Hangszerenként felfutás, lecsengés, kitartás és elengedés, Varga István midiplay programjának hangszer-burkológörbéivel (GPL 2). A hangmagasság-változásokat és a torzítást a TVC nem használja; a dobok a saját dobkészlettel szólnak. A görbék tickenkénti hangerőváltásai miatt a dal adata nagyobb.</p>
-          <div class="field"><label for="wave">Hullámforma</label><select id="wave"><option value="square">négyszög</option><option value="pulse">impulzus (25%)</option><option value="triangle">háromszög</option><option value="saw">fűrész</option><option value="sine">szinusz</option></select></div>
+          <div class="field"><label for="wave">Hullámforma</label><select id="wave"><option value="square">négyszög</option><option value="pulse">impulzus (25%)</option><option value="triangle">háromszög</option><option value="saw">fűrész</option><option value="sine">szinusz</option><option value="pulse12">keskeny impulzus (12,5%)</option></select></div>
           <div class="field"><label for="polyDiv">Mintavétel</label>
             <select id="polyDiv"><option value="17">11 489 Hz · CPU 93%</option><option value="19" selected>10 280 Hz · CPU 83%</option><option value="21">9 301 Hz · CPU 75%</option><option value="23">8 492 Hz · CPU 69%</option><option value="28">6 975 Hz · CPU 56%</option></select></div>
           <fieldset class="field wide opts" id="polyOpts"><legend>Mi kerüljön a programba?</legend>
@@ -649,7 +649,7 @@ footer code, .hint code { font-family: var(--font-mono); font-size: 12.5px; }
         const sel = document.createElement('select');
         sel.id = 'chw-' + c.ch;
         sel.setAttribute('aria-label', c.ch + '. csatorna hullámformája');
-        sel.innerHTML = '<option value="">alap</option><option value="square">négyszög</option><option value="pulse">impulzus</option><option value="triangle">háromszög</option><option value="saw">fűrész</option><option value="sine">szinusz</option>';
+        sel.innerHTML = '<option value="">alap</option><option value="square">négyszög</option><option value="pulse">impulzus</option><option value="triangle">háromszög</option><option value="saw">fűrész</option><option value="sine">szinusz</option><option value="pulse12">keskeny impulzus</option>';
         if (channelWave[c.ch]) sel.value = channelWave[c.ch];
         sel.addEventListener('change', () => {
           if (sel.value) channelWave[c.ch] = sel.value; else delete channelWave[c.ch];
@@ -888,7 +888,7 @@ footer code, .hint code { font-family: var(--font-mono); font-size: 12.5px; }
     }
   }
   const FEAT_LABELS = { FEAT_DRUMS: 'dobok', FEAT_BG: 'háttér-mód', FEAT_WAVE_PULSE: 'impulzus', FEAT_WAVE_TRI: 'háromszög',
-    FEAT_WAVE_SAW: 'fűrész', FEAT_WAVE_NOISE: 'zaj', FEAT_WAVE_SINE: 'szinusz', FEAT_IRQ0038: 'gyors megszakítás', FEAT_PITCH: 'hajlítás', FEAT_CARDS: 'kártyafelismerés', FEAT_SN: 'SN76489', FEAT_SID: 'vSID', FEAT_SAA: 'SAA1099', FEAT_OPL: 'OPL2', FEAT_FASTMIX: 'gyors keverés' };
+    FEAT_WAVE_SAW: 'fűrész', FEAT_WAVE_NOISE: 'zaj', FEAT_WAVE_SINE: 'szinusz', FEAT_IRQ0038: 'gyors megszakítás', FEAT_PITCH: 'hajlítás', FEAT_CARDS: 'kártyafelismerés', FEAT_SN: 'SN76489', FEAT_SID: 'vSID', FEAT_SAA: 'SAA1099', FEAT_OPL: 'OPL2', FEAT_FASTMIX: 'gyors keverés', FEAT_WAVE_PULSE12: 'keskeny impulzus', FEAT_DECAY: 'lecsengés', FEAT_WAVECHG: 'hullámforma-váltás', FEAT_LOOP: 'ismétlés' };
   function renderStats(player, warns) {
     const r = result, s = r.stats;
     const secs = r.total / r.rate;

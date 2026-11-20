@@ -63,7 +63,7 @@ MAX_SLOTS   equ 5
 ; +6   minta / tick
 ; +7   a hullámforma-helyek száma (1..5)
 ; +8   5 bájt: helyenként a hullámforma (0 négyszög, 1 impulzus 25%,
-;      2 háromszög, 3 fűrész, 4 zaj, 5 szinusz)
+;      2 háromszög, 3 fűrész, 4 zaj, 5 szinusz, 6 impulzus 12,5%)
 ; +13  a szólamok legnagyobb hangereje (vmax; a hangkártyák skálázásához)
 ; +14  2 bájt tartalék
 ; +16  64 bájt keverőtábla: összeg (0..45) -> kimenet (0..15); gyors keverésnél
@@ -380,9 +380,11 @@ tick_work:
 init_song:
             ld hl, SONG_EVENTS
             ld (ptr), hl
+            IF FEAT_LOOP
             ld de, (SONG_LOOP)
             add hl, de
             ld (loop_ptr), hl
+            ENDIF
             ld hl, 0
             ld (wait), hl
             xor a
@@ -481,11 +483,13 @@ events:
             ld (wait), hl
             ret
 .end:
+            IF FEAT_LOOP
             ld a, (SONG_FLAGS)
             rrca
             jr nc, .finish
             ld hl, (loop_ptr)
             jr .next
+            ENDIF
 .finish:
             dec hl
             ld (ptr), hl
@@ -552,6 +556,7 @@ events:
             jp .next
             ENDIF
 .wave:                              ; BB+s h
+            IF FEAT_WAVECHG
             sub 0BBh
             ld c, (hl)
             inc hl
@@ -562,6 +567,10 @@ events:
             ld (hl), c
             pop hl
             jp .next
+            ELSE
+            inc hl                  ; egy hullámforma-hely: nincs váltás
+            jp .next
+            ENDIF
             IF FEAT_DRUMS
 .slide:                             ; B8+s n vd lo hi
             sub 0B8h
@@ -650,6 +659,7 @@ voice1:
             ld a, (hl)
             ld c, a                 ; C = hangerő
             inc hl
+            IF FEAT_DECAY
             ld a, (hl)              ; VS_DEC
             inc hl                  ; VS_CNT
             or a
@@ -669,6 +679,10 @@ voice1:
             ld (hl), c              ; VS_VOL
             inc hl
             inc hl
+            ELSE
+            inc hl                  ; lecsengés nincs a dalban
+            inc hl                  ; VS_CNT
+            ENDIF
 .nodec:
             inc hl                  ; VS_FLOOR
             inc hl                  ; VS_SLOT
@@ -782,6 +796,10 @@ wave_sample:
             cp 5
             jr z, .sine
             ENDIF
+            IF FEAT_WAVE_PULSE12
+            cp 6
+            jr z, .pulse12
+            ENDIF
             IF FEAT_WAVE_NOISE
             cp 4
             jr nz, .square
@@ -807,6 +825,12 @@ wave_sample:
 .pulse:     ld a, c
             cp 64
             sbc a, a                ; 0..63: 255
+            ret
+            ENDIF
+            IF FEAT_WAVE_PULSE12
+.pulse12:   ld a, c
+            cp 32
+            sbc a, a                ; 0..31: 255
             ret
             ENDIF
             IF FEAT_WAVE_TRI

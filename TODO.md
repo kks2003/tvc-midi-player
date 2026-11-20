@@ -27,8 +27,9 @@ kicsi és gyors, vagy teljes tudású, vagy egy adott hangkártyára szabott.
 - [ ] A felületen „Mi kerüljön a programba?” rész: most automatikus (a dal
   dönti el) és kiírja; kézi kapcsolók (pl. háttér-mód, kártyák) a további
   funkciókkal jönnek, mellettük a méret- és CPU-költség.
-- [ ] További kapcsolható részek: hullámforma-váltás (`BB` esemény) csak több
-  hullámformánál, lecsengés, ismétlés, billentyűfigyelés.
+- [x] További kapcsolható részek: hullámforma-váltás (`FEAT_WAVECHG`, csak
+  több hullámformánál), lecsengés (`FEAT_DECAY`), ismétlés (`FEAT_LOOP`). (A
+  billentyűfigyelés marad: enélkül nem lehetne leállítani.)
 
 ## 1. Hangzás a beépített hanggal (`player_poly.asm`)
 
@@ -46,8 +47,10 @@ kicsi és gyors, vagy teljes tudású, vagy egy adott hangkártyára szabott.
   visszaállítása). Mintánként −10 ciklus. A 0040h–006Fh a 0. kártyahely
   munkaterülete: mentés és visszaállítás kell, a dokumentáció szerint így
   biztonságos.
-- [ ] **PWM-négyszög** (állítható és változtatható kitöltési tényező, tábla
-  nélkül: `cp pwm / sbc a,a / and vol`) új hullámformaként.
+- [x] **Keskeny impulzus** (12,5%, `--wave pulse12`, `FEAT_WAVE_PULSE12`) új
+  hullámformaként, a kártyákon is (vSID: PW 12,5%). A futás közben változó
+  kitöltési tényező (PWM) a táblás keverésnél túl drága lenne; a vSID-en
+  megoldható volna (a PW tickenként írható).
 - [ ] **Hosszú zajtábla** 23 bites LFSR-ből és 16 hangerőszint a cinekhez és a
   pergőhöz (most 256 bájtos zaj, 8 szint).
 - [x] **Tiszta keverés keverőtábla nélkül** (`--poly-mix fast`,

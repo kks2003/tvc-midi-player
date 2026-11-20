@@ -712,9 +712,10 @@ sid_update:
             jp nz, .voice
             ret
 
-; hullámforma (0 négyszög, 1 impulzus 25%, 2 háromszög, 3 fűrész, 4 zaj, 5 szinusz)
-sid_wave:   db 40h, 40h, 10h, 20h, 80h, 10h
-sid_pw:     db 08h, 04h, 08h, 08h, 08h, 08h      ; PW felső 4 bit (alsó bájt 0)
+; hullámforma (0 négyszög, 1 impulzus 25%, 2 háromszög, 3 fűrész, 4 zaj, 5 szinusz,
+; 6 impulzus 12,5%)
+sid_wave:   db 40h, 40h, 10h, 20h, 80h, 10h, 40h
+sid_pw:     db 08h, 04h, 08h, 08h, 08h, 08h, 02h      ; PW felső 4 bit (alsó bájt 0)
 sid_k:      ds 3
 sid_last:   ds 6
 sid_tmp:    ds 4
@@ -1153,10 +1154,11 @@ opl_update:
             jp nz, .voice
             ret
 
-; hullámforma (0 négyszög, 1 impulzus 25%, 2 háromszög, 3 fűrész, 4 zaj, 5 szinusz)
-opl_mmul:   db 22h, 21h, 22h, 21h, 2Fh, 21h    ; modulátor: kitartott, szorzó
-opl_mtl:    db 21h, 21h, 2Dh, 25h, 00h, 3Fh    ; modulátor erőssége (0,75 dB-es lépés, 3Fh: nincs)
-opl_fb:     db 00h, 04h, 00h, 0Ch, 0Eh, 00h    ; visszacsatolás << 1, FM
+; hullámforma (0 négyszög, 1 impulzus 25%, 2 háromszög, 3 fűrész, 4 zaj, 5 szinusz,
+; 6 impulzus 12,5%)
+opl_mmul:   db 22h, 21h, 22h, 21h, 2Fh, 21h, 21h    ; modulátor: kitartott, szorzó
+opl_mtl:    db 21h, 21h, 2Dh, 25h, 00h, 3Fh, 1Dh    ; modulátor erőssége (0,75 dB-es lépés, 3Fh: nincs)
+opl_fb:     db 00h, 04h, 00h, 0Ch, 0Eh, 00h, 06h    ; visszacsatolás << 1, FM
 ; hangerő (0..15, lineáris) -> a vivő csillapítása: round(-20 lg(v/15) / 0,75)
 opl_tl:     db 63, 31, 23, 19, 15, 13, 11, 9, 7, 6, 5, 4, 3, 2, 1, 0
 opl_k:      ds 3

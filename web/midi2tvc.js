@@ -20,8 +20,8 @@
   const POLY_HANDLER_CYCLES = 253;
   const POLY_VOICES = 3;
   const POLY_DIV_MIN = 17, POLY_DIV_MAX = 64;
-  const WAVES = ['square', 'pulse', 'triangle', 'saw', 'noise', 'sine'];
-  const WAVE_NAMES = { square: 'négyszög', pulse: 'impulzus (25%)', triangle: 'háromszög', saw: 'fűrész', noise: 'zaj', sine: 'szinusz' };
+  const WAVES = ['square', 'pulse', 'triangle', 'saw', 'noise', 'sine', 'pulse12'];
+  const WAVE_NAMES = { square: 'négyszög', pulse: 'impulzus (25%)', triangle: 'háromszög', saw: 'fűrész', noise: 'zaj', sine: 'szinusz', pulse12: 'keskeny impulzus (12,5%)' };
   const TONE_WAVES = WAVES.filter((w) => w !== 'noise');
   const MAX_SLOTS = 5;
 
@@ -951,7 +951,10 @@
         ['FEAT_IRQ0038', !!o.fastIrq], ['FEAT_PITCH', (r.stats.bends || 0) > 0],
         ['FEAT_CARDS', (o.cards || []).length > 0], ['FEAT_SN', (o.cards || []).includes('sn')],
         ['FEAT_SID', (o.cards || []).includes('sid')], ['FEAT_SAA', (o.cards || []).includes('saa')],
-        ['FEAT_OPL', (o.cards || []).includes('opl')], ['FEAT_FASTMIX', o.polyMix === 'fast']]
+        ['FEAT_OPL', (o.cards || []).includes('opl')], ['FEAT_FASTMIX', o.polyMix === 'fast'],
+        ['FEAT_WAVE_PULSE12', used.has('pulse12')],
+        ['FEAT_DECAY', (o.envelopeData ? 0 : o.decay) > 0 || (r.stats.slides || 0) > 0],
+        ['FEAT_WAVECHG', r.slots.length > 1], ['FEAT_LOOP', !!o.loop]]
         .filter((x) => x[1]).map((x) => x[0]);
       rate = tickRate;
     } else {
@@ -1011,7 +1014,8 @@
   // a .cas-ba csak a dalhoz kellő kód kerül; ugyanaz, mint a midi2tvc.py
   // POLY_FEATURES / MONO_FEATURES / features_inc
   const POLY_FEATURES = ['FEAT_DRUMS', 'FEAT_WAVE_PULSE', 'FEAT_WAVE_TRI', 'FEAT_WAVE_SAW', 'FEAT_WAVE_NOISE', 'FEAT_WAVE_SINE', 'FEAT_IRQ0038', 'FEAT_PITCH',
-    'FEAT_CARDS', 'FEAT_SN', 'FEAT_SID', 'FEAT_SAA', 'FEAT_OPL', 'FEAT_FASTMIX'];
+    'FEAT_CARDS', 'FEAT_SN', 'FEAT_SID', 'FEAT_SAA', 'FEAT_OPL', 'FEAT_FASTMIX', 'FEAT_WAVE_PULSE12',
+    'FEAT_DECAY', 'FEAT_WAVECHG', 'FEAT_LOOP'];
   const MONO_FEATURES = ['FEAT_DRUMS', 'FEAT_BG'];
   const featureNames = (mode) => (mode === 'poly' ? POLY_FEATURES : MONO_FEATURES);
   const featuresInc = (result) => featureNames(result.mode).map((n) => n + ' equ ' + (result.features.includes(n) ? 1 : 0) + '\n').join('');

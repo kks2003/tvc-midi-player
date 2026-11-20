@@ -451,9 +451,10 @@ CPU_CLOCK = 3125000.0
 POLY_HANDLER_CYCLES = 253     # a player_poly.asm mintamegszakítása a belépéssel együtt
 POLY_VOICES = 3
 POLY_DIV_MIN, POLY_DIV_MAX = 17, 64
-WAVES = ["square", "pulse", "triangle", "saw", "noise", "sine"]
+WAVES = ["square", "pulse", "triangle", "saw", "noise", "sine", "pulse12"]
 WAVE_NAMES = {"square": "négyszög", "pulse": "impulzus (25%)", "triangle": "háromszög",
-              "saw": "fűrész", "noise": "zaj", "sine": "szinusz"}
+              "saw": "fűrész", "noise": "zaj", "sine": "szinusz",
+              "pulse12": "keskeny impulzus (12,5%)"}
 TONE_WAVES = [w for w in WAVES if w != "noise"]     # dallamhoz választható
 NOISE = WAVES.index("noise")
 MAX_SLOTS = 5
@@ -1166,7 +1167,7 @@ def main():
                     help="poly: a mintaóra osztója, mintafrekvencia = 195312,5 / osztó "
                          "(alap: 19 = 10 280 Hz; 23 = 8 492 Hz, több szabad CPU)")
     ap.add_argument("--wave", choices=TONE_WAVES, default="square",
-                    help="poly: hullámforma (square, pulse = 25%%-os impulzus, triangle, saw, sine)")
+                    help="poly: hullámforma (square, pulse = 25%%-os impulzus, triangle, saw, sine, pulse12 = 12,5%%-os)")
     ap.add_argument("--channel-wave", metavar="CS=HULLÁM,...",
                     help="poly: csatornánkénti hullámforma, pl. 1=saw,6=sine")
     ap.add_argument("--prio", choices=("high", "low", "last"), default="high",
@@ -1342,7 +1343,8 @@ def ascii_name(name):
 # konverterével (midi2tvc.js featuresInc) azonos.
 POLY_FEATURES = ["FEAT_DRUMS", "FEAT_WAVE_PULSE", "FEAT_WAVE_TRI", "FEAT_WAVE_SAW",
                  "FEAT_WAVE_NOISE", "FEAT_WAVE_SINE", "FEAT_IRQ0038", "FEAT_PITCH",
-                 "FEAT_CARDS", "FEAT_SN", "FEAT_SID", "FEAT_SAA", "FEAT_OPL", "FEAT_FASTMIX"]
+                 "FEAT_CARDS", "FEAT_SN", "FEAT_SID", "FEAT_SAA", "FEAT_OPL", "FEAT_FASTMIX", "FEAT_WAVE_PULSE12",
+                 "FEAT_DECAY", "FEAT_WAVECHG", "FEAT_LOOP"]
 CARDS = ["sn", "sid", "saa", "opl"]                      # --cards: a lejátszóba kerülő kártyameghajtók
 MONO_FEATURES = ["FEAT_DRUMS", "FEAT_BG"]
 
@@ -1410,7 +1412,10 @@ def write_poly(args, notes, drums_sec, gain_auto=False):
         ("FEAT_IRQ0038", args.fast_irq), ("FEAT_PITCH", stats.get("bends", 0) > 0),
         ("FEAT_CARDS", bool(args.cards)), ("FEAT_SN", "sn" in args.cards),
         ("FEAT_SID", "sid" in args.cards), ("FEAT_SAA", "saa" in args.cards),
-        ("FEAT_OPL", "opl" in args.cards), ("FEAT_FASTMIX", args.poly_mix == "fast")) if on})
+        ("FEAT_OPL", "opl" in args.cards), ("FEAT_FASTMIX", args.poly_mix == "fast"),
+        ("FEAT_WAVE_PULSE12", "pulse12" in used),
+        ("FEAT_DECAY", (0 if args.envelope_data else args.decay) > 0 or stats.get("slides", 0) > 0),
+        ("FEAT_WAVECHG", len(slots) > 1), ("FEAT_LOOP", args.loop)) if on})
     print("poly: %.0f Hz mintavétel (osztó %d), %.2f tick/s, a keverés a CPU %.0f%%-a; "
           "hullámformák: %s; táblák: %d bájt a program után"
           % (sr, args.poly_div, tick_rate, 100 * poly_cpu_load(args.poly_div, args.fast_irq, args.poly_mix == "fast"),

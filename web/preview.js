@@ -33,6 +33,7 @@
   function waveSample(id, i, st) {
     if (id === 0) return i < 128 ? 255 : 0;
     if (id === 1) return i < 64 ? 255 : 0;
+    if (id === 6) return i < 32 ? 255 : 0;
     if (id === 2) return i < 128 ? 2 * i : 255 - ((2 * i) & 255);
     if (id === 3) return i;
     if (id === 5) {                     // negyed-szinusz tábla tükrözve, mint a lejátszóban
@@ -88,7 +89,7 @@
   }
   // vSID (chips.inc sid_update), egyszerűsítve: a hullámforma a SID-é, a
   // hangerő a kitartási szint (az ADSR felfutása, lecsengése nélkül)
-  const SID_CLOCK = 985337, SID_WAVE = [3, 4, 1, 2, 5, 1];   // 1 háromszög, 2 fűrész, 3 négyszög, 4 impulzus 25%, 5 zaj
+  const SID_CLOCK = 985337, SID_WAVE = [3, 4, 1, 2, 5, 1, 6];   // 1 háromszög, 2 fűrész, 3 négyszög, 4 impulzus 25%, 5 zaj, 6 impulzus 12,5%
   function sidTick(st, vs, waves, volScale, k, sr, n) {
     const out = new Float32Array(n);
     const ch = vs.map((v) => {
@@ -109,6 +110,7 @@
         else if (q.w === 2) y = p;
         else if (q.w === 3) y = p < 0.5 ? 1 : 0;
         else if (q.w === 4) y = p < 0.25 ? 1 : 0;
+        else if (q.w === 6) y = p < 0.125 ? 1 : 0;
         else {
           if (p * 16 % 1 < old * 16 % 1) st.noise[c] = Math.random();
           y = st.noise[c];
@@ -159,7 +161,7 @@
   }
   // OPL2 (chips.inc opl_update), egyszerűsített kétoperátoros FM: a vivő
   // szinusz, a modulátor szorzója, erőssége és visszacsatolása a hullámformából
-  const OPL_MUL = [2, 1, 2, 1, 15, 1], OPL_MTL = [0x21, 0x21, 0x2D, 0x25, 0, 0x3F], OPL_FB = [0, 2, 0, 6, 7, 0];
+  const OPL_MUL = [2, 1, 2, 1, 15, 1, 1], OPL_MTL = [0x21, 0x21, 0x2D, 0x25, 0, 0x3F, 0x1D], OPL_FB = [0, 2, 0, 6, 7, 0, 3];
   const OPL_TL = [63, 31, 23, 19, 15, 13, 11, 9, 7, 6, 5, 4, 3, 2, 1, 0];
   function oplFreq(F, k) {
     let fn = Math.floor(F * k / 65536), blk = 0;

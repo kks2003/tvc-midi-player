@@ -166,6 +166,10 @@ kerül, amit a dal használ. A konverter a dalból dönti el, és a
 | többszólamú | `FEAT_WAVE_PULSE`, `_TRI`, `_SAW`, `_NOISE`, `_SINE` | ha a dal használja az adott hullámformát (a négyszög mindig) |
 | többszólamú | `FEAT_IRQ0038` | `--fast-irq`: a mintakezelő a 0038h-n (−10 ciklus mintánként; a 0038h–0088h területet a lejátszás alatt használja, a végén visszaállítja) |
 | többszólamú | `FEAT_FASTMIX` | `--poly-mix fast`: keverőtábla nélkül (a szólamtáblákban már a kimenet van, a kezelő csak összead: −11 ciklus mintánként; szólamonként 6 hangerőszint) |
+| többszólamú | `FEAT_WAVE_PULSE12` | ha a dal használja a keskeny (12,5%-os) impulzust (`--wave pulse12`) |
+| többszólamú | `FEAT_DECAY` | ha van lecsengés (`--decay`) vagy dob |
+| többszólamú | `FEAT_WAVECHG` | ha több hullámforma-hely van (`BB` esemény) |
+| többszólamú | `FEAT_LOOP` | `--loop` |
 | többszólamú | `FEAT_PITCH` | `--bend`, ha a dalban van hajlítás, vibrato vagy burkológörbe-hangmagasság (`B3+s lo hi` parancs) |
 | többszólamú | `FEAT_CARDS`, `FEAT_SN`, `FEAT_SID`, `FEAT_SAA`, `FEAT_OPL` | `--cards sn,sid,saa,opl`: hangkártya-felismerés és a kiválasztott chipek meghajtói (`chips.inc`) |
 | egycsatornás | `FEAT_DRUMS` | ha van dobkészlet |
