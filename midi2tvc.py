@@ -632,6 +632,7 @@ def compile_envelopes(text):
         vl, vl_inc, vl_mult = 0x80, 0, 0
         vr, vr_inc, vr_mult = 0x80, 0, 0
         pb, pb_inc = 0x80, 0
+        any_dist = False
         d = 0
         frames = []
         while True:
@@ -723,13 +724,40 @@ def compile_envelopes(text):
                 pb_inc = tdiv(x, d)
             expect(",")
             expect("0")                 # torzítás
-            read_number()
+            if read_number() != 0:
+                any_dist = True
             expect(";")
         frames.append((0x80, 0x00 if not flags else 0xFF, 0))
+        if any_dist:
+            # a torzítást használó hangszernél a hangmagasság a DAVE torzításának
+            # kiegyenlítése és az erre épülő trükkök (pl. +1464 a torzított, -768 a
+            # tiszta képkockákon): a TVC-n nincs torzítás, így az egész elmarad
+            frames = [(a, b, 0) for a, b, _ in frames]
+        else:
+            frames = center_envelope_pitch(frames)
         for n in progs:
             if n >= 0:
                 out[n] = (frames, flags)
     return out
+
+
+def center_envelope_pitch(frames):
+    """A kitartott (ismétlődő) rész átlagos hangmagassága 0 legyen, ha egy
+    félhangon (64 egység) belül tér el tőle: a midiplay kórus-hangszereinél
+    (pl. 88 + 89) a két réteg ellentétesen el van hangolva, a TVC-n viszont
+    csak egy szól, így az hamis lenne. A vibrato megmarad."""
+    start = next((i for i, f in enumerate(frames) if f[0] & 0xC0 == 0x40), None)
+    if start is None:
+        return frames
+    end = next((i for i in range(start + 1, len(frames)) if frames[i][0] & 0xC0 == 0x80), None)
+    if end is None or frames[end][1] == 0xFF:
+        return frames
+    loop = [f[2] for f in frames[start:end]]
+    mean = sum(loop) / float(len(loop))
+    if not 0 < abs(mean) < 64:
+        return frames
+    off = int(round(mean))
+    return [(a, b, p - off if not (a & 0xC0 == 0x80 and p == 0) else p) for a, b, p in frames]
 
 
 def load_envelopes(name):
