@@ -75,7 +75,7 @@ MAX_SLOTS   equ 5
 ; +8   5 bájt: helyenként a hullámforma (0 négyszög, 1 impulzus 25%,
 ;      2 háromszög, 3 fűrész, 4 zaj, 5 szinusz, 6 impulzus 12,5%)
 ; +13  a szólamok legnagyobb hangereje (vmax; a hangkártyák skálázásához)
-; +14  2 bájt tartalék
+; +14  dw a burkológörbe-tábla helye a dal elejéhez képest (FEAT_ENVPLAY, különben 0)
 ; +16  64 bájt keverőtábla: összeg (0..45) -> kimenet (0..15); gyors keverésnél
 ;      (flags b1, FEAT_FASTMIX) szólamonként: érték (0..15) -> kimenet (0..5)
 ; +80  128 x dw fázisnövekmény (MIDI hangjegy -> f * 65536 / mintafrekvencia)
@@ -85,6 +85,9 @@ MAX_SLOTS   equ 5
 ;   B3+s lo hi          a szólam fázisnövekménye (hajlítás, vibrato; FEAT_PITCH)
 ;   B8+s n vd lo hi     csúszó / lecsengő hang (dob): n = kezdőhang, v/d hangerő
 ;                       és lecsengés (0-ig), lo hi = fázisnövekmény-változás / tick
+;   B6 sv n e           hang burkológörbével (FEAT_ENVPLAY): s = szólam (felső 4 bit),
+;                       v = hangerő (alsó 4 bit), n = hangjegy, e = a görbe sorszáma
+;   B7 s                a szólam hangszerét elengedik (a görbe az elengedési részre lép)
 ;   BB+s h              a szólam hullámforma-helye (h = 0..4)
 ;   BF lo hi            várakozás lo+256*hi tick
 ;   C0..FE              várakozás 1..63 tick
@@ -98,6 +101,7 @@ SONG_TICKN  equ song+6
 SONG_NSLOTS equ song+7
 SONG_WAVES  equ song+8
 SONG_VMAX   equ song+13
+SONG_ENVTAB equ song+14
 SONG_MIX    equ song+16
 SONG_FREQ   equ song+80
 SONG_EVENTS equ song+336
@@ -499,6 +503,13 @@ events:
             cp 0B6h
             jp c, .freq
             ENDIF
+            IF FEAT_ENVPLAY
+            cp 0B6h
+            jr c, .next
+            cp 0B7h
+            jp c, .envnote
+            jp z, .envrel
+            ENDIF
             cp 0B8h
             jr c, .next
             cp 0BBh
@@ -548,6 +559,9 @@ events:
             rrca
             rrca
             and 03h
+            IF FEAT_ENVPLAY
+            call env_off
+            ENDIF
             ld c, (hl)              ; hangjegy
             inc hl
             push hl
@@ -578,6 +592,9 @@ events:
             jp .next
 .off:
             sub 0B0h
+            IF FEAT_ENVPLAY
+            call env_off
+            ENDIF
             push hl
             call voice_hl
             ld de, VS_VOL
@@ -600,6 +617,102 @@ events:
             pop hl
             jp .next
             ENDIF
+            IF FEAT_ENVPLAY
+.envnote:                           ; B6 sv n e: hang burkológörbével
+            ld a, (hl)
+            inc hl
+            ld b, a                 ; B = sv
+            ld c, (hl)              ; C = hangjegy
+            inc hl
+            ld e, (hl)              ; E = a görbe sorszáma
+            inc hl
+            push hl
+            push de
+            rrca
+            rrca
+            rrca
+            rrca
+            and 03h
+            push af                 ; a szólam
+            call voice_hl
+            ld a, c
+            call note_freq
+            ld (hl), e              ; VS_F
+            inc hl
+            ld (hl), d
+            inc hl
+            xor a
+            ld (hl), a              ; VS_SLIDE
+            inc hl
+            ld (hl), a
+            inc hl
+            ld (hl), a              ; VS_VOL (a görbe lépése állítja be)
+            inc hl
+            ld (hl), a              ; VS_DEC: nincs lecsengés
+            inc hl
+            ld (hl), a              ; VS_CNT
+            pop af
+            add a, a
+            add a, a
+            add a, a
+            ld e, a
+            ld d, 0
+            ld hl, env_v
+            add hl, de
+            ex (sp), hl             ; a szólam görbe-állapota a verembe, HL = görbe sorszáma (E)
+            ld a, b
+            and 0Fh
+            ld b, a                 ; B = alaphangerő
+            ld a, l                 ; a görbe címe: song + táblázat[2 * e]
+            ld hl, (SONG_ENVTAB)
+            ld de, song
+            add hl, de
+            ld e, a
+            ld d, 0
+            add hl, de
+            add hl, de
+            ld e, (hl)
+            inc hl
+            ld d, (hl)
+            ld hl, song
+            add hl, de              ; HL = a görbe: jelzők, majd a képkockák
+            ld a, (hl)
+            and 0B0h
+            ld c, a                 ; C = állapot
+            inc hl
+            ex de, hl               ; DE = az első képkocka
+            pop hl                  ; a görbe-állapot
+            ld (hl), e              ; +0 mutató
+            inc hl
+            ld (hl), d
+            inc hl
+            xor a
+            ld (hl), a              ; +2 ismétlés eleje: nincs
+            inc hl
+            ld (hl), a
+            inc hl
+            ld (hl), c              ; +4 állapot
+            inc hl
+            ld (hl), b              ; +5 alaphangerő
+            inc hl
+            ld (hl), a              ; +6 elengedés: még nincs
+            pop hl
+            jp .next
+.envrel:                            ; B7 s: elengedés
+            ld a, (hl)
+            inc hl
+            push hl
+            add a, a
+            add a, a
+            add a, a
+            ld e, a
+            ld d, 0
+            ld hl, env_v + 6
+            add hl, de
+            ld (hl), 1              ; kérés: a következő lépésnél
+            pop hl
+            jp .next
+            ENDIF
 .wave:                              ; BB+s h
             IF FEAT_WAVECHG
             sub 0BBh
@@ -619,6 +732,9 @@ events:
             IF FEAT_DRUMS
 .slide:                             ; B8+s n vd lo hi
             sub 0B8h
+            IF FEAT_ENVPLAY
+            call env_off
+            ENDIF
             ld c, (hl)              ; hangjegy
             inc hl
             ld b, (hl)              ; vd
@@ -662,6 +778,9 @@ events:
             ENDIF
 ; ---- lecsengés, csúszás, majd a megszakítás operandusai -------------------
 voices:
+            IF FEAT_ENVPLAY
+            call env_tick
+            ENDIF
             ld hl, vstate
             ld bc, w1 + 1
             call voice1
@@ -922,6 +1041,161 @@ sine_q:
             ENDIF
             IF FEAT_CARDS
             include "chips.inc"
+            ENDIF
+
+            IF FEAT_ENVPLAY
+; ---- hangszer-burkológörbék a lejátszóban ----------------------------------------
+; A görbe képkockái (a konverter compile_envelopes / env_table szerint): 00..3F
+; hangerő; 40 h: ismétlés eleje (L), 80 h: ismétlés vége (R), C0 h: kitart (S), a
+; második bájt a hangerő; FF: vége.  A léptetés a midiplay daveplay-ével azonos
+; (midi2tvc.py envelope_frames): a hang hangereje = (szint * alap * 2 + 63) / 126.
+; Szólamonként 8 bájt: +0 mutató (0 = nincs görbe), +2 ismétlés eleje, +4
+; állapot (b4: van elengedési rész / kitart), +5 alaphangerő, +6 elengedés
+; (0 = lenyomva, 1 = most engedték el, 2 = elengedve)
+
+; A = a szólam: a görbe ki (A, BC, HL marad)
+env_off:
+            push hl
+            push de
+            push af
+            add a, a
+            add a, a
+            add a, a
+            ld e, a
+            ld d, 0
+            ld hl, env_v
+            add hl, de
+            xor a
+            ld (hl), a
+            inc hl
+            ld (hl), a
+            pop af
+            pop de
+            pop hl
+            ret
+
+env_tick:
+            ld hl, env_v
+            ld de, vstate + VS_VOL
+            ld b, 3
+.v:         push bc
+            push de
+            push hl
+            ld (e_vol), de
+            ld (e_entry), hl
+            call env_step
+            pop hl
+            pop de
+            ld bc, 8
+            add hl, bc
+            ex de, hl
+            ld bc, VS_SIZE
+            add hl, bc
+            ex de, hl
+            pop bc
+            djnz .v
+            ret
+
+env_step:
+            ld de, e_ptr            ; munkapéldány
+            ld bc, 7
+            ldir
+            ld hl, (e_ptr)
+            ld a, h
+            or l
+            ret z                   ; nincs görbe
+            ld a, (e_rel)
+            dec a
+            jr nz, .go
+            ld a, (e_state)         ; most engedték el
+            and 10h
+            jr z, .end              ; nincs elengedési rész: vége
+            ld a, 2
+            ld (e_rel), a
+            ld a, (hl)
+            cp 0C0h                 ; a kitartó képkocka kimarad
+            jr nz, .go
+            inc hl
+            inc hl
+.go:        ld a, (hl)
+            cp 40h
+            jr c, .plain
+            cp 0FFh
+            jr z, .end
+            ld b, a                 ; B = jelző
+            inc hl
+            ld c, (hl)              ; C = hangerő
+            inc hl
+            ld a, (e_rel)
+            or a
+            jr nz, .lev             ; elengedés után: tovább
+            ld a, b
+            cp 40h
+            jr z, .loop
+            cp 80h
+            jr z, .rep
+            ld a, 10h               ; kitart (S): marad ezen a képkockán
+            ld (e_state), a
+            dec hl
+            dec hl
+            jr .lev
+.loop:      dec hl                  ; L: az ismétlés eleje
+            dec hl
+            ld (e_loop), hl
+            inc hl
+            inc hl
+            jr .lev
+.rep:       ld hl, (e_loop)         ; R: vissza az ismétlés elejére
+            ld a, h
+            or l
+            jr z, .end
+            inc hl
+            ld c, (hl)
+            inc hl
+            jr .lev
+.plain:     ld c, a
+            inc hl
+.lev:       ld (e_ptr), hl
+            ld a, (e_base)          ; hangerő = (szint * alap * 2 + 63) / 126
+            ld b, a
+            ld e, c
+            ld d, 0
+            ld hl, 0
+            or a
+            jr z, .mz
+.ml:        add hl, de
+            djnz .ml
+.mz:        add hl, hl
+            ld de, 63
+            add hl, de
+            ld de, 126
+            xor a
+.dv:        or a
+            sbc hl, de
+            jr c, .dd
+            inc a
+            jr .dv
+.dd:        ld hl, (e_vol)
+            ld (hl), a
+            jr .save
+.end:       ld hl, (e_vol)          ; a görbe vége: a hang elhallgat
+            ld (hl), 0
+            ld hl, 0
+            ld (e_ptr), hl
+.save:      ld hl, e_ptr
+            ld de, (e_entry)
+            ld bc, 7
+            ldir
+            ret
+
+env_v:      ds 3 * 8
+e_ptr:      dw 0
+e_loop:     dw 0
+e_state:    db 0
+e_base:     db 0
+e_rel:      db 0
+e_vol:      dw 0
+e_entry:    dw 0
             ENDIF
 
 ; ---- változók ---------------------------------------------------------------

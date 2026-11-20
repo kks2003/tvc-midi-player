@@ -61,6 +61,8 @@ CASES = [
     (["--mode", "poly", "--wave", "pulse12", "--cards", "sid,opl"], {"mode": "poly", "wave": "pulse12", "cards": ["sid", "opl"]}),
     (["--mode", "poly", "--poly-mix", "fast", "--fast-irq", "--gain", "max"], {"mode": "poly", "polyMix": "fast", "fastIrq": True, "gain": "max"}),
     (["--mode", "poly", "--envelopes", "midiplay"], {"mode": "poly", "envelopes": "midiplay"}),
+    (["--mode", "poly", "--envelopes", "tvc", "--env-player", "--decay", "3"], {"mode": "poly", "envelopes": "tvc", "envPlayer": True, "decay": 3}),
+    (["--mode", "poly", "--envelopes", "midiplay", "--env-player", "--bend", "--loop"], {"mode": "poly", "envelopes": "midiplay", "envPlayer": True, "bend": True, "loop": True}),
     (["--mode", "poly", "--envelopes", "tvc", "--loop", "--decay", "3", "--gain", "max"],
      {"mode": "poly", "envelopes": "tvc", "loop": True, "decay": 3, "gain": "max"}),
     (["--mode", "poly", "--envelopes", "tvc", "--wave", "triangle", "--from", "3", "--to", "20"],

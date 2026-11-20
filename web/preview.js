@@ -193,7 +193,8 @@
     }
     return out;
   }
-  function simulatePoly(song, card) {
+  // trace(ptr, wait, hangerők): tickenként (tesztekhez: az emulátor állapotával összevetni)
+  function simulatePoly(song, card, trace) {
     const flags = song[0], decay = song[1], floor = song[2], div = song[3];
     const loopOff = song[4] | (song[5] << 8), tickn = song[6], nslots = song[7];
     const waves = Array.from(song.subarray(8, 8 + nslots));
@@ -203,7 +204,34 @@
     const EV = 336;
     const tables = buildTables(waves);
     let ptr = EV, wait = 0, done = false;
-    const vs = [0, 1, 2].map(() => ({ f: 0, slide: 0, vol: 0, dec: 0, cnt: 0, floor: 0, slot: 0, note: -1, drum: false }));
+    const vs = [0, 1, 2].map(() => ({ f: 0, slide: 0, vol: 0, dec: 0, cnt: 0, floor: 0, slot: 0, note: -1, drum: false, env: null }));
+    const envTab = song[14] | (song[15] << 8);
+    // hangszer-burkológörbe (player_poly.asm env_step): a mutatók a dal elejétől
+    function envStep(v) {
+      const e = v.env;
+      if (!e) return;
+      if (e.rel === 1) {
+        if (!(e.state & 0x10)) { v.vol = 0; v.env = null; return; }
+        e.rel = 2;
+        if (song[e.ptr] === 0xC0) e.ptr += 2;
+      }
+      let p = e.ptr, b = song[p], lev;
+      if (b < 0x40) { lev = b; p++; }
+      else {
+        if (b === 0xFF) { v.vol = 0; v.env = null; return; }
+        lev = song[p + 1];
+        p += 2;
+        if (!e.rel) {
+          if (b === 0x40) e.loop = p - 2;
+          else if (b === 0x80) {
+            if (e.loop === null) { v.vol = 0; v.env = null; return; }
+            lev = song[e.loop + 1]; p = e.loop + 2;
+          } else { e.state = 0x10; p -= 2; }
+        }
+      }
+      e.ptr = p;
+      v.vol = Math.floor((lev * e.base * 2 + 63) / 126);
+    }
 
     function events() {
       if (wait) { wait--; if (wait) return; }
@@ -221,14 +249,23 @@
         if (a < 0xB0) {
           const v = vs[(a >> 4) & 3], n = song[ptr++];
           v.vol = a & 15; v.f = F(n); v.slide = 0; v.dec = decay; v.cnt = decay; v.floor = floor;
-          v.note = n; v.drum = false;
-        } else if (a < 0xB3) vs[a - 0xB0].vol = 0;
+          v.note = n; v.drum = false; v.env = null;
+        } else if (a < 0xB3) { vs[a - 0xB0].vol = 0; vs[a - 0xB0].env = null; }
         else if (a >= 0xB3 && a < 0xB6) { vs[a - 0xB3].f = song[ptr] | (song[ptr + 1] << 8); ptr += 2; }
         else if (a >= 0xB8 && a < 0xBB) {
           const v = vs[a - 0xB8], n = song[ptr++], b = song[ptr++];
           v.f = F(n); v.dec = b & 15; v.cnt = v.dec; v.vol = b >> 4; v.floor = 0;
           v.slide = song[ptr] | (song[ptr + 1] << 8); ptr += 2;
-          v.note = n; v.drum = true;
+          v.note = n; v.drum = true; v.env = null;
+        } else if (a === 0xB6) {
+          const sv = song[ptr++], n = song[ptr++], e = song[ptr++];
+          const v = vs[(sv >> 4) & 3];
+          const at = song[envTab + 2 * e] | (song[envTab + 2 * e + 1] << 8);
+          v.f = F(n); v.slide = 0; v.vol = 0; v.dec = 0; v.cnt = 0; v.note = n; v.drum = false;
+          v.env = { ptr: at + 1, loop: null, state: song[at] & 0xB0, base: sv & 15, rel: 0 };
+        } else if (a === 0xB7) {
+          const v = vs[song[ptr++] & 3];
+          if (v.env) v.env.rel = 1;
         } else if (a >= 0xBB && a < 0xBE) vs[a - 0xBB].slot = song[ptr++];
         else if (a === 0xBF) {
           wait = song[ptr] | (song[ptr + 1] << 8); ptr += 2; return;
@@ -236,6 +273,7 @@
       }
     }
     function voices() {
+      for (const v of vs) envStep(v);
       for (const v of vs) {
         v.f = (v.f + v.slide) & 0xFFFF;
         if (v.dec && --v.cnt === 0) { v.cnt = v.dec; if (v.vol > v.floor) v.vol--; }
@@ -257,13 +295,13 @@
       sid: () => sidTick(sidSt, vs, waves, volScale, sidK, sr, tickn),
       saa: () => saaTick(saaSt, vs, waves, volScale, saaK, sr, tickn),
       opl: () => oplTick(oplSt, vs, waves, volScale, oplK, sr, tickn) }[card];
-    events(); voices();
+    events(); voices(); if (trace) trace(ptr, wait, vs.map((v) => v.vol));
     while (!done && tick < maxTicks) {
       if (cardTick) {
         chunks.push(cardTick());
         roll.push(vs.map((v, i) => ({ v: i, note: v.note, vol: v.vol, drum: v.drum, noise: waves[v.slot] === 4 }))
           .filter((x) => x.vol > 0 && x.note >= 0));
-        events(); voices();
+        events(); voices(); if (trace) trace(ptr, wait, vs.map((v) => v.vol));
         tick++;
         continue;
       }
@@ -280,7 +318,7 @@
       chunks.push(buf);
       roll.push(vs.map((v, i) => ({ v: i, note: v.note, vol: v.vol, drum: v.drum, noise: waves[v.slot] === 4 }))
         .filter((x) => x.vol > 0 && x.note >= 0));
-      events(); voices();
+      events(); voices(); if (trace) trace(ptr, wait, vs.map((v) => v.vol));
       tick++;
     }
     return { levels: join(chunks), rate: sr, roll, frames: tick, loop: !!(flags & 1) };
@@ -422,8 +460,8 @@
   }
 
   // card: 'sn', 'sid', 'saa', 'opl' = a hangkártya hangja (csak a többszólamú lejátszónál)
-  function simulate(song, mode, outRate, card) {
-    return mode === 'poly' ? simulatePoly(song, card) : simulateMono(song, outRate || 44100);
+  function simulate(song, mode, outRate, card, trace) {
+    return mode === 'poly' ? simulatePoly(song, card, trace) : simulateMono(song, outRate || 44100);
   }
 
   const api = { simulate, toAudio };

@@ -832,6 +832,29 @@ def parse_channel_waves(spec):
     return out
 
 
+def env_table(env, used, base):
+    """--env-player: a használt hangszerek görbéi a lejátszónak (player_poly.asm
+    env_step): görbénként dw hely (a dal elejétől), majd görbénként a jelzők és a
+    képkockák: 00..3F hangerő; 40 h / 80 h / C0 h = L / R / S, h a hangerő; FF vége"""
+    order = sorted(used, key=used.get)
+    blobs = []
+    for pg in order:
+        frames, flags = env[pg]
+        b = bytearray([flags & 0xFF])
+        for b0, b1, _ in frames:
+            if b0 & 0xC0:
+                b += bytes((0xFF,)) if b1 == 0xFF else bytes((b0 & 0xC0, max(b0 & 0x3F, b1)))
+            else:
+                b.append(max(b0, b1))
+        blobs.append(bytes(b))
+    out = bytearray()
+    off = base + 2 * len(order)
+    for bl in blobs:
+        out += struct.pack("<H", off)
+        off += len(bl)
+    return bytes(out) + b"".join(blobs)
+
+
 def poly_envelope_ticks(ticks, args, vmin, vmax):
     """Hangszer-burkológörbékkel: hangonként a hangerő tickenként (None =
     állandó), és a hang új vége (az elengedés utáni lecsengéssel együtt)."""
@@ -897,6 +920,13 @@ def convert_poly(notes, drums, args, sr, tick_rate, ftab, ch_waves):
     vfreq = [None] * POLY_VOICES      # a szólam fázisnövekménye a lejátszóban
     bend_on = bool(getattr(args, "bend", False))
     bends, mods = getattr(args, "bend_ctl", None) or ({}, {})
+    # --env-player: a burkológörbés hangot a lejátszó lépteti (B6 / B7), ha a hang az
+    # elején kap szólamot; a többi hang hangerejét a lejátszó lecsengése viszi
+    env = getattr(args, "envelope_data", None) or {}
+    envplay = bool(getattr(args, "env_player", False)) and bool(env)
+    env_ids = {}                      # program -> a görbe sorszáma (a megjelenés sorrendjében)
+    note_pg = {}
+    eng = [False] * POLY_VOICES       # a szólam hangját a lejátszó görbéje viszi
     slot_of(args.wave)                # az alap hullámforma a 0. hely
 
     def set_wave(v, wave):
@@ -910,6 +940,7 @@ def convert_poly(notes, drums, args, sr, tick_rate, ftab, ch_waves):
             del active[k]
         for st, en, n, v, ch, idx, pg in starts.get(t, ()):
             active[idx] = (st, en, n, v, ch)
+            note_pg[idx] = pg
         # lejárt dobfoglalások: a szólam elhallgat
         for v in range(POLY_VOICES):
             if reserved[v] and reserved[v] <= t:
@@ -959,6 +990,7 @@ def convert_poly(notes, drums, args, sr, tick_rate, ftab, ch_waves):
                     lvl[v] = vol
                     reserved[v] = t + dur
                     cur[v] = None
+                    eng[v] = False
         free = [v for v in range(POLY_VOICES) if not reserved[v]]
         want = cands[:len(free)]
         want_idx = dict(want)
@@ -981,7 +1013,16 @@ def convert_poly(notes, drums, args, sr, tick_rate, ftab, ch_waves):
             else:
                 vol = velocity_to_volume(vel, args.curve, vmin, vmax)
             set_wave(v, ch_waves.get(ch, args.wave))
-            emit(bytes((0x80 + 16 * v + vol, n)))
+            pg = note_pg.get(idx)
+            if envplay and idx in seqs and pg in env and t == active[idx][0]:
+                base = velocity_to_volume(vel, args.curve, vmin, vmax)
+                e = env_ids.setdefault(pg, len(env_ids))
+                emit(bytes((0xB6, (v << 4) | base, n, e)))
+                vol = max(seqs[idx][0])           # (a statisztikához)
+                eng[v] = True
+            else:
+                emit(bytes((0x80 + 16 * v + vol, n)))
+                eng[v] = False
             lvl[v] = vol
             vfreq[v] = ftab[n]
             stats["notes"] += 1
@@ -992,12 +1033,18 @@ def convert_poly(notes, drums, args, sr, tick_rate, ftab, ch_waves):
             if v not in new_cur and cur[v] is not None:
                 emit(bytes((0xB0 + v,)))
                 lvl[v] = 0
+                eng[v] = False
             cur[v] = new_cur.get(v)
-            # burkológörbe: ha a hangerő változik, a hang újra (a fázis marad)
+            # burkológörbe: ha a hangerő változik, a hang újra (a fázis marad);
+            # --env-player: a lejátszó görbéje (B6) vagy lecsengése viszi
             if cur[v] is not None and v not in fresh and cur[v][0] in seqs:
                 idx, n = cur[v]
                 lev = seqs[idx][0][t - active[idx][0]]
-                if lev != lvl[v]:
+                if envplay and (eng[v] or note_pg.get(idx) not in env):
+                    lvl[v] = lev
+                    if eng[v] and t == seqs[idx][1]:
+                        emit(bytes((0xB7, v)))        # elengedik
+                elif lev != lvl[v]:
                     emit(bytes((0x80 + 16 * v + lev, n)))
                     lvl[v] = lev
                     vfreq[v] = ftab[n]
@@ -1033,6 +1080,7 @@ def convert_poly(notes, drums, args, sr, tick_rate, ftab, ch_waves):
             encode_wait_poly(out, n)      # beállított szünet az ismétlés előtt
             total += n
     out.append(0xFF)
+    args.env_used = env_ids
     return bytes(out), total, stats, slots
 
 
@@ -1235,6 +1283,10 @@ def main():
     ap.add_argument("--envelopes", metavar="NÉV|FÁJL",
                     help="többszólamú mód: hangszer-burkológörbék a midiplay formátumában "
                          "('midiplay' vagy 'tvc' = a mellékelt fájlok, vagy egy envelope.txt)")
+    ap.add_argument("--env-player", action="store_true",
+                    help="többszólamú mód, --envelopes: a burkológörbéket a lejátszó lépteti "
+                         "(csak a dalban használt hangszerek görbéi kerülnek bele, a dal adata "
+                         "sokkal kisebb); különben a konverter tickenként kiírja a hangerőt")
     ap.add_argument("--gain", default="100", metavar="SZÁZALÉK",
                     help="globális hangerő százalékban (alap: 100); 'max' = a legnagyobb, "
                          "ami még nem torzít")
@@ -1376,7 +1428,7 @@ def ascii_name(name):
 POLY_FEATURES = ["FEAT_DRUMS", "FEAT_WAVE_PULSE", "FEAT_WAVE_TRI", "FEAT_WAVE_SAW",
                  "FEAT_WAVE_NOISE", "FEAT_WAVE_SINE", "FEAT_IRQ0038", "FEAT_PITCH",
                  "FEAT_CARDS", "FEAT_SN", "FEAT_SID", "FEAT_SAA", "FEAT_OPL", "FEAT_FASTMIX", "FEAT_WAVE_PULSE12",
-                 "FEAT_DECAY", "FEAT_WAVECHG", "FEAT_LOOP", "FEAT_BIGMEM"]
+                 "FEAT_DECAY", "FEAT_WAVECHG", "FEAT_LOOP", "FEAT_BIGMEM", "FEAT_ENVPLAY"]
 CARDS = ["sn", "sid", "saa", "opl"]
 # memória: a program a 19EFh-tól; a BASIC-nek (ROM a C000h-tól) a táblákkal együtt
 # legfeljebb BIG_LIMIT-ig; fölötte a többszólamú lejátszó a lejátszás alatt az U3
@@ -1470,12 +1522,18 @@ def write_poly(args, notes, drums_sec, gain_auto=False):
     if gain_auto:
         args.gain = top
     print("hangerő: %g%% (torzítás nélkül legfeljebb %d%%)" % (args.gain, top))
-    header = struct.pack("<BBBBHBB", (1 if args.loop else 0) | (2 if args.poly_mix == "fast" else 0), 0 if args.envelope_data else args.decay,
+    envplay = bool(args.env_used)
+    hdecay = args.decay if envplay or not args.envelope_data else 0
+    body_off = 16 + 64 + 2 * len(ftab)
+    env_off = body_off + len(body) if envplay else 0
+    header = struct.pack("<BBBBHBB", (1 if args.loop else 0) | (2 if args.poly_mix == "fast" else 0), hdecay,
                          max(0, min(15, args.decay_floor)), args.poly_div, 0, tickn, len(slots))
-    header += bytes(slots + [0] * (MAX_SLOTS - len(slots))) + bytes((args.poly_volume, 0, 0))
+    header += bytes(slots + [0] * (MAX_SLOTS - len(slots))) + bytes((args.poly_volume,)) + struct.pack("<H", env_off)
     data = header + bytes(poly_mix_table(args.poly_knee, mode=args.poly_mix, vmax=args.poly_volume,
                                          gain=args.gain)) + \
         b"".join(struct.pack("<H", f) for f in ftab) + body
+    if envplay:
+        data += env_table(args.envelope_data, args.env_used, env_off)
     os.makedirs(os.path.dirname(os.path.abspath(args.output)), exist_ok=True)
     with open(args.output, "wb") as f:
         f.write(data)
@@ -1497,8 +1555,8 @@ def write_poly(args, notes, drums_sec, gain_auto=False):
         ("FEAT_SID", "sid" in args.cards), ("FEAT_SAA", "saa" in args.cards),
         ("FEAT_OPL", "opl" in args.cards), ("FEAT_FASTMIX", args.poly_mix == "fast"),
         ("FEAT_WAVE_PULSE12", "pulse12" in used),
-        ("FEAT_DECAY", (0 if args.envelope_data else args.decay) > 0 or stats.get("slides", 0) > 0),
-        ("FEAT_WAVECHG", len(slots) > 1), ("FEAT_LOOP", args.loop), ("FEAT_BIGMEM", big)) if on}, len(data))
+        ("FEAT_DECAY", hdecay > 0 or stats.get("slides", 0) > 0),
+        ("FEAT_WAVECHG", len(slots) > 1), ("FEAT_LOOP", args.loop), ("FEAT_BIGMEM", big), ("FEAT_ENVPLAY", envplay)) if on}, len(data))
     print("poly: %.0f Hz mintavétel (osztó %d), %.2f tick/s, a keverés a CPU %.0f%%-a; "
           "hullámformák: %s; táblák: %d bájt a program után"
           % (sr, args.poly_div, tick_rate, 100 * poly_cpu_load(args.poly_div, args.fast_irq, args.poly_mix == "fast"),
