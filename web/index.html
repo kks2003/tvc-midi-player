@@ -152,6 +152,10 @@ td.name .sub { display: block; font: 11.5px var(--font-mono); color: var(--muted
 .fields.compact .field label { font-size: 12px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .fields.compact .field input[type="number"], .fields.compact .field input[type="text"], .fields.compact .field select { padding: 4px 6px; font-size: 13px; }
 .fields.compact .check { font-size: 13px; }
+fieldset.opts { border: 1px solid var(--line); border-radius: var(--r); padding: 8px 10px 10px; margin: 0; display: grid; gap: 6px; }
+fieldset.opts legend { font-size: 12.5px; color: var(--muted); padding: 0 4px; }
+fieldset.opts .check { align-items: flex-start; font-size: 13px; }
+fieldset.opts .check input { margin-top: 2px; flex: none; }
 .gainrow { display: flex; gap: 8px; min-width: 0; }
 .gainrow input { min-width: 0; flex: 1; }
 .gainrow.wide input { flex: 0 1 7em; }
@@ -319,6 +323,9 @@ footer code, .hint code { font-family: var(--font-mono); font-size: 12.5px; }
           <div class="field"><label for="wave">Hullámforma</label><select id="wave"><option value="square">négyszög</option><option value="pulse">impulzus (25%)</option><option value="triangle">háromszög</option><option value="saw">fűrész</option><option value="sine">szinusz</option></select></div>
           <div class="field"><label for="polyDiv">Mintavétel</label>
             <select id="polyDiv"><option value="17">11 489 Hz · CPU 93%</option><option value="19" selected>10 280 Hz · CPU 83%</option><option value="21">9 301 Hz · CPU 75%</option><option value="23">8 492 Hz · CPU 69%</option><option value="28">6 975 Hz · CPU 56%</option></select></div>
+          <fieldset class="field wide opts" id="polyOpts"><legend>Mi kerüljön a programba?</legend>
+            <label class="check"><input id="fastIrq" type="checkbox"> Gyors megszakítás: a mintakezelő a 0038h-n (−10 ciklus mintánként, kb. 4% CPU). A 0038h–0088h területet (a 0. kártyahely munkaterületét is) a lejátszás alatt használja, a végén visszaállítja.</label>
+          </fieldset>
           <p class="hint field wide">Tiszta keverésnél a három szólam együtt sem vezérli túl a 4 bites kimenetet; a hangos keverés erősebb, de a csúcsokat összenyomja (szinusznál, háromszögnél torzítás). A hullámforma csatornánként is megadható a Csatornák táblázatban. Kisebb mintavételnél több processzoridő marad szabadon, de tompább a hang.</p>
         </div>
         <div class="fields" id="f-arp" hidden>
@@ -667,7 +674,7 @@ footer code, .hint code { font-family: var(--font-mono); font-size: 12.5px; }
       loopPause: $('loop').checked && $('loopPauseOn').checked ? Math.max(1, Math.min(9, Math.round(num('loopPause')) || 1)) : 0,
       background: mode !== 'poly' && $('background').checked,
       from: rangeFrom, to: rangeTo, trim: $('trim').checked,
-      wave: $('wave').value, polyDiv: num('polyDiv'), envelopes: envOption(),
+      wave: $('wave').value, polyDiv: num('polyDiv'), fastIrq: $('fastIrq').checked, envelopes: envOption(),
       channelWave: mode === 'poly' ? Object.fromEntries(Object.entries(channelWave).filter(([ch]) => channelSel.has(+ch))) : null,
     };
   }
@@ -739,6 +746,15 @@ footer code, .hint code { font-family: var(--font-mono); font-size: 12.5px; }
     },
   });
   $('envEdit').addEventListener('click', () => envEditor.open());
+  // a mintavétel-választó CPU-feliratai (a gyors megszakítással kevesebb)
+  function updateDivLabels() {
+    for (const opt of $('polyDiv').options) {
+      const div = +opt.value, hz = 195312.5 / div;
+      const cpu = (253 - ($('fastIrq').checked ? 10 : 0)) * hz / 3125000;
+      opt.textContent = Math.round(hz).toLocaleString('hu-HU') + ' Hz · CPU ' + Math.round(100 * cpu) + '%';
+    }
+  }
+  $('fastIrq').addEventListener('change', updateDivLabels);
   function showModeFields() {
     const mode = document.querySelector('input[name="mode"]:checked').value;
     for (const m of ['poly', 'arp', 'mono']) $('f-' + m).hidden = m !== mode;
@@ -1365,7 +1381,7 @@ footer code, .hint code { font-family: var(--font-mono); font-size: 12.5px; }
   $('loopPauseOn').addEventListener('change', syncPause);
   syncPause();
   for (const id of ['polyVolume', 'polyKnee', 'polyMix', 'maxNotes', 'arpSpeed', 'arpBass', 'prio', 'drums', 'transpose', 'decay',
-    'decayFloor', 'speed', 'title', 'tuning', 'curve', 'minVolume', 'maxVolume', 'gain', 'drumVolume', 'loop', 'loopPauseOn', 'loopPause', 'background', 'wave', 'polyDiv', 'trim']) {
+    'decayFloor', 'speed', 'title', 'tuning', 'curve', 'minVolume', 'maxVolume', 'gain', 'drumVolume', 'fastIrq', 'loop', 'loopPauseOn', 'loopPause', 'background', 'wave', 'polyDiv', 'trim']) {
     $(id).addEventListener(($(id).type === 'checkbox' || $(id).tagName === 'SELECT') ? 'change' : 'input', regenerate);
   }
   $('fileInput').addEventListener('change', (e) => {
@@ -1415,6 +1431,7 @@ footer code, .hint code { font-family: var(--font-mono); font-size: 12.5px; }
     }
   } catch (e) { /* alapbeállítások */ }
   syncPause();   // a visszaállított „Végtelenítve” szerint
+  updateDivLabels();
   syncDrums();
   window.addEventListener('pageshow', syncPause);   // a böngésző is visszatöltheti az űrlapot
   showModeFields();

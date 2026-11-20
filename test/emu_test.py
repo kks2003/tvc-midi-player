@@ -329,6 +329,39 @@ def main():
         d4 = struct.unpack("<%dh" % w.getnframes(), w.readframes(w.getnframes()))
     check("poly: ESC: leáll a hang", max(d4[-rate:]) - min(d4[-rate:]) < 200)
 
+    # 3b. --fast-irq: a mintakezelő a 0038h-n; a 0038h..0088h terület visszaáll
+    def poly_run(extra, name, secs, dump=None):
+        subprocess.check_call([os.path.join(REPO, "build.sh"), mid, "--mode", "poly", "--decay", "4"] + extra,
+                              stdout=subprocess.DEVNULL)
+        shutil.copy(os.path.join(REPO, "build", "teszt.cas"), "/files/%s.cas" % name)
+        w_ = os.path.join(out, name + ".wav")
+        sc = os.path.join(out, name + ".ppm")
+        env_ = dict(os.environ, SCREEN=sc)
+        if dump:
+            env_["DUMP"] = dump
+        r_ = subprocess.check_output([exe, args.roms, name, str(secs), w_, os.path.join(out, name + "_ports.txt")],
+                                     env=env_).decode()
+        with wave.open(w_) as w:
+            d_ = struct.unpack("<%dh" % w.getnframes(), w.readframes(w.getnframes()))
+        return r_, d_, sc
+    rb, _, _ = poly_run([], "pbase", 16, "0038,51")
+    rf, df, sf = poly_run(["--fast-irq"], "pfast", 16, "0038,51")
+    check("fast-irq: a dal végén a BASIC hiba nélkül folytatja", basic_ok(sf))
+    st = next((i for i in range(len(df)) if abs(df[i] - df[0]) > 200), None)
+    check("fast-irq: szól a hang", st is not None)
+    if st is not None:
+        cents = []
+        for k, n in ((0.1, 60), (0.6, 62), (3.6, 72)):
+            f = zero_cross_freq(df[st + int(k * rate): st + int((k + 0.3) * rate)], rate)
+            cents.append(1200 * math.log2(f / midi2tvc.note_freq(n, 440.0)) if f else 999)
+        check("fast-irq: a hangmagasság pontos (±5 cent)", all(abs(c) < 5 for c in cents),
+              ", ".join("%.1f" % c for c in cents))
+    db = rb.split("dump 0038:")[1].split("\n")[0].strip()
+    dfa = rf.split("dump 0038:")[1].split("\n")[0].strip()
+    check("fast-irq: a 0038h..0088h terület a végén ugyanaz, mint nélküle", db == dfa,
+          "" if db == dfa else "eltér")
+    check("fast-irq: a rendszer IT-belépése visszaállt", isr_restored(rf))
+
     # 4. háttér-mód (--background): a zene szól, a BASIC közben dolgozik
     subprocess.check_call([os.path.join(REPO, "build.sh"), mid, "--background", "--loop", "--decay", "4"])
     shutil.copy(os.path.join(REPO, "build", "teszt.cas"), "/files/bg.cas")

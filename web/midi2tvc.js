@@ -358,7 +358,7 @@
     const tickn = clamp(pyRound(sr / 50.0), 1, 255);
     return [sr, tickn, sr / tickn];
   }
-  const polyCpuLoad = (div) => POLY_HANDLER_CYCLES / (CPU_CLOCK / (TVC_CLOCK / div));
+  const polyCpuLoad = (div, fastIrq) => (POLY_HANDLER_CYCLES - (fastIrq ? 10 : 0)) / (CPU_CLOCK / (TVC_CLOCK / div));
   function polyFreqTable(tuning, sr) {
     const out = [];
     for (let n = 0; n < 128; n++) out.push(clamp(pyRound(noteFreq(n, tuning) * 65536 / sr), 1, 32767));
@@ -792,7 +792,7 @@
   const DEFAULTS = {
     mode: 'arp', prio: 'high', maxNotes: 3, arpBass: false, arpSpeed: 1, polyVolume: 9, polyKnee: 10, polyMix: 'clean',
     channels: null, drums: 'synth', transpose: 0, tuning: 440.0, speed: 1.0, rate: FRAME_RATE,
-    decay: 0, decayFloor: 6, curve: 0.7, minVolume: 6, maxVolume: 15, loop: false, loopPause: 0, drumVolume: 100, gain: 100, envelopes: null, background: false, from: null, to: null, trim: false,
+    decay: 0, decayFloor: 6, curve: 0.7, minVolume: 6, maxVolume: 15, loop: false, loopPause: 0, drumVolume: 100, gain: 100, envelopes: null, fastIrq: false, background: false, from: null, to: null, trim: false,
     polyDiv: 19, wave: 'square', channelWave: null,     // channelWave: {csatorna (1..16): hullámforma}
   };
 
@@ -851,10 +851,11 @@
       for (const f of ftab) data.push(f & 0xFF, f >> 8);
       song = Uint8Array.from(data.concat(r.body));
       ({ total, stats, pause } = r);
-      polyInfo = { div: o.polyDiv, tickn, slots: r.slots, cpu: polyCpuLoad(o.polyDiv), tableBytes: 256 * (2 + 8 * r.slots.length) };
+      polyInfo = { div: o.polyDiv, tickn, slots: r.slots, cpu: polyCpuLoad(o.polyDiv, o.fastIrq), tableBytes: 256 * (2 + 8 * r.slots.length) };
       const used = new Set(r.slots.map((w) => WAVES[w]));
       features = [['FEAT_DRUMS', (r.stats.slides || 0) > 0], ['FEAT_WAVE_PULSE', used.has('pulse')], ['FEAT_WAVE_TRI', used.has('triangle')],
-        ['FEAT_WAVE_SAW', used.has('saw')], ['FEAT_WAVE_NOISE', used.has('noise')], ['FEAT_WAVE_SINE', used.has('sine')]]
+        ['FEAT_WAVE_SAW', used.has('saw')], ['FEAT_WAVE_NOISE', used.has('noise')], ['FEAT_WAVE_SINE', used.has('sine')],
+        ['FEAT_IRQ0038', !!o.fastIrq]]
         .filter((x) => x[1]).map((x) => x[0]);
       rate = tickRate;
     } else {
@@ -913,7 +914,7 @@
   // ---- a lejátszók kapcsolható részei (build/features.inc) -------------------------
   // a .cas-ba csak a dalhoz kellő kód kerül; ugyanaz, mint a midi2tvc.py
   // POLY_FEATURES / MONO_FEATURES / features_inc
-  const POLY_FEATURES = ['FEAT_DRUMS', 'FEAT_WAVE_PULSE', 'FEAT_WAVE_TRI', 'FEAT_WAVE_SAW', 'FEAT_WAVE_NOISE', 'FEAT_WAVE_SINE'];
+  const POLY_FEATURES = ['FEAT_DRUMS', 'FEAT_WAVE_PULSE', 'FEAT_WAVE_TRI', 'FEAT_WAVE_SAW', 'FEAT_WAVE_NOISE', 'FEAT_WAVE_SINE', 'FEAT_IRQ0038'];
   const MONO_FEATURES = ['FEAT_DRUMS', 'FEAT_BG'];
   const featureNames = (mode) => (mode === 'poly' ? POLY_FEATURES : MONO_FEATURES);
   const featuresInc = (result) => featureNames(result.mode).map((n) => n + ' equ ' + (result.features.includes(n) ? 1 : 0) + '\n').join('');
@@ -963,7 +964,7 @@
     ['arpSpeed', '--arp-speed'], ['polyVolume', '--poly-volume'], ['polyKnee', '--poly-knee'], ['polyMix', '--poly-mix'],
     ['channels', '--channels'], ['drums', '--drums'], ['transpose', '--transpose'], ['tuning', '--tuning'],
     ['speed', '--speed'], ['decay', '--decay'], ['decayFloor', '--decay-floor'], ['curve', '--curve'],
-    ['minVolume', '--min-volume'], ['maxVolume', '--max-volume'], ['loop', '--loop'], ['loopPause', '--loop-pause'], ['drumVolume', '--drum-volume'], ['gain', '--gain'], ['envelopes', '--envelopes'],
+    ['minVolume', '--min-volume'], ['maxVolume', '--max-volume'], ['loop', '--loop'], ['loopPause', '--loop-pause'], ['drumVolume', '--drum-volume'], ['gain', '--gain'], ['fastIrq', '--fast-irq'], ['envelopes', '--envelopes'],
     ['background', '--background'], ['from', '--from'], ['to', '--to'], ['trim', '--trim'], ['polyDiv', '--poly-div'], ['wave', '--wave'], ['channelWave', '--channel-wave'],
   ];
   function cliArgs(opts) {

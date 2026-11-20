@@ -147,6 +147,16 @@ start:
             out (P_CRTCREG), a      ; magnókezelésnél: 10. regiszter = 23h)
             ld a, 23h
             out (P_CRTCDAT), a
+            IF FEAT_IRQ0038
+            ld hl, IRQVEC           ; a 0038h-tól a terület mentése, és oda
+            ld de, saved_irq        ; a kezelő (ugrás nélkül: -10 ciklus/minta)
+            ld bc, IRQ_LEN
+            ldir
+            ld hl, irq_code
+            ld de, IRQVEC
+            ld bc, IRQ_LEN
+            ldir
+            ELSE
             ld hl, IRQVEC           ; a megszakítás a mi kezelőnkre ugrik
             ld de, saved_irq
             ld bc, 3
@@ -155,6 +165,7 @@ start:
             ld (IRQVEC), a
             ld hl, it_handler
             ld (IRQVEC + 1), hl
+            ENDIF
             ld a, (SONG_TICKN)
             ld (tickn + 1), a
             call tick_work          ; az első események
@@ -192,7 +203,11 @@ start:
             out (P_AMP), a
             ld hl, saved_irq
             ld de, IRQVEC
+            IF FEAT_IRQ0038
+            ld bc, IRQ_LEN          ; a 0038h-tól az eredeti (a 0. kártyahely területe is)
+            ELSE
             ld bc, 3
+            ENDIF
             ldir
             ld a, 10                ; a kurzor-IT vissza
             out (P_CRTCREG), a
@@ -223,6 +238,13 @@ exit:
 ; ---- mintamegszakítás -------------------------------------------------------
 ; árnyékregiszterek: HL' = 3. fázis, BC' munka, D' összeg, E' tickszámláló;
 ; IX, IY = 1. és 2. fázis.  Ciklus: 13 (IM 1) + 10 (JP) + 230
+; FEAT_IRQ0038: a kezelő (a tick belépőjével együtt) a 0038h-ra fordítva, ide
+; csak bemásoljuk (a 0038h..0038h+IRQ_LEN terület a végén visszaáll), így az
+; ugrás elmarad: 13 + 230 ciklus
+            IF FEAT_IRQ0038
+irq_code:
+            DISP IRQVEC
+            ENDIF
 it_handler:
             ex af, af'              ; 4
             exx                     ; 4
@@ -282,6 +304,11 @@ tickn:      ld e, 0                 ; minta / tick (induláskor írjuk be)
             pop af
             ei
             ret
+            IF FEAT_IRQ0038
+            ENT
+irq_code_end:
+IRQ_LEN     equ irq_code_end - irq_code
+            ENDIF
 
 tick_work:
             in a, (P_KBDIN)
@@ -748,7 +775,11 @@ sine_q:
 ; ---- változók ---------------------------------------------------------------
 ; a dal hossza (a weboldal buildCas-a is ide írja be)
 song_len:   dw song_end - song
+            IF FEAT_IRQ0038
+saved_irq:  ds IRQ_LEN
+            ELSE
 saved_irq:  ds 3
+            ENDIF
 tab_base:   db 0
 wave_id:    db 0
 lfsr:       dw 0

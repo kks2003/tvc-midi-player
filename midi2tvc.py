@@ -409,8 +409,9 @@ def poly_rates(div):
     return sr, tickn, sr / tickn
 
 
-def poly_cpu_load(div):
-    return POLY_HANDLER_CYCLES / (CPU_CLOCK / (TVC_CLOCK / div))
+def poly_cpu_load(div, fast_irq=False):
+    """a keverés CPU-része; fast_irq: a kezelő a 0038h-n (az ugrás elmarad)"""
+    return (POLY_HANDLER_CYCLES - (10 if fast_irq else 0)) / (CPU_CLOCK / (TVC_CLOCK / div))
 
 
 def poly_freq_table(tuning, sr):
@@ -1060,6 +1061,9 @@ def main():
     ap.add_argument("--min-volume", type=int, default=6)
     ap.add_argument("--max-volume", type=int, default=15)
     ap.add_argument("--loop", action="store_true", help="a dal végtelenítve szól")
+    ap.add_argument("--fast-irq", action="store_true",
+                    help="többszólamú mód: a mintakezelő a 0038h-ra kerül (-10 ciklus mintánként; "
+                         "a 0038h..0088h területet a lejátszás alatt használja, a végén visszaállítja)")
     ap.add_argument("--envelopes", metavar="NÉV|FÁJL",
                     help="többszólamú mód: hangszer-burkológörbék a midiplay formátumában "
                          "('midiplay' vagy 'tvc' = a mellékelt fájlok, vagy egy envelope.txt)")
@@ -1191,7 +1195,7 @@ def ascii_name(name):
 # a .cas-ba csak a dalhoz kellő kód kerül.  A sorrend és a szöveg a webes
 # konverterével (midi2tvc.js featuresInc) azonos.
 POLY_FEATURES = ["FEAT_DRUMS", "FEAT_WAVE_PULSE", "FEAT_WAVE_TRI", "FEAT_WAVE_SAW",
-                 "FEAT_WAVE_NOISE", "FEAT_WAVE_SINE"]
+                 "FEAT_WAVE_NOISE", "FEAT_WAVE_SINE", "FEAT_IRQ0038"]
 MONO_FEATURES = ["FEAT_DRUMS", "FEAT_BG"]
 
 
@@ -1249,10 +1253,11 @@ def write_poly(args, notes, drums_sec, gain_auto=False):
     write_features(args, POLY_FEATURES, {n for n, on in (
         ("FEAT_DRUMS", stats.get("slides", 0) > 0), ("FEAT_WAVE_PULSE", "pulse" in used),
         ("FEAT_WAVE_TRI", "triangle" in used), ("FEAT_WAVE_SAW", "saw" in used),
-        ("FEAT_WAVE_NOISE", "noise" in used), ("FEAT_WAVE_SINE", "sine" in used)) if on})
+        ("FEAT_WAVE_NOISE", "noise" in used), ("FEAT_WAVE_SINE", "sine" in used),
+        ("FEAT_IRQ0038", args.fast_irq)) if on})
     print("poly: %.0f Hz mintavétel (osztó %d), %.2f tick/s, a keverés a CPU %.0f%%-a; "
           "hullámformák: %s; táblák: %d bájt a program után"
-          % (sr, args.poly_div, tick_rate, 100 * poly_cpu_load(args.poly_div),
+          % (sr, args.poly_div, tick_rate, 100 * poly_cpu_load(args.poly_div, args.fast_irq),
              ", ".join(WAVE_NAMES[WAVES[w]] for w in slots), 256 * (2 + 8 * len(slots))))
     stats.setdefault("chords", 0)
     stats.setdefault("rests", 0)

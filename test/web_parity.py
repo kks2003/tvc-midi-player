@@ -46,6 +46,7 @@ CASES = [
     (["--loop", "--loop-pause", "3"], {"loop": True, "loopPause": 3}),
     (["--drum-volume", "60"], {"drumVolume": 60}),
     (["--gain", "150"], {"gain": 150}),
+    (["--mode", "poly", "--fast-irq", "--wave", "sine"], {"mode": "poly", "fastIrq": True, "wave": "sine"}),
     (["--mode", "poly", "--envelopes", "midiplay"], {"mode": "poly", "envelopes": "midiplay"}),
     (["--mode", "poly", "--envelopes", "tvc", "--loop", "--decay", "3", "--gain", "max"],
      {"mode": "poly", "envelopes": "tvc", "loop": True, "decay": 3, "gain": "max"}),
