@@ -127,7 +127,7 @@ start:
             and 0C3h
             ld c, a
             ld hl, SONG_MIX
-            ld a, (mixpg + 1)       ; a keverőtábla lapja (build_tables)
+            ld a, (mix_page)        ; a keverőtábla lapja (build_tables)
             ld d, a
             ld e, 0
             ld b, 64
@@ -168,6 +168,8 @@ start:
             ENDIF
             ld a, (SONG_TICKN)
             ld (tickn + 1), a
+            ld a, (mix_page)        ; a kezelő bemásolása után (FEAT_IRQ0038)
+            ld (mixpg + 1), a
             call tick_work          ; az első események
             ld ix, 0
             ld iy, 0
@@ -635,7 +637,7 @@ build_tables:
             add a, a
             inc a
             add a, h
-            ld (mixpg + 1), a       ; a táblák után a keverőtábla lapja
+            ld (mix_page), a        ; a táblák után a keverőtábla lapja
             inc a
             ld b, a                 ; B = a táblák utáni lap
             ld a, (V_HIMEM + 1)     ; a BASIC verme alatt maradjon 2 lap
@@ -781,6 +783,7 @@ saved_irq:  ds IRQ_LEN
 saved_irq:  ds 3
             ENDIF
 tab_base:   db 0
+mix_page:   db 0
 wave_id:    db 0
 lfsr:       dw 0
 ptr:        dw 0

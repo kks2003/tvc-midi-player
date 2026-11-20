@@ -344,8 +344,9 @@ def main():
         with wave.open(w_) as w:
             d_ = struct.unpack("<%dh" % w.getnframes(), w.readframes(w.getnframes()))
         return r_, d_, sc
-    rb, _, _ = poly_run([], "pbase", 16, "0038,51")
-    rf, df, sf = poly_run(["--fast-irq"], "pfast", 16, "0038,51")
+    # (ugyanazzal a fájlnévvel: a FILE: eszköz a 0070h-tól tartja a nevét)
+    rb, _, _ = poly_run([], "pirq", 16, "0038,51")
+    rf, df, sf = poly_run(["--fast-irq"], "pirq", 16, "0038,51")
     check("fast-irq: a dal végén a BASIC hiba nélkül folytatja", basic_ok(sf))
     st = next((i for i in range(len(df)) if abs(df[i] - df[0]) > 200), None)
     check("fast-irq: szól a hang", st is not None)
