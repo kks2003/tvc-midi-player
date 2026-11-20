@@ -86,6 +86,39 @@
     }
     return out;
   }
+  // vSID (chips.inc sid_update), egyszerűsítve: a hullámforma a SID-é, a
+  // hangerő a kitartási szint (az ADSR felfutása, lecsengése nélkül)
+  const SID_CLOCK = 985337, SID_WAVE = [3, 4, 1, 2, 5, 1];   // 1 háromszög, 2 fűrész, 3 négyszög, 4 impulzus 25%, 5 zaj
+  function sidTick(st, vs, waves, volScale, k, sr, n) {
+    const out = new Float32Array(n);
+    const ch = vs.map((v) => {
+      const w = SID_WAVE[waves[v.slot]] || 3;
+      const sidf = w === 5 ? 0xC000 : Math.min(0xFFFF, Math.floor(v.f * k / 65536));
+      return { w, amp: volScale[v.vol] / 15, inc: sidf * SID_CLOCK / 16777216 / sr };
+    });
+    for (let i = 0; i < n; i++) {
+      let x = 0;
+      for (let c = 0; c < 3; c++) {
+        const q = ch[c];
+        if (!q.amp) continue;
+        const old = st.ph[c];
+        st.ph[c] = (st.ph[c] + q.inc) % 1;
+        const p = st.ph[c];
+        let y;
+        if (q.w === 1) y = p < 0.5 ? 2 * p : 2 - 2 * p;
+        else if (q.w === 2) y = p;
+        else if (q.w === 3) y = p < 0.5 ? 1 : 0;
+        else if (q.w === 4) y = p < 0.25 ? 1 : 0;
+        else {
+          if (p * 16 % 1 < old * 16 % 1) st.noise[c] = Math.random();
+          y = st.noise[c];
+        }
+        x += q.amp * y;
+      }
+      out[i] = x * 15 / 3;
+    }
+    return out;
+  }
   function simulatePoly(song, card) {
     const flags = song[0], decay = song[1], floor = song[2], div = song[3];
     const loopOff = song[4] | (song[5] << 8), tickn = song[6], nslots = song[7];
@@ -143,10 +176,11 @@
     const vmax = song[13] || 15;
     const volScale = Array.from({ length: 16 }, (_, v) => Math.min(15, Math.floor(v * 15 / vmax)));
     const snK = 37535 * div, snSt = { ph: [0, 0, 0], nph: 0, lfsr: 0x4000 };
+    const sidK = Math.floor((3325563 + (div >> 1)) / div), sidSt = { ph: [0, 0, 0], noise: [0, 0, 0] };
     events(); voices();
     while (!done && tick < maxTicks) {
-      if (card === 'sn') {
-        chunks.push(snTick(snSt, vs, waves, volScale, snK, sr, tickn));
+      if (card === 'sn' || card === 'sid') {
+        chunks.push(card === 'sn' ? snTick(snSt, vs, waves, volScale, snK, sr, tickn) : sidTick(sidSt, vs, waves, volScale, sidK, sr, tickn));
         roll.push(vs.map((v, i) => ({ v: i, note: v.note, vol: v.vol, drum: v.drum, noise: waves[v.slot] === 4 }))
           .filter((x) => x.vol > 0 && x.note >= 0));
         events(); voices();

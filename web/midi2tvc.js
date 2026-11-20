@@ -948,7 +948,8 @@
       features = [['FEAT_DRUMS', (r.stats.slides || 0) > 0], ['FEAT_WAVE_PULSE', used.has('pulse')], ['FEAT_WAVE_TRI', used.has('triangle')],
         ['FEAT_WAVE_SAW', used.has('saw')], ['FEAT_WAVE_NOISE', used.has('noise')], ['FEAT_WAVE_SINE', used.has('sine')],
         ['FEAT_IRQ0038', !!o.fastIrq], ['FEAT_PITCH', (r.stats.bends || 0) > 0],
-        ['FEAT_CARDS', (o.cards || []).length > 0], ['FEAT_SN', (o.cards || []).includes('sn')]]
+        ['FEAT_CARDS', (o.cards || []).length > 0], ['FEAT_SN', (o.cards || []).includes('sn')],
+        ['FEAT_SID', (o.cards || []).includes('sid')]]
         .filter((x) => x[1]).map((x) => x[0]);
       rate = tickRate;
     } else {
@@ -1008,7 +1009,7 @@
   // a .cas-ba csak a dalhoz kellő kód kerül; ugyanaz, mint a midi2tvc.py
   // POLY_FEATURES / MONO_FEATURES / features_inc
   const POLY_FEATURES = ['FEAT_DRUMS', 'FEAT_WAVE_PULSE', 'FEAT_WAVE_TRI', 'FEAT_WAVE_SAW', 'FEAT_WAVE_NOISE', 'FEAT_WAVE_SINE', 'FEAT_IRQ0038', 'FEAT_PITCH',
-    'FEAT_CARDS', 'FEAT_SN'];
+    'FEAT_CARDS', 'FEAT_SN', 'FEAT_SID'];
   const MONO_FEATURES = ['FEAT_DRUMS', 'FEAT_BG'];
   const featureNames = (mode) => (mode === 'poly' ? POLY_FEATURES : MONO_FEATURES);
   const featuresInc = (result) => featureNames(result.mode).map((n) => n + ' equ ' + (result.features.includes(n) ? 1 : 0) + '\n').join('');

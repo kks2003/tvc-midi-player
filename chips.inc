@@ -20,15 +20,23 @@
 ; kártya neve (hossz + szöveg); a hely I/O portjai 10h + 10h * hely-től.
 ;   GameCard:  "JOY+SN", SN76489 a +0 porton
 ;   Multichip: "SndMx",  SN76489 a +0, SAA1099 a +2/+3, OPL2 a +4/+5 porton
+;   TVC256k++: "256k++", vSID (C64 SID-emuláció): a kártya E0h+n regiszterei,
+;              a +0 portra a regiszter sorszáma, a +1-re az érték
 ; A meghajtók a chipek adatlapjai alapján készültek.
 ; ============================================================================
 
 CARD_NONE   equ 0
 CARD_SN     equ 1
+CARD_SID    equ 2
 
 ; ---- felismerés ---------------------------------------------------------------
 ; -> card_type, card_port (a hely I/O alapcíme)
 detect_card:
+            IF FEAT_SID
+            ld hl, name_256k
+            call find_card
+            jr z, .sid
+            ENDIF
             IF FEAT_SN
             ld hl, name_sndmx
             call find_card
@@ -43,6 +51,12 @@ detect_card:
             IF FEAT_SN
 .sn:        ld (card_port), a
             ld a, CARD_SN
+            ld (card_type), a
+            ret
+            ENDIF
+            IF FEAT_SID
+.sid:       ld (card_port), a
+            ld a, CARD_SID
             ld (card_type), a
             ret
             ENDIF
@@ -82,6 +96,9 @@ find_card:
             IF FEAT_SN
 name_sndmx: db 5, "SndMx"
 name_joysn: db 6, "JOY+SN"
+            ENDIF
+            IF FEAT_SID
+name_256k:  db 6, "256k++"
             ENDIF
 
 ; ---- lejátszás kártyán -----------------------------------------------------------
@@ -210,6 +227,10 @@ chip_init:
             cp CARD_SN
             jp z, sn_init
             ENDIF
+            IF FEAT_SID
+            cp CARD_SID
+            jp z, sid_init
+            ENDIF
             ret
 
 chip_update:
@@ -218,6 +239,10 @@ chip_update:
             cp CARD_SN
             jp z, sn_update
             ENDIF
+            IF FEAT_SID
+            cp CARD_SID
+            jp z, sid_update
+            ENDIF
             ret
 
 chip_silence:
@@ -225,6 +250,10 @@ chip_silence:
             IF FEAT_SN
             cp CARD_SN
             jp z, sn_silence
+            ENDIF
+            IF FEAT_SID
+            cp CARD_SID
+            jp z, sid_silence
             ENDIF
             ret
 
@@ -429,6 +458,230 @@ sn_update:
 sn_att:     db 15, 12, 9, 7, 6, 5, 4, 3, 3, 2, 2, 1, 1, 1, 0, 0
 sn_k:       ds 3
 sn_noise:   db 0
+            ENDIF
+
+            IF FEAT_SID
+; ---- vSID (TVC256k++) ---------------------------------------------------------------
+; 3 szólam hullámformával (háromszög, fűrész, impulzus, zaj) és ADSR-rel; a
+; SID órajele 985 337 Hz (336 MHz / 341). Frekvencia: SIDF = f * 2^24 / órajel =
+; F * sid_k / 65536, sid_k = 3 325 563 / mintaosztó. Hangerő szólamonként nincs:
+; a kitartási szinttel (S) állítjuk; a SID ezt csak csökkenteni engedi, ezért
+; ha nő (új hang), a kaput rövid szünettel újraindítjuk (attack 2 ms).
+SID_K24     equ 3325563
+
+sid_init:
+            ld a, (SONG_DIV)        ; sid_k = (SID_K24 + osztó/2) / osztó
+            ld c, a
+            ld b, 0
+            srl a
+            ld e, a
+            ld d, 0
+            ld hl, SID_K24 & 0FFFFh
+            add hl, de
+            ld a, SID_K24 >> 16
+            adc a, 0
+            call div24
+            ld (sid_k), hl
+            ld (sid_k + 2), a
+            ld a, (card_port)       ; nincs automatikus regiszterléptetés
+            add a, 2
+            ld c, a
+            xor a
+            out (c), a
+            ld a, 24                ; fő hangerő: max., szűrő nincs
+            ld b, 0Fh
+            call sid_w
+            ld hl, sid_last
+            ld b, 6
+.z:         ld (hl), 0
+            inc hl
+            djnz .z
+sid_silence:
+            ld e, 0                 ; minden szólam: kapu ki, ADSR 0
+.v:         ld a, e
+            add a, 4
+            ld b, 0
+            call sid_w
+            ld a, e
+            add a, 5
+            call sid_w
+            ld a, e
+            add a, 6
+            call sid_w
+            ld a, e
+            add a, 7
+            ld e, a
+            cp 21
+            jr c, .v
+            ret
+
+; A = SID-regiszter (0..24), B = érték
+sid_w:
+            push bc
+            push af
+            ld a, (card_port)
+            ld c, a
+            pop af
+            push af
+            add a, 0E0h
+            out (c), a
+            inc c
+            out (c), b
+            pop af
+            pop bc
+            ret
+
+; HL * DE -> DEHL (32 bit)
+mul16:
+            push bc
+            ld b, h
+            ld c, l
+            ld hl, 0
+            ld a, 16
+.m:         add hl, hl
+            rl e
+            rl d
+            jr nc, .n
+            add hl, bc
+            jr nc, .n
+            inc de
+.n:         dec a
+            jr nz, .m
+            pop bc
+            ret
+
+sid_update:
+            ld hl, vstate
+            xor a
+.voice:     push af                 ; A = szólam
+            push hl
+            call voice_get          ; A = hullámforma, B = hangerő, DE = F
+            ld (sid_tmp), a
+            ld a, b
+            ld (sid_tmp + 1), a
+            ld (sid_tmp + 2), de
+            pop hl
+            pop af
+            push hl
+            push af
+            ld c, a                 ; C = szólam, a regiszterek alapja 7 * C
+            add a, a
+            add a, a
+            add a, a
+            sub c
+            ld (sid_base), a
+            ; frekvencia: zajnál fix, világos
+            ld a, (sid_tmp)
+            cp 4
+            ld hl, 0C000h
+            jr z, .freq
+            ld hl, (sid_tmp + 2)    ; F * sid_k / 65536
+            ld de, (sid_k)
+            call mul16              ; DEHL = F * (sid_k alsó 16 bitje)
+            push de                 ; a szorzat felső 16 bitje
+            ld a, (sid_k + 2)       ; + F * (sid_k felső bájtja, legfeljebb 3)
+            ld de, (sid_tmp + 2)
+            ld hl, 0
+            or a
+            jr z, .hiok
+.hi:        add hl, de
+            dec a
+            jr nz, .hi
+.hiok:      pop de
+            add hl, de
+            jr nc, .freq
+            ld hl, 0FFFFh
+.freq:      ld a, (sid_base)
+            ld b, l
+            call sid_w              ; 0: frekvencia alsó bájt
+            inc a
+            ld b, h
+            call sid_w              ; 1: felső bájt
+            ; hullámforma és impulzusszélesség
+            ld a, (sid_tmp)
+            ld e, a
+            ld d, 0
+            ld hl, sid_wave
+            add hl, de
+            ld a, (hl)
+            ld (sid_ctl), a
+            ld hl, sid_pw
+            add hl, de
+            ld a, (sid_base)
+            add a, 2
+            ld b, 0
+            call sid_w              ; 2: PW alsó
+            inc a
+            ld b, (hl)
+            call sid_w              ; 3: PW felső (4 bit)
+            ld a, (sid_base)        ; 5: AD = 0 (attack 2 ms, decay 6 ms)
+            add a, 5
+            ld b, 0
+            call sid_w
+            ; hangerő -> kitartási szint; ha nő, a kapu újraindul
+            pop af
+            push af
+            ld e, a
+            ld d, 0
+            ld hl, sid_last
+            add hl, de
+            ld a, (sid_tmp + 1)
+            ld c, a                 ; C = az új hangerő
+            ld b, (hl)              ; B = az előző
+            ld (hl), a
+            ld a, (sid_base)
+            add a, 6
+            push bc
+            ld b, c
+            sla b
+            sla b
+            sla b
+            sla b
+            call sid_w              ; 6: SR = hangerő << 4, release 0
+            pop bc
+            ld a, c
+            or a
+            ld a, (sid_ctl)
+            jr z, .gate             ; néma: kapu ki
+            ld a, c
+            cp b
+            jr z, .keep
+            jr c, .keep             ; csökken: a kitartási szint elég
+            ld a, (sid_base)        ; nő: kapu ki, rövid szünet, kapu be
+            add a, 4
+            ld b, a
+            ld a, (sid_ctl)
+            push bc
+            ld c, b
+            ld b, a
+            ld a, c
+            call sid_w
+            pop bc
+            ld b, 10
+.dl:        djnz .dl
+.keep:      ld a, (sid_ctl)
+            or 1
+.gate:      ld b, a
+            ld a, (sid_base)
+            add a, 4
+            call sid_w              ; 4: vezérlés (hullámforma, kapu)
+            pop af
+            pop hl
+            ld de, VS_SIZE
+            add hl, de
+            inc a
+            cp 3
+            jp nz, .voice
+            ret
+
+; hullámforma (0 négyszög, 1 impulzus 25%, 2 háromszög, 3 fűrész, 4 zaj, 5 szinusz)
+sid_wave:   db 40h, 40h, 10h, 20h, 80h, 10h
+sid_pw:     db 08h, 04h, 08h, 08h, 08h, 08h      ; PW felső 4 bit (alsó bájt 0)
+sid_k:      ds 3
+sid_last:   ds 6
+sid_tmp:    ds 4
+sid_base:   db 0
+sid_ctl:    db 0
             ENDIF
 
 card_type:  db 0

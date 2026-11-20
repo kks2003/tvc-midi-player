@@ -1189,7 +1189,8 @@ def main():
                          "a modulációs kerékről és a burkológörbék hangmagassága")
     ap.add_argument("--cards", default="", metavar="LISTA",
                     help="többszólamú mód: hangkártya-meghajtók vesszővel (sn = SN76489: GameCard, "
-                         "Multichip); ha a program indításkor talál ilyen kártyát, azon szól")
+                         "Multichip; sid = a TVC256k++ vSID-je); ha a program indításkor talál "
+                         "ilyen kártyát, azon szól")
     ap.add_argument("--fast-irq", action="store_true",
                     help="többszólamú mód: a mintakezelő a 0038h-ra kerül (-10 ciklus mintánként; "
                          "a 0038h..0088h területet a lejátszás alatt használja, a végén visszaállítja)")
@@ -1332,8 +1333,8 @@ def ascii_name(name):
 # konverterével (midi2tvc.js featuresInc) azonos.
 POLY_FEATURES = ["FEAT_DRUMS", "FEAT_WAVE_PULSE", "FEAT_WAVE_TRI", "FEAT_WAVE_SAW",
                  "FEAT_WAVE_NOISE", "FEAT_WAVE_SINE", "FEAT_IRQ0038", "FEAT_PITCH",
-                 "FEAT_CARDS", "FEAT_SN"]
-CARDS = ["sn"]                      # --cards: a lejátszóba kerülő kártyameghajtók
+                 "FEAT_CARDS", "FEAT_SN", "FEAT_SID"]
+CARDS = ["sn", "sid"]                      # --cards: a lejátszóba kerülő kártyameghajtók
 MONO_FEATURES = ["FEAT_DRUMS", "FEAT_BG"]
 
 
@@ -1396,7 +1397,8 @@ def write_poly(args, notes, drums_sec, gain_auto=False):
         ("FEAT_WAVE_TRI", "triangle" in used), ("FEAT_WAVE_SAW", "saw" in used),
         ("FEAT_WAVE_NOISE", "noise" in used), ("FEAT_WAVE_SINE", "sine" in used),
         ("FEAT_IRQ0038", args.fast_irq), ("FEAT_PITCH", stats.get("bends", 0) > 0),
-        ("FEAT_CARDS", bool(args.cards)), ("FEAT_SN", "sn" in args.cards)) if on})
+        ("FEAT_CARDS", bool(args.cards)), ("FEAT_SN", "sn" in args.cards),
+        ("FEAT_SID", "sid" in args.cards)) if on})
     print("poly: %.0f Hz mintavétel (osztó %d), %.2f tick/s, a keverés a CPU %.0f%%-a; "
           "hullámformák: %s; táblák: %d bájt a program után"
           % (sr, args.poly_div, tick_rate, 100 * poly_cpu_load(args.poly_div, args.fast_irq),

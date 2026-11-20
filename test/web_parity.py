@@ -48,6 +48,7 @@ CASES = [
     (["--gain", "150"], {"gain": 150}),
     (["--mode", "poly", "--bend"], {"mode": "poly", "bend": True}),
     (["--mode", "poly", "--cards", "sn", "--bend", "--fast-irq"], {"mode": "poly", "cards": ["sn"], "bend": True, "fastIrq": True}),
+    (["--mode", "poly", "--cards", "sn,sid"], {"mode": "poly", "cards": ["sn", "sid"]}),
     (["--mode", "poly", "--bend", "--envelopes", "tvc", "--from", "1", "--to", "6"],
      {"mode": "poly", "bend": True, "envelopes": "tvc", "from": 1, "to": 6}),
     (["--mode", "poly", "--fast-irq", "--wave", "sine"], {"mode": "poly", "fastIrq": True, "wave": "sine"}),
