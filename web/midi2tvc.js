@@ -788,7 +788,9 @@
       if (vslot[v] !== sl) { emit(0xBB + v, sl); vslot[v] = sl; }
     };
     const range = [...Array(POLY_VOICES).keys()];
+    const fill = [];                  // tickenként az adat hossza (a „túl nagy” dalnál: meddig fér el)
     for (let t = 0; t <= total; t++) {
+      fill.push(out.length);
       expire(active, t);
       for (const [st, en, n, v, ch, idx] of starts.get(t) || []) active.set(idx, [st, en, n, v, ch]);
       for (let v = 0; v < POLY_VOICES; v++) {
@@ -897,7 +899,7 @@
       }
     }
     out.push(0xFF);
-    return { body: out, total, stats, slots, pause };
+    return { body: out, total, stats, slots, pause, fill };
   }
 
   const DEFAULTS = {
@@ -929,7 +931,7 @@
     const drums = useDrums ? drumHits(drumNotes, o.rate, o.curve) : new Map();
     if (!notes.length && !drums.size) throw new Error('a kiválasztott csatornákon (és részben) nincs hang');
     const floor = clamp(o.decayFloor, 0, 15);
-    let song, total, stats, pause = 0, rate, sr = null, polyInfo = null, gainMax = 100, features = [];
+    let song, total, stats, pause = 0, rate, sr = null, polyInfo = null, gainMax = 100, features = [], tooBig = null;
     // gain: globális hangerő (%); 'max' = a legnagyobb, ami még nem torzít
     const gainAuto = o.gain === 'max';
     if (gainAuto) o.gain = 100;
@@ -977,9 +979,16 @@
         ['FEAT_WAVECHG', r.slots.length > 1], ['FEAT_LOOP', !!o.loop],
         ['FEAT_BIGMEM', polyTablesEnd(PLAYER_EST, song.length, r.slots.length) > BIG_LIMIT]]
         .filter((x) => x[1]).map((x) => x[0]);
-      if (polyTablesEnd(PLAYER_MIN, song.length, r.slots.length) > BIG_TOP)
-        throw new Error('a dal túl nagy: a hullámtáblákkal együtt a 64 KB-ban sem fér el (' + song.length +
-          ' bájt; kevesebb féle hullámforma vagy rövidebb rész segít)');
+      // túl nagy: nem hiba, hogy az előnézet és a kijelölés működjön (a .cas nem készül)
+      if (polyTablesEnd(PLAYER_MIN, song.length, r.slots.length) > BIG_TOP) {
+        const room = BIG_TOP - 256 * (2 + 8 * r.slots.length) - 256 - BASIC_START - PLAYER_MIN;
+        // az utolsó tick, amíg (a fejléccel és a lejátszó becsült méretével) elfér; a
+        // kijelölés az eredeti MIDI idejében van (a --speed előtt), és a rész elejétől
+        const head = song.length - r.body.length + (PLAYER_EST - PLAYER_MIN);
+        let k = 0;
+        while (k < r.fill.length && head + r.fill[k] <= room) k++;
+        tooBig = { bytes: song.length, room, seconds: Math.max(0, k - 1) / tickRate * o.speed };
+      }
       rate = tickRate;
     } else {
       let r = convert(notes, o, drums);
@@ -1008,7 +1017,7 @@
     // range: a mentett rész helye a teljes dal lejátszási idejében (másodperc),
     // a hossza az ismétlés előtti szünet nélkül
     return { song, mode: o.mode, total, rate, sampleRate: sr, stats, notes, used, warnings, options: o, poly: polyInfo,
-      range: { start: shift, length: (total - pause) / rate }, pause: pause / rate, gain: o.gain, gainMax, features };
+      range: { start: shift, length: (total - pause) / rate }, pause: pause / rate, gain: o.gain, gainMax, features, tooBig };
   }
 
   // ---- .cas összeállítása ---------------------------------------------------------

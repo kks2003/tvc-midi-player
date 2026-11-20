@@ -822,7 +822,8 @@ footer code, .hint code { font-family: var(--font-mono); font-size: 12.5px; }
       return;
     }
     const player = o.mode === 'poly' ? PLAYERS.poly : PLAYERS.mono;
-    casBytes = M.buildCas(player, result.song, $('title').value || fileBase);   // tartalék, amíg a fordító dolgozik
+    const tooBig = result.tooBig;
+    casBytes = tooBig ? null : M.buildCas(player, result.song, $('title').value || fileBase);   // tartalék, amíg a fordító dolgozik
     casExact = false;
     const gen = ++casGen;
     // az előnézet kártyája: amelyik a gépen szólna (a vSID előbb)
@@ -838,6 +839,26 @@ footer code, .hint code { font-family: var(--font-mono); font-size: 12.5px; }
     if (offset >= duration() - 0.05) offset = 0;
     if (wasPlaying) play();
     renderRange();
+    if (tooBig) {
+      // az előnézet és a kijelölés működik, csak a .cas nem készül
+      renderGain();
+      drawRoll();
+      $('stats').textContent = '';
+      $('mem').textContent = '';
+      $('basic').textContent = '';
+      $('featInfo').textContent = '';
+      $('warns').innerHTML = '';
+      const li = document.createElement('li');
+      li.className = 'error';
+      li.textContent = 'Nem készült program: a dal túl nagy, a hullámtáblákkal együtt a 64 KB-ban sem fér el (' +
+        tooBig.bytes.toLocaleString('hu-HU') + ' bájt, legfeljebb kb. ' + Math.max(0, tooBig.room).toLocaleString('hu-HU') +
+        '). Jelölj ki a tekercsen egy rövidebb részt (ezekkel a beállításokkal kb. ' + fmtTime(tooBig.seconds) +
+        ' hosszú rész fér el; az előnézet a teljes dalt mutatja), vagy próbáld kevesebb féle hullámformával, burkológörbék nélkül.';
+      $('warns').appendChild(li);
+      setOutputsEnabled(false, true);
+      store.set('opts', JSON.stringify(Object.assign({}, o, { channels: undefined, envelopes: typeof o.envelopes === 'string' ? o.envelopes : undefined })));
+      return;
+    }
     renderStats(player, warns);
     renderGain();
     renderBasic(player);
@@ -965,11 +986,11 @@ footer code, .hint code { font-family: var(--font-mono); font-size: 12.5px; }
     $('basic').textContent = '1 PRINT "' + title + '"\n2 X=USR(' + addr + ')' +
       (bg ? '\n\n! háttérben szól: EXT 0 leállítja, EXT 1 elölről indítja' : '');
   }
-  function setOutputsEnabled(on) {
+  function setOutputsEnabled(on, preview = on) {
     $('dlBtn').disabled = !on;
     $('srcBtn').disabled = !on;
-    $('playBtn').disabled = !on;
-    $('restartBtn').disabled = !on;
+    $('playBtn').disabled = !preview;
+    $('restartBtn').disabled = !preview;
     $('emuLink').setAttribute('aria-disabled', on ? 'false' : 'true');
   }
   function setStatus(t, bad) {
