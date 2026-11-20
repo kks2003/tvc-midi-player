@@ -557,6 +557,22 @@
   const ENV_TAIL_MAX = 250;
   const isDigit = (c) => c >= '0' && c <= '9';
   // -> Map(program -> [képkockák [[bal, jobb]], jelzők])
+  // a kitartott (ismétlődő) rész átlagos hangmagassága 0 legyen, ha egy félhangon
+  // belül tér el tőle (midiplay kórus-hangszerek, pl. 88 + 89: a TVC-n csak egy
+  // réteg szól); a vibrato megmarad (midi2tvc.py center_envelope_pitch)
+  function centerEnvelopePitch(frames) {
+    const start = frames.findIndex((f) => (f[0] & 0xC0) === 0x40);
+    if (start < 0) return;
+    let end = -1;
+    for (let i = start + 1; i < frames.length; i++) if ((frames[i][0] & 0xC0) === 0x80) { end = i; break; }
+    if (end < 0 || frames[end][1] === 0xFF) return;
+    let sum = 0;
+    for (let i = start; i < end; i++) sum += frames[i][2];
+    const mean = sum / (end - start);
+    if (!(Math.abs(mean) > 0 && Math.abs(mean) < 64)) return;
+    const off = pyRound(mean);
+    for (const f of frames) if (!((f[0] & 0xC0) === 0x80 && f[2] === 0)) f[2] -= off;
+  }
   function compileEnvelopes(text) {
     let buf = '', comment = false;
     for (const c of text) {
@@ -601,7 +617,7 @@
         if (c === '{') break;
         if (c !== ',') fail('szintaktikai hiba');
       }
-      let vl = 0x80, vlInc = 0, vlMult = 0, vr = 0x80, vrInc = 0, vrMult = 0, d = 0, pb = 0x80, pbInc = 0;
+      let vl = 0x80, vlInc = 0, vlMult = 0, vr = 0x80, vrInc = 0, vrMult = 0, d = 0, pb = 0x80, pbInc = 0, anyDist = false;
       const frames = [];
       for (;;) {
         if (d) {
@@ -658,9 +674,13 @@
         if (!d) pb = pv;
         else if (pv !== pb) { let x = pv - pb; x += x < 0 ? -(d >> 1) : d >> 1; pbInc = Math.trunc(x / d); }
         expect(',');
-        expect('0'); readNumber(); expect(';');      // torzítás
+        expect('0'); if (readNumber() !== 0) anyDist = true; expect(';');      // torzítás
       }
       frames.push([0x80, flags ? 0xFF : 0x00, 0]);
+      // a torzítást használó hangszernél a hangmagasság a DAVE torzításának kiegyenlítése
+      // (és az erre épülő trükkök): a TVC-n nincs torzítás, így az egész elmarad
+      if (anyDist) for (const f of frames) f[2] = 0;
+      else centerEnvelopePitch(frames);
       for (const n of progs) if (n >= 0) out.set(n, [frames, flags]);
     }
     return out;

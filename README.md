@@ -267,8 +267,14 @@ R 50, *107, *107, 1464, 16;   # R: ismétlés vége / elengedés; *n: szorzás n
 ismétlődik), `S` = egy képkockán kitart. A görbét a konverter a midiplay
 `midiconv` fordítójával bájtra azonosan számolja (ellenőrizve az eredeti C++
 forrással), a lejátszást a `daveplay` szerint követi. A TVC-n a bal és jobb
-hangerő nagyobbika számít, a hangmagasság-változás és a torzítás nincs
-használva, a dobok (negatív számok) helyett a saját dobkészlet szól. Ahol a
+hangerő nagyobbika számít, a torzítás nincs (a dobok, negatív számok
+helyett a saját dobkészlet szól). A hangmagasság-változás a `--bend`-del
+szól, két kivétellel: a torzítást használó hangszereknél a hangmagasság a DAVE
+torzításának kiegyenlítése (pl. +768 vagy +1464 a torzított szakaszokon), ez
+elmarad; és ha a kitartott (`L`…`R`) rész átlagos hangmagassága egy félhangon
+belül eltér a nullától (a midiplay kórus-hangszerei, pl. 88 és 89, két
+ellentétesen elhangolt rétegben szólnak, a TVC-n csak egy), a görbe az átlagra
+igazodik, így nem hamis, a vibrato megmarad. Ahol a
 fájl egy programot nem ír le, ott a megszokott lecsengés marad.
 
 **Szerkesztő a webes felületen** (Hangszerek → „Szerkesztő…”): a készlet
