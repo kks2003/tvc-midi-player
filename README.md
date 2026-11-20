@@ -241,7 +241,9 @@ fájl egy programot nem ír le, ott a megszokott lecsengés marad.
 
 **Szerkesztő a webes felületen** (Hangszerek → „Szerkesztő…”): a készlet
 hangszer-blokkokra bontva szerkeszthető (programszámok, szakaszok, L/R/S
-jelek), a görbe rajzon látszik a billentyű elengedésével együtt, és a TVC
+jelek), a görbe rajzon látszik a billentyű elengedésével együtt, és egérrel
+vagy ujjal is szerkeszthető (a pontok húzhatók, dupla kattintás: új pont /
+törlés, az elengedés vonala is húzható), és a TVC
 többszólamú lejátszójának szimulációjával meghallgatható. Kiindulhat a két
 mellékelt készletből, egy saját fájlból vagy üresből; menthető `.txt`-be
 (ugyanebben a formátumban, a parancssori konverter is olvassa), és a

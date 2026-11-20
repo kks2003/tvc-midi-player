@@ -96,6 +96,7 @@
     const $ = (id) => document.getElementById(id);
     const dlg = $('envDlg');
     const KEY = 'tvcmidi.envEditor';
+    let handles = [], geo = null, drag = null;      // a grafikon húzható pontjai
     let blocks = [], sel = 0, selProg = null, ctx = null, src = null, fileName = 'szerkesztett';
     // a dalban szereplő hangszerek: Map(program -> {chs: [csatorna], notes})
     const song = () => (opts.songPrograms ? opts.songPrograms() : new Map());
@@ -192,7 +193,7 @@
       tb.textContent = '';
       b.segs.forEach((s, i) => {
         const tr = document.createElement('tr');
-        tr.innerHTML = '<td><select aria-label="Jel"><option value="">–</option><option>L</option><option>R</option><option>S</option></select></td>' +
+        tr.innerHTML = '<td><select aria-label="Jel"><option value="">– nincs</option><option value="L">L – ismétlés eleje</option><option value="R">R – ismétlés vége / elengedés</option><option value="S">S – kitartás (1 képkocka)</option></select></td>' +
           '<td><input type="number" min="0" max="255" aria-label="Hossz"></td><td><input type="text" aria-label="Bal hangerő"></td>' +
           '<td><input type="text" aria-label="Jobb hangerő"></td><td><input type="number" min="-2048" max="2047" aria-label="Hangmagasság"></td>' +
           '<td><input type="number" min="0" max="255" step="16" aria-label="Torzítás"></td>' +
@@ -271,8 +272,10 @@
       }
       const lev = M.envelopeLevels(e, held);
       const frames = e[0].slice(0, -1);
-      const n = Math.max(lev.length, held, 10) + 4;
+      // húzás közben a lépték nem változik (különben a pont elszaladna az egér alól)
+      const n = drag ? drag.n : Math.max(lev.length, held, frames.length, 10) + 4;
       const pad = 22, x = (i) => pad + i * (W - pad - 6) / n, y = (v) => H - 16 - v * (H - 26) / 63;
+      geo = { n, x, y, t: (px) => (px - pad) * n / (W - pad - 6), v: (py) => (H - 16 - py) * 63 / (H - 26) };
       g.font = '10.5px ' + css('--font-mono');
       g.fillStyle = css('--line');
       for (const v of [0, 16, 32, 48, 63]) { g.fillRect(pad, Math.round(y(v)), W - pad - 6, 1); }
@@ -299,10 +302,111 @@
       lev.forEach((v, i) => g.fillRect(x(i), y(v), x(i + 1) - x(i) + 0.5, y(0) - y(v)));
       g.globalAlpha = 1;
       line(lev, css('--v0'), 2);
-      // a billentyű elengedése
+      // a billentyű elengedése (húzható)
       g.fillStyle = css('--warn'); g.fillRect(Math.round(x(held)), 4, 2, H - 20);
       g.fillText('elengedés', x(held) + 4, 26);
+      // a szakaszok végpontjai: a szakasz végén elért hangerő (húzható)
+      handles = [];
+      let T = 0;
+      b.segs.forEach((sg, i) => {
+        T += sg.len;
+        const mult = sg.l.mult || sg.r.mult;
+        let v = Math.max(sg.l.v, sg.r.v);
+        if (mult) { const f = frames[Math.min(T, frames.length - 1)]; v = f ? Math.max(f[0] & 0x3F, f[1]) : 0; }
+        handles.push({ i, T, v, mult });
+      });
+      for (const h of handles) {
+        g.beginPath();
+        g.arc(x(h.T), y(h.v), drag && drag.i === h.i ? 6 : 4.5, 0, 2 * Math.PI);
+        g.fillStyle = h.mult ? css('--surface') : css('--accent');
+        g.fill();
+        g.lineWidth = 1.5; g.strokeStyle = css('--accent'); g.stroke();
+      }
     }
+
+    // ---- a grafikon egérrel / ujjal: pontok húzása, új pont, törlés ------------------
+    const cvPos = (ev) => { const r = $('eeGraph').getBoundingClientRect(); return [ev.clientX - r.left, ev.clientY - r.top]; };
+    const hitHandle = (px, py) => {
+      let best = null, bd = 100;
+      for (const h of handles) {
+        const d = (geo.x(h.T) - px) ** 2 + (geo.y(h.v) - py) ** 2;
+        if (d <= bd) { bd = d; best = h; }     // egyezésnél a későbbi (a 0 hosszú szakasz a sajátja fölött)
+      }
+      return best;
+    };
+    const nearHeld = (px) => geo && Math.abs(geo.x(+$('eeHeld').value) - px) < 7;
+    const clamp = (v, a, b) => Math.max(a, Math.min(b, v));
+    $('eeGraph').addEventListener('pointerdown', (ev) => {
+      const b = blocks[sel];
+      if (!b || !geo) return;
+      const [px, py] = cvPos(ev);
+      const h = hitHandle(px, py);
+      if (h) {
+        const sg = b.segs[h.i];
+        drag = { kind: 'seg', i: h.i, start: h.T - sg.len, l0: sg.l.v, r0: sg.r.v, top0: Math.max(sg.l.v, sg.r.v), mult: h.mult, n: geo.n };
+      } else if (nearHeld(px)) drag = { kind: 'held', n: geo.n };
+      else return;
+      $('eeGraph').setPointerCapture(ev.pointerId);      // (preventDefault nélkül, hogy a dupla kattintás is megjöjjön)
+    });
+    $('eeGraph').addEventListener('pointermove', (ev) => {
+      const [px, py] = cvPos(ev);
+      if (!drag) {
+        if (geo) $('eeGraph').style.cursor = hitHandle(px, py) || nearHeld(px) ? 'grab' : 'crosshair';
+        return;
+      }
+      const t = Math.round(geo.t(px));
+      if (drag.kind === 'held') { $('eeHeld').value = clamp(t, 1, 250); drawGraph(); return; }
+      const sg = blocks[sel].segs[drag.i];
+      sg.len = clamp(t - drag.start, 0, 255);
+      if (!drag.mult) {
+        const v = clamp(Math.round(geo.v(py)), 0, 63);
+        if (drag.l0 === drag.r0) { sg.l.v = v; sg.r.v = v; }
+        else { const d = v - drag.top0; sg.l.v = clamp(drag.l0 + d, 0, 63); sg.r.v = clamp(drag.r0 + d, 0, 63); }
+      }
+      renderBlock();
+      changed();
+    });
+    const endDrag = () => { if (drag) { drag = null; drawGraph(); } };
+    $('eeGraph').addEventListener('pointerup', endDrag);
+    $('eeGraph').addEventListener('pointercancel', endDrag);
+    // dupla kattintás: pontra = a szakasz törlése; üres helyre = a szakasz kettévágása ott
+    $('eeGraph').addEventListener('dblclick', (ev) => {
+      const b = blocks[sel];
+      if (!b || !geo) return;
+      const [px, py] = cvPos(ev);
+      const h = hitHandle(px, py);
+      if (h) {
+        if (b.segs.length > 1) {
+          // a következő pont a helyén marad: a törölt szakasz hossza hozzá kerül
+          const nx = b.segs[h.i + 1];
+          if (nx) nx.len = Math.min(255, nx.len + b.segs[h.i].len);
+          b.segs.splice(h.i, 1);
+          renderBlock();
+          changed();
+        }
+        return;
+      }
+      const t = Math.round(geo.t(px)), v = clamp(Math.round(geo.v(py)), 0, 63);
+      let T = 0;
+      for (let i = 0; i < b.segs.length; i++) {
+        const sg = b.segs[i];
+        if (!sg.l.mult && !sg.r.mult && t > T && t < T + sg.len) {
+          b.segs.splice(i, 0, { mark: '', len: t - T, l: { mult: false, v }, r: { mult: false, v }, pitch: sg.pitch, dist: sg.dist });
+          sg.len -= t - T;
+          renderBlock();
+          changed();
+          return;
+        }
+        T += sg.len;
+      }
+      // a görbe vége után: új szakasz a végére
+      if (t > T) {
+        const last = b.segs[b.segs.length - 1];
+        b.segs.push({ mark: '', len: clamp(t - T, 1, 255), l: { mult: false, v }, r: { mult: false, v }, pitch: last ? last.pitch : 0, dist: last ? last.dist : 0 });
+        renderBlock();
+        changed();
+      }
+    });
 
     // ---- meghallgatás: egy hang a TVC többszólamú lejátszójának szimulációjával -----
     function stopSound() { if (src) { try { src.stop(); } catch (e) { /* már leállt */ } src = null; } $('eePlay').textContent = '▶ Meghallgatás'; }

@@ -237,11 +237,11 @@ footer { color: var(--muted); font-size: 13px; display: grid; gap: 8px; }
 #envDlg table.segs th { padding: 0 4px 4px; }
 #envDlg table.segs td { padding: 2px 3px; border-top: 0; }
 #envDlg table.segs input, #envDlg table.segs select { width: 5.2em; padding: 3px 5px; font: 13px var(--font-mono); border: 1px solid var(--line); border-radius: 4px; background: var(--surface); color: inherit; }
-#envDlg table.segs select { width: 3.6em; }
+#envDlg table.segs select { width: 12.5em; font-family: inherit; }
 #envDlg .rowbtns { white-space: nowrap; }
 #envDlg .rowbtns button { padding: 1px 6px; font-size: 12px; min-width: 24px; }
 #envDlg .bad { border-color: var(--warn) !important; outline: 1px solid var(--warn); }
-#eeGraph { display: block; width: 100%; height: 190px; background: var(--sunk); border: 1px solid var(--line); border-radius: var(--r); }
+#eeGraph { display: block; width: 100%; height: 210px; touch-action: none; cursor: crosshair; background: var(--sunk); border: 1px solid var(--line); border-radius: var(--r); }
 #envDlg .eeplay { display: flex; flex-wrap: wrap; gap: 8px 12px; align-items: center; font-size: 13px; }
 #envDlg .eeplay input[type=range] { width: 160px; accent-color: var(--accent); }
 #envDlg .eeplay input[type=number] { width: 4.5em; padding: 3px 5px; }
@@ -472,6 +472,7 @@ footer code, .hint code { font-family: var(--font-mono); font-size: 12.5px; }
             <label for="eeVel">Erősség</label><input id="eeVel" type="number" min="1" max="127" value="100">
             <button id="eePlay" type="button">▶ Meghallgatás</button>
           </div>
+          <p class="hint">A grafikon szerkeszthető: a pontok (a szakaszok vége) húzhatók – vízszintesen a szakasz hossza, függőlegesen a hangerő változik; dupla kattintás egy pontra törli a szakaszt, üres helyre új pontot tesz (a szakaszt ott kettévágja). Az üres karika szorzós (*n) szakasz, annak csak a hossza húzható. A piros vonal (elengedés) is húzható.</p>
           <p class="hint">A vastag vonal az, amit a TVC kap (a bal és jobb hangerő nagyobbika); a vékonyak a fájl bal és jobb értékei. A meghallgatás a TVC többszólamú lejátszójának szimulációja a jelenlegi beállításokkal (hullámforma, mintavétel, szólam hangereje). A hangmagasság és a torzítás a fájlban megmarad, de a TVC-n nincs használva.</p>
         </div>
       </div>
