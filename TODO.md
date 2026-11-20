@@ -7,23 +7,28 @@ kicsi és gyors, vagy teljes tudású, vagy egy adott hangkártyára szabott.
 
 ## 0. Moduláris felépítés (ez az alapja a többinek)
 
-- [ ] **Feltételes fordítás a lejátszókban.** Minden funkció külön blokk
-  (`IF FEAT_DIGIDRUM` … `ENDIF` az sjasmplus-ban). A konverter a beállításokból
-  dönti el, mely blokkok kellenek, és a dal fejlécében jelzi őket.
-- [ ] **A webes felület is így építsen.** A böngésző nem fordít assemblyt,
-  ezért két lehetőség van:
-  - a `tools/export_players.py` előre lefordítja a lejátszót minden
-    funkciókombinációra (5–6 kapcsolónál néhány tucat változat, egyenként
-    ~1–2 KB, ez még belefér a `players.js`-be);
-  - vagy a lejátszó áthelyezhető modulokból áll, és a JavaScript fűzi össze őket
-    (egyszerű „linker” a címek javításával, mint a háttér-módnál a
-    `RELOCATE_TABLE`).
-  Az első egyszerűbb és biztosan bájtazonos a `build.sh`-val; a második akkor
-  kell, ha a kombinációk száma elszáll.
-- [ ] **A web_parity és az emulátoros teszt minden kombinációra** (vagy egy
-  reprezentatív részhalmazra), hogy egyik változat se romoljon el.
-- [ ] A felületen a funkciók egy „Mi kerüljön a programba?” részben, mellettük
-  a méret- és CPU-költség.
+- [x] **Feltételes fordítás a lejátszókban.** A kapcsolható részek
+  `IF FEAT_…` / `ENDIF` blokkok; a konverter a dalból dönti el, melyik kell,
+  és a `build/features.inc`-be írja (`midi2tvc.py` / `midi2tvc.js`
+  `features_inc`). Eddig: többszólamú: dobok (csúszás), impulzus, háromszög,
+  fűrész, zaj, szinusz; egycsatornás: dobok, háttér-mód.
+- [x] **A webes felület is így épít:** a `build.sh`-éval azonos sjasmplus
+  (v1.24.0) WebAssemblyre fordítva fut a böngészőben (`web/sjasmplus/`,
+  `web/assembler.js`, újraépítés: `tools/build_sjasmplus_wasm.sh`), így
+  bármelyik kombináció bájtra azonos a `build.sh`-val; egy fordítás néhány ms.
+  Ha nem tölthető be, az előre fordított, minden részt tartalmazó lejátszó a
+  tartalék (`players.js`).
+- [x] **A keverőtábla futás közben** a hullámtáblák utáni lapon (a `.cas`-ban
+  nincs lapra igazító kitöltés: −207 bájt a DuckTales-nél).
+- [x] **A web_parity** a böngészős fordítóval fordít (75/75 bájtra azonos), a
+  forráscsomag a `build/features.inc`-et is tartalmazza.
+- [ ] **Emulátoros teszt a kombinációkra** (most a meglévő esetek futnak, ezek
+  több kombinációt lefednek; célzott esetek kellenek a többire).
+- [ ] A felületen „Mi kerüljön a programba?” rész: most automatikus (a dal
+  dönti el) és kiírja; kézi kapcsolók (pl. háttér-mód, kártyák) a további
+  funkciókkal jönnek, mellettük a méret- és CPU-költség.
+- [ ] További kapcsolható részek: hullámforma-váltás (`BB` esemény) csak több
+  hullámformánál, lecsengés, ismétlés, billentyűfigyelés.
 
 ## 1. Hangzás a beépített hanggal (`player_poly.asm`)
 

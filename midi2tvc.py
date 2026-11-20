@@ -815,6 +815,7 @@ def convert_poly(notes, drums, args, sr, tick_rate, ftab, ch_waves):
                     vol = max(1, drum_level(vol, args.drum_volume) - att)
                     set_wave(v, wave)
                     emit(bytes((0xB8 + v, note, (vol << 4) | dec, slide & 0xFF, slide >> 8)))
+                    stats["slides"] = stats.get("slides", 0) + 1
                     lvl[v] = vol
                     reserved[v] = t + dur
                     cur[v] = None
@@ -1148,6 +1149,8 @@ def main():
     with open(args.output, "wb") as f:
         f.write(data)
     write_title(args)
+    write_features(args, MONO_FEATURES, {n for n, on in (("FEAT_DRUMS", bool(drums)),
+                                                         ("FEAT_BG", args.background)) if on})
 
     report(args, notes, total, args.rate, stats, len(data))
 
@@ -1182,6 +1185,25 @@ def ascii_name(name):
     import unicodedata
     t = unicodedata.normalize("NFKD", name)
     return "".join(c for c in t if c.isascii() and (c.isalnum() or c in "-_"))
+
+
+# A lejátszók kapcsolható részei (build/features.inc, a lejátszó IF blokkjai):
+# a .cas-ba csak a dalhoz kellő kód kerül.  A sorrend és a szöveg a webes
+# konverterével (midi2tvc.js featuresInc) azonos.
+POLY_FEATURES = ["FEAT_DRUMS", "FEAT_WAVE_PULSE", "FEAT_WAVE_TRI", "FEAT_WAVE_SAW",
+                 "FEAT_WAVE_NOISE", "FEAT_WAVE_SINE"]
+MONO_FEATURES = ["FEAT_DRUMS", "FEAT_BG"]
+
+
+def features_inc(names, on):
+    return "".join("%s equ %d\n" % (n, 1 if n in on else 0) for n in names)
+
+
+def write_features(args, names, on):
+    path = os.path.join(os.path.dirname(os.path.abspath(args.output)), "features.inc")
+    with open(path, "w") as f:
+        f.write(features_inc(names, on))
+    print("a lejátszóba kerül: %s" % (", ".join(n[5:].lower() for n in names if n in on) or "csak az alap"))
 
 
 def write_title(args):
@@ -1223,10 +1245,15 @@ def write_poly(args, notes, drums_sec, gain_auto=False):
     with open(args.output, "wb") as f:
         f.write(data)
     write_title(args)
+    used = {WAVES[w] for w in slots}
+    write_features(args, POLY_FEATURES, {n for n, on in (
+        ("FEAT_DRUMS", stats.get("slides", 0) > 0), ("FEAT_WAVE_PULSE", "pulse" in used),
+        ("FEAT_WAVE_TRI", "triangle" in used), ("FEAT_WAVE_SAW", "saw" in used),
+        ("FEAT_WAVE_NOISE", "noise" in used), ("FEAT_WAVE_SINE", "sine" in used)) if on})
     print("poly: %.0f Hz mintavétel (osztó %d), %.2f tick/s, a keverés a CPU %.0f%%-a; "
           "hullámformák: %s; táblák: %d bájt a program után"
           % (sr, args.poly_div, tick_rate, 100 * poly_cpu_load(args.poly_div),
-             ", ".join(WAVE_NAMES[WAVES[w]] for w in slots), 256 * (1 + 8 * len(slots))))
+             ", ".join(WAVE_NAMES[WAVES[w]] for w in slots), 256 * (2 + 8 * len(slots))))
     stats.setdefault("chords", 0)
     stats.setdefault("rests", 0)
     report(args, notes, total, tick_rate, stats, len(data))

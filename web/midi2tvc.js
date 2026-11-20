@@ -731,6 +731,7 @@
             setWave(v, wave);
             const dv = Math.max(1, drumLevel(vol0, o.drumVolume) - att);
             emit(0xB8 + v, note, (dv << 4) | dec, slide & 0xFF, slide >> 8);
+            stats.slides = (stats.slides || 0) + 1;
             lvl[v] = dv;
             reserved[v] = t + dur;
             cur[v] = null;
@@ -816,7 +817,7 @@
     const drums = useDrums ? drumHits(drumNotes, o.rate, o.curve) : new Map();
     if (!notes.length && !drums.size) throw new Error('a kiválasztott csatornákon (és részben) nincs hang');
     const floor = clamp(o.decayFloor, 0, 15);
-    let song, total, stats, pause = 0, rate, sr = null, polyInfo = null, gainMax = 100;
+    let song, total, stats, pause = 0, rate, sr = null, polyInfo = null, gainMax = 100, features = [];
     // gain: globális hangerő (%); 'max' = a legnagyobb, ami még nem torzít
     const gainAuto = o.gain === 'max';
     if (gainAuto) o.gain = 100;
@@ -850,7 +851,11 @@
       for (const f of ftab) data.push(f & 0xFF, f >> 8);
       song = Uint8Array.from(data.concat(r.body));
       ({ total, stats, pause } = r);
-      polyInfo = { div: o.polyDiv, tickn, slots: r.slots, cpu: polyCpuLoad(o.polyDiv), tableBytes: 256 * (1 + 8 * r.slots.length) };
+      polyInfo = { div: o.polyDiv, tickn, slots: r.slots, cpu: polyCpuLoad(o.polyDiv), tableBytes: 256 * (2 + 8 * r.slots.length) };
+      const used = new Set(r.slots.map((w) => WAVES[w]));
+      features = [['FEAT_DRUMS', (r.stats.slides || 0) > 0], ['FEAT_WAVE_PULSE', used.has('pulse')], ['FEAT_WAVE_TRI', used.has('triangle')],
+        ['FEAT_WAVE_SAW', used.has('saw')], ['FEAT_WAVE_NOISE', used.has('noise')], ['FEAT_WAVE_SINE', used.has('sine')]]
+        .filter((x) => x[1]).map((x) => x[0]);
       rate = tickRate;
     } else {
       let r = convert(notes, o, drums);
@@ -861,6 +866,7 @@
       for (const p of pitchTable(o.tuning)) data.push(p & 0xFF, p >> 8);
       let all = data.concat(r.body);
       if (drums.size) all = all.concat(buildKit(kitOffset, o.drumVolume * o.gain / 100.0));
+      features = [['FEAT_DRUMS', drums.size > 0], ['FEAT_BG', !!o.background]].filter((x) => x[1]).map((x) => x[0]);
       song = Uint8Array.from(all);
       ({ total, stats, pause } = r);
       rate = o.rate;
@@ -876,7 +882,7 @@
     // range: a mentett rész helye a teljes dal lejátszási idejében (másodperc),
     // a hossza az ismétlés előtti szünet nélkül
     return { song, mode: o.mode, total, rate, sampleRate: sr, stats, notes, used, warnings, options: o, poly: polyInfo,
-      range: { start: shift, length: (total - pause) / rate }, pause: pause / rate, gain: o.gain, gainMax };
+      range: { start: shift, length: (total - pause) / rate }, pause: pause / rate, gain: o.gain, gainMax, features };
   }
 
   // ---- .cas összeállítása ---------------------------------------------------------
@@ -904,6 +910,27 @@
   }
   // ékezet nélküli fájlnév: Árvíztűrő -> Arvizturo
   const asciiName = (name) => String(name).normalize('NFKD').replace(/[^A-Za-z0-9_-]/g, '');
+  // ---- a lejátszók kapcsolható részei (build/features.inc) -------------------------
+  // a .cas-ba csak a dalhoz kellő kód kerül; ugyanaz, mint a midi2tvc.py
+  // POLY_FEATURES / MONO_FEATURES / features_inc
+  const POLY_FEATURES = ['FEAT_DRUMS', 'FEAT_WAVE_PULSE', 'FEAT_WAVE_TRI', 'FEAT_WAVE_SAW', 'FEAT_WAVE_NOISE', 'FEAT_WAVE_SINE'];
+  const MONO_FEATURES = ['FEAT_DRUMS', 'FEAT_BG'];
+  const featureNames = (mode) => (mode === 'poly' ? POLY_FEATURES : MONO_FEATURES);
+  const featuresInc = (result) => featureNames(result.mode).map((n) => n + ' equ ' + (result.features.includes(n) ? 1 : 0) + '\n').join('');
+  // a lejátszó fordítása a dalhoz (böngészős sjasmplus: assembler.js run) -> {cas, codeLen}
+  async function assembleCas(run, players, result, title) {
+    const asm = result.mode === 'poly' ? 'player_poly.asm' : 'player.asm';
+    const files = {
+      [asm]: players.sources[asm], 'cas.inc': players.sources['cas.inc'],
+      'build/features.inc': featuresInc(result), 'build/song.bin': result.song, 'build/title.bin': titleBytes(title),
+    };
+    const r = await run(files, asm, { raw: 'build/out.cas', sym: 'build/out.sym' });
+    const m = /^song: EQU 0x([0-9A-F]+)/m.exec(r.sym || '');
+    // cas: a kész fájl; codeLen: a BASIC programtól a dal elejéig (a lejátszó kódja)
+    return { cas: r.raw, codeLen: m ? parseInt(m[1], 16) - 0x19EF : null };
+  }
+
+  // tartalék: az előre fordított, minden funkciót tartalmazó lejátszó (players.js)
   function buildCas(player, song, title) {
     const code = Uint8Array.from(player.code);
     const suffix = Uint8Array.from(player.suffix || []);
@@ -990,6 +1017,7 @@
       '  cas.inc             a .cas fejléc és a BASIC indító sorok',
       '  build/song.bin      a dal adatai (formátum: a ' + asm + ' eleje)',
       '  build/title.bin     a cím (32 bájt, a BASIC PRINT sorban)',
+      '  build/features.inc  a lejátszóba kerülő részek (a dalhoz kellők)',
       '  build.sh            újrafordítás: ./build.sh -> build/' + name + '.cas',
       '',
       'A dal adatai a tvc-midi-player repó midi2tvc.py konverterével, ugyanezekkel',
@@ -1005,6 +1033,7 @@
       [name + '/cas.inc', enc(players.sources['cas.inc'])],
       [name + '/build/song.bin', result.song],
       [name + '/build/title.bin', tb],
+      [name + '/build/features.inc', enc(featuresInc(result))],
       [name + '/build.sh', enc(build)],
       [name + '/README.txt', enc(readme)],
     ].concat(result.options.envelopes && typeof result.options.envelopes !== 'string'
@@ -1058,7 +1087,7 @@
 
   const api = {
     TVC_CLOCK, FRAME_RATE, CPU_CLOCK, POLY_VOICES, WAVES, WAVE_NAMES, DRUM_CHANNEL, DRUM_KIT, POLY_KIT, DEFAULTS,
-    compileEnvelopes, envelopeLevels, pyRound, parseMidi, collectNotes, pitchTable, polyFreqTable, polyMixTable, polyRates, noteFreq,
+    compileEnvelopes, envelopeLevels, featuresInc, featureNames, assembleCas, pyRound, parseMidi, collectNotes, pitchTable, polyFreqTable, polyMixTable, polyRates, noteFreq,
     convertMidi, buildCas, titleBytes, asciiName, selectRange, cliArgs, sourcePackage, zipFiles,
   };
   if (typeof module !== 'undefined' && module.exports) module.exports = api;

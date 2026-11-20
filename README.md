@@ -152,6 +152,27 @@ ride > kolomp > perem > zárt cin). A dobütés erőssége halkítja a dobot.
 - Hangerő: `06h` b2–b5. A b0–b1 (videómód) és a b7 (nyomtató) változatlan
   marad. A lejátszó minden íráskor frissíti a ROM `0B12h` / `0B13h` tükrét is.
 
+## Moduláris lejátszók (`build/features.inc`)
+
+A lejátszók kapcsolható részei `IF FEAT_…` blokkok; a `.cas`-ba csak az
+kerül, amit a dal használ. A konverter a dalból dönti el, és a
+`build/features.inc`-be írja (a `build.sh` ezzel fordít):
+
+| lejátszó | rész | mikor kell |
+| --- | --- | --- |
+| többszólamú | `FEAT_DRUMS` | ha szól szintetizált dob (csúszás, `B8` esemény) |
+| többszólamú | `FEAT_WAVE_PULSE`, `_TRI`, `_SAW`, `_NOISE`, `_SINE` | ha a dal használja az adott hullámformát (a négyszög mindig) |
+| egycsatornás | `FEAT_DRUMS` | ha van dobkészlet |
+| egycsatornás | `FEAT_BG` | `--background` |
+
+A webes felület ugyanígy, a böngészőben fordít: a `build.sh`-éval azonos
+sjasmplus (v1.24.0, BSD licenc) WebAssemblyre fordítva (`web/sjasmplus/`,
+`web/assembler.js`; újraépítés Emscriptennel:
+`tools/build_sjasmplus_wasm.sh`). Egy fordítás néhány ms, és bájtra ugyanazt
+adja, mint a `build.sh`. Ha a fordító nem tölthető be, az előre fordított,
+minden részt tartalmazó lejátszó (`players.js`) a tartalék. A felület kiírja,
+mi került a lejátszóba és mekkora.
+
 ## A többszólamú lejátszó (`player_poly.asm`)
 
 - A `05h` b4 = 0 állással a hangoszcillátor nem szól, a `06h`

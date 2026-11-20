@@ -98,6 +98,7 @@ VS_FLOOR    equ 7
 VS_SLOT     equ 8                   ; hullámforma-hely
 VS_SIZE     equ 9
 
+            include "build/features.inc"   ; a dalhoz kellő részek (midi2tvc)
             include "cas.inc"
 
 ; ---- belépés ----------------------------------------------------------------
@@ -126,7 +127,9 @@ start:
             and 0C3h
             ld c, a
             ld hl, SONG_MIX
-            ld de, mixtab
+            ld a, (mixpg + 1)       ; a keverőtábla lapja (build_tables)
+            ld d, a
+            ld e, 0
             ld b, 64
 .mt:        ld a, (hl)
             add a, a
@@ -244,7 +247,7 @@ w3:         ld b, 0                 ; 7
             ld a, (bc)              ; 7
             add a, d                ; 4
             ld c, a                 ; 4
-            ld b, high mixtab       ; 7
+mixpg:      ld b, 0                 ; 7   a keverőtábla lapja (induláskor írjuk be)
             ld a, (bc)              ; 7
             out (P_AMP), a          ; 11
             dec e                   ; 4
@@ -366,7 +369,11 @@ events:
             cp 0B8h
             jr c, .next
             cp 0BBh
+            IF FEAT_DRUMS
             jp c, .slide
+            ELSE
+            jr c, .next
+            ENDIF
             cp 0BEh
             jp c, .wave
             cp 0BFh
@@ -454,6 +461,7 @@ events:
             ld (hl), c
             pop hl
             jp .next
+            IF FEAT_DRUMS
 .slide:                             ; B8+s n vd lo hi
             sub 0B8h
             ld c, (hl)              ; hangjegy
@@ -496,6 +504,7 @@ events:
             ld (de), a              ; VS_FLOOR = 0
             jp .next
 
+            ENDIF
 ; ---- lecsengés, csúszás, majd a megszakítás operandusai -------------------
 voices:
             ld hl, vstate
@@ -515,6 +524,7 @@ voices:
 ; HL = a szólam állapota, BC = a táblalap operandusa; kilépéskor HL a következő
 voice1:
             push bc
+            IF FEAT_DRUMS
             ld e, (hl)              ; F += csúszás
             inc hl
             ld d, (hl)
@@ -532,6 +542,10 @@ voice1:
             ld (hl), e
             ld de, VS_VOL
             add hl, de              ; HL = VS_VOL
+            ELSE
+            ld de, VS_VOL
+            add hl, de              ; HL = VS_VOL (csúszás nincs: dob nélkül)
+            ENDIF
             ld a, (hl)
             ld c, a                 ; C = hangerő
             inc hl
@@ -594,6 +608,8 @@ build_tables:
             add a, a
             inc a
             add a, h
+            ld (mixpg + 1), a       ; a táblák után a keverőtábla lapja
+            inc a
             ld b, a                 ; B = a táblák utáni lap
             ld a, (V_HIMEM + 1)     ; a BASIC verme alatt maradjon 2 lap
             sub 2
@@ -649,16 +665,25 @@ build_tables:
 ; A = a wave_id hullámforma C. mintája (0..255)
 wave_sample:
             ld a, (wave_id)
-            or a
-            jr z, .square
-            dec a
+            IF FEAT_WAVE_PULSE
+            cp 1
             jr z, .pulse
-            dec a
+            ENDIF
+            IF FEAT_WAVE_TRI
+            cp 2
             jr z, .triangle
-            dec a
+            ENDIF
+            IF FEAT_WAVE_SAW
+            cp 3
             jr z, .saw
-            dec a
-            jr nz, .sine
+            ENDIF
+            IF FEAT_WAVE_SINE
+            cp 5
+            jr z, .sine
+            ENDIF
+            IF FEAT_WAVE_NOISE
+            cp 4
+            jr nz, .square
             ld de, (lfsr)           ; zaj
             ld b, 8
 .n:         srl d
@@ -671,22 +696,30 @@ wave_sample:
             ld (lfsr), de
             ld a, e
             ret
+            ENDIF
 .square:    ld a, c
             rlca
             sbc a, a
             cpl                     ; 0..127: 255, 128..255: 0
             ret
+            IF FEAT_WAVE_PULSE
 .pulse:     ld a, c
             cp 64
             sbc a, a                ; 0..63: 255
             ret
+            ENDIF
+            IF FEAT_WAVE_TRI
 .triangle:  ld a, c
             add a, a
             ret nc
             cpl                     ; 128..255: lefelé
             ret
+            ENDIF
+            IF FEAT_WAVE_SAW
 .saw:       ld a, c
             ret
+            ENDIF
+            IF FEAT_WAVE_SINE
 .sine:      push hl                 ; negyed-szinusz táblából, tükrözve
             ld a, c
             bit 6, a
@@ -711,6 +744,7 @@ sine_q:
             db 219, 221, 223, 225, 227, 229, 231, 233, 234, 236, 238, 239, 241, 242, 243, 245
             db 246, 247, 248, 249, 250, 251, 252, 252, 253, 253, 254, 254, 255, 255, 255, 255
 
+            ENDIF
 ; ---- változók ---------------------------------------------------------------
 ; a dal hossza (a weboldal buildCas-a is ide írja be)
 song_len:   dw song_end - song
@@ -724,8 +758,7 @@ wait:       dw 0
 done:       db 0
 in_tick:    db 0
 vstate:     ds 3 * VS_SIZE
-            align 256
-mixtab:     ds 64                   ; a keverőtábla a 06h többi bitjével
+; a keverőtábla (a 06h többi bitjével) futás közben a hullámtáblák utáni lapon
 
 song:       incbin "build/song.bin"
 song_end:

@@ -73,13 +73,21 @@ const M = require(process.argv[2] + '/web/midi2tvc.js');
 const P = require(process.argv[2] + '/web/players.js');
 require(process.argv[2] + '/web/envelopes.js');
 const job = JSON.parse(fs.readFileSync(process.argv[3], 'utf8'));
-const r = M.convertMidi(new Uint8Array(fs.readFileSync(job.midi)), job.opts);
-const cas = M.buildCas(r.mode === 'poly' ? P.poly : P.mono, r.song, job.title);
-fs.writeFileSync(job.out, cas);
-const name = 'par';
-const files = M.sourcePackage({ players: P, result: r, midiBytes: new Uint8Array(fs.readFileSync(job.midi)),
-  midiName: name + '.mid', name, title: job.title, casBytes: cas });
-fs.writeFileSync(job.zip, M.zipFiles(files, /\.sh$/));
+const A = require(process.argv[2] + '/web/assembler.js');
+const SjasmPlus = require(process.argv[2] + '/web/sjasmplus/sjasmplus.js');
+(async () => {
+  const r = M.convertMidi(new Uint8Array(fs.readFileSync(job.midi)), job.opts);
+  // a böngészős sjasmplus a dalhoz kellő részekkel fordít; mellette a tartalék
+  // (előre fordított, minden funkcióval) is összeáll
+  const run = await A.createAssembler(SjasmPlus, fs.readFileSync(process.argv[2] + '/web/sjasmplus/sjasmplus.wasm'));
+  const cas = (await M.assembleCas(run, P, r, job.title)).cas;
+  fs.writeFileSync(job.out, cas);
+  M.buildCas(r.mode === 'poly' ? P.poly : P.mono, r.song, job.title);
+  const name = 'par';
+  const files = M.sourcePackage({ players: P, result: r, midiBytes: new Uint8Array(fs.readFileSync(job.midi)),
+    midiName: name + '.mid', name, title: job.title, casBytes: cas });
+  fs.writeFileSync(job.zip, M.zipFiles(files, /\.sh$/));
+})();
 """
 
 

@@ -96,6 +96,7 @@ SONG_KIT    equ song+6
 PITCH_TAB   equ song+8
 SONG_EVENTS equ song+8+256
 
+            include "build/features.inc"   ; a dalhoz kellő részek (midi2tvc)
             include "cas.inc"
 
 ; ---- belépési pontok (fix címek) -------------------------------------------
@@ -137,6 +138,7 @@ play_fg:
             ret
 
 ; háttérben: a rezidens rész (res_begin..res_end) a HIMEM alá kerül
+            IF FEAT_BG
 play_bg:
             push ix                 ; a BASIC változóterülete (USR: őrizni kell)
             call play_bg1
@@ -270,6 +272,9 @@ play_bg1:
 .fail:
             jp play_fg
 
+            ELSE
+play_bg     equ play_fg              ; háttér-mód nélkül: előtérben
+            ENDIF
 call_hl:    jp (hl)
 
 ; A = a billentyűzet 7. sorának ESC/SPACE bitjei (KEYMASK: nincs lenyomva)
@@ -288,9 +293,11 @@ read_keys:
             ld a, b
             ret
 
+            IF FEAT_BG
 bg_base:    dw 0
 bg_delta:   dw 0
 res_size:   dw 0
+            ENDIF
 ; a dal hossza: ebből számoljuk a blokk méretét és a relokációs tábla helyét
 ; (a dal mögött); a weboldal (midi2tvc.js buildCas) ide írja be
 song_len:   dw song_end - song
@@ -328,9 +335,11 @@ res_play:
             ret
 
 ; aláírás + a blokk mérete (play_bg ebből ismeri fel a korábbi példányt)
+            IF FEAT_BG
 sig:        db "TVCMIDI", 0
 SIG_LEN     equ 8
             dw 0                    ; a blokk mérete (play_bg írja be)
+            ENDIF
 ; leállítás; EXT 0
 res_stop:
             di
@@ -381,7 +390,9 @@ irq:
             push de
             push hl
             call tick
+            IF FEAT_DRUMS
             call drum_step
+            ENDIF
             ld a, (done)            ; háttérben a dal végén lekapcsolódik
             or a
             jr z, .go
@@ -418,8 +429,10 @@ tick:
             cp 0A0h
             jr c, .vol
             jr z, .lwait
+            IF FEAT_DRUMS
             cp 0C0h
             jp c, .drum             ; A1..BF: dobütés
+            ENDIF
             cp 0FFh
             jr z, .end
             sub 0BFh                ; C0..FE -> 1..63
@@ -436,6 +449,7 @@ tick:
             ld (ptr), hl
             ld (wait), de
             ret
+            IF FEAT_DRUMS
 .drum:
             sub 0A1h                ; a dob sorszáma
             ld c, (hl)              ; gyengítés
@@ -444,6 +458,7 @@ tick:
             call drum_start
             pop hl
             jp .next
+            ENDIF
 .vol:
             and 0Fh
             ld (note_vol), a
@@ -548,6 +563,7 @@ effects:
             ld (cur_vol), a
             jp set_vol
 
+            IF FEAT_DRUMS
 ; ---- dob ---------------------------------------------------------------------
 ; A = a dob sorszáma, C = gyengítés
 drum_start:
@@ -679,6 +695,7 @@ atten:
             ret
 drum_code_end:
 
+            ENDIF
 ; ---- hardver ----------------------------------------------------------------
 ; A = MIDI hangjegy (0..127): a dallam PITCH-e; dob közben csak eltároljuk
 set_note:
@@ -758,11 +775,13 @@ arp_notes:  ds 4
 sh_lo:      db 0                    ; a dallam PITCH-e (dob közben)
 sh_hi:      db 0
 drum_on:    db 0
+            IF FEAT_DRUMS
 drum_ptr:   dw 0
 drum_att:   db 0
 drum_vol:   db 0
 drum_noise: db 0
 lfsr:       dw 0ACE1h
+            ENDIF
 
 song:       incbin "build/song.bin"
 song_end:
@@ -770,8 +789,10 @@ song_end:
 
 ; a rezidens rész relokációs táblája: a javítandó szavak címei (dw); a dal
 ; mögött, mert a mérete csak a fordítás végén derül ki
+            IF FEAT_BG
 reloc_table:
             RELOCATE_TABLE
 reloc_table_end:
 RELOC_BYTES equ reloc_table_end - reloc_table
+            ENDIF
 prog_end:

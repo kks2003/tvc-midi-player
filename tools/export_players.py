@@ -26,8 +26,16 @@ ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 PLAYERS = {"mono": "player.asm", "poly": "player_poly.asm"}
 
 
+sys.path.insert(0, ROOT)
+from midi2tvc import POLY_FEATURES, MONO_FEATURES, features_inc  # noqa: E402
+
+
 def assemble(asm, title, song=b""):
     os.makedirs(os.path.join(ROOT, "build"), exist_ok=True)
+    # tartalék (ha a böngészőben nem fut a sjasmplus): minden funkcióval
+    names = POLY_FEATURES if asm == "player_poly.asm" else MONO_FEATURES
+    with open(os.path.join(ROOT, "build", "features.inc"), "w") as f:
+        f.write(features_inc(names, set(names)))
     with open(os.path.join(ROOT, "build", "song.bin"), "wb") as f:
         f.write(song)
     with open(os.path.join(ROOT, "build", "title.bin"), "wb") as f:
