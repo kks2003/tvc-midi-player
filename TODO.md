@@ -36,7 +36,10 @@ kicsi és gyors, vagy teljes tudású, vagy egy adott hangkártyára szabott.
 - [ ] **Mintavételezett dobok („digidrum”).** A zajból számolt dobok helyett
   rövid, valódi dobminták a DAC-on (lábdob, pergő, cin, taps). Egy szólamot
   egyszeri lejátszású mintatáblára állít. Opció: mintakészlet (beépített vagy
-  saját WAV), mintavétel, a minták hossza. Ára: néhány KB adat.
+  saját WAV), mintavétel, a minták hossza. Ára: néhány KB adat. Felmérés: a
+  kezelő lapon belül olvas, ezért a minta tickenként lapot váltana
+  (F = 65536 / minta-per-tick); hangerőszintenként külön lap kellene, így egy
+  0,3 s-os dob 8 szinten ~30 KB — csak 1–2 szinttel, néhány dobra fér bele.
 - [x] **Hangmagasság-hajlítás és vibrato** (`--bend`, `FEAT_PITCH`): MIDI pitch
   bend (RPN 0 tartomány), vibrato a modulációs kerékről, a burkológörbék
   hangmagassága; új `B3+s lo hi` parancs. Emulátorban ellenőrizve. (Az
@@ -58,10 +61,17 @@ kicsi és gyors, vagy teljes tudású, vagy egy adott hangkártyára szabott.
   kezelő csak összead és a 06h többi bitjét hozzá-OR-olja: mintánként −11
   ciklus (a −18-ból 7 az `OR`). Emulátorban ellenőrizve (a DAC-szintek
   eloszlása egyezik az előnézettel).
-- [ ] 4. szólam alacsonyabb mintavétellel, ha a CPU-idő engedi.
+- [ ] 4. szólam alacsonyabb mintavétellel, ha a CPU-idő engedi. Felmérés: a
+  negyedik fázis már nem fér regiszterbe (IX, IY, HL' foglalt), memóriából
+  kb. +80 ciklus mintánként: 8,5 kHz-en is ~90% CPU, a tickeknek alig marad.
+  Csak a gyors keveréssel és ~7 kHz-es mintavétellel lenne értelme.
 - [ ] **Háttér-mód a többszólamú lejátszóhoz** gépi kódú programok mellé
   (belépési pontok: indítás, leállítás, képkocka-szinkron), alacsony
-  mintavétellel, hogy maradjon CPU-idő.
+  mintavétellel, hogy maradjon CPU-idő. Felmérés: a kezelő most az IX, IY és
+  az árnyékregisztereket tartja fenn magának; háttérben ezeket menteni kell
+  (+~60 ciklus), így 5 kHz körül ~50% CPU maradna a programnak. Kártyával
+  (`--cards`) viszont könnyű: ott tickenként egyszer fut, a CPU szinte szabad
+  — ez lehet az első lépés.
 
 ## 2. Konverter
 
