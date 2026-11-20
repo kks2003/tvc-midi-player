@@ -20,8 +20,8 @@
   const POLY_HANDLER_CYCLES = 253;
   const POLY_VOICES = 3;
   const POLY_DIV_MIN = 17, POLY_DIV_MAX = 64;
-  const WAVES = ['square', 'pulse', 'triangle', 'saw', 'noise', 'sine'];
-  const WAVE_NAMES = { square: 'négyszög', pulse: 'impulzus (25%)', triangle: 'háromszög', saw: 'fűrész', noise: 'zaj', sine: 'szinusz' };
+  const WAVES = ['square', 'pulse', 'triangle', 'saw', 'noise', 'sine', 'pulse12'];
+  const WAVE_NAMES = { square: 'négyszög', pulse: 'impulzus (25%)', triangle: 'háromszög', saw: 'fűrész', noise: 'zaj', sine: 'szinusz', pulse12: 'keskeny impulzus (12,5%)' };
   const TONE_WAVES = WAVES.filter((w) => w !== 'noise');
   const MAX_SLOTS = 5;
 
@@ -140,6 +140,8 @@
           c.notes++; c.lo = Math.min(c.lo, a); c.hi = Math.max(c.hi, a);
         } else if (hi === 0x80 || hi === 0x90) {
           events.push([tick, order, 'off', ch, a, 0]);
+        } else if (hi === 0xE0) {
+          events.push([tick, order, 'pb', ch, a, v]);
         } else if (hi === 0xB0) {
           events.push([tick, order, 'cc', ch, a, v]);
         }
@@ -239,6 +241,60 @@
       for (const [k, lst] of d) for (const [st, v] of lst) finish(k >> 8, k & 255, st, v, end);
     notes.sort(cmpTuple);
     return notes;
+  }
+
+  // ---- hangmagasság-hajlítás, vibrato (bend) -----------------------------------
+  // egész számokkal, mint a midi2tvc.py (CENT_RATIO, bent_freq)
+  const CENT_RATIO = [65536, 65574, 65612, 65650, 65688, 65726, 65764, 65802, 65840, 65878, 65916, 65954, 65992, 66030, 66068, 66106, 66144, 66183, 66221, 66259, 66297, 66336, 66374, 66412, 66451, 66489, 66528, 66566, 66605, 66643, 66682, 66720, 66759, 66797, 66836, 66874, 66913, 66952, 66990, 67029, 67068, 67107, 67145, 67184, 67223, 67262, 67301, 67340, 67378, 67417, 67456, 67495, 67534, 67573, 67612, 67651, 67691, 67730, 67769, 67808, 67847, 67886, 67926, 67965, 68004, 68043, 68083, 68122, 68161, 68201, 68240, 68280, 68319, 68359, 68398, 68438, 68477, 68517, 68556, 68596, 68635, 68675, 68715, 68755, 68794, 68834, 68874, 68914, 68953, 68993, 69033, 69073, 69113, 69153, 69193, 69233, 69273, 69313, 69353, 69393];
+  const VIB_SIN = [0, 383, 707, 924, 1000, 924, 707, 383, 0, -383, -707, -924, -1000, -924, -707, -383];
+  const VIB_HZ = 5.5, VIB_DEPTH = 50;
+  // -> [{cs: [[mp, cent]]} hajlítás, {cs: [[mp, 0..127]]} moduláció]
+  function collectControls(division, events, channels, speed) {
+    const conv = tickToSeconds(division, events);
+    const rng = new Array(16).fill(2);
+    const rpn = Array.from({ length: 16 }, () => [127, 127]);
+    const bends = {}, mods = {};
+    const add = (o, ch, x) => { (o[ch] = o[ch] || []).push(x); };
+    for (const [tick, , kind, ch, a, b] of events) {
+      if (channels && !channels.has(ch)) continue;
+      const t = conv(tick) / speed;
+      if (kind === 'cc') {
+        if (a === 101) rpn[ch][0] = b;
+        else if (a === 100) rpn[ch][1] = b;
+        else if (a === 6 && rpn[ch][0] === 0 && rpn[ch][1] === 0) rng[ch] = b;
+        else if (a === 1) add(mods, ch, [t, b]);
+        else if (a === 121) { add(bends, ch, [t, 0]); add(mods, ch, [t, 0]); }
+      } else if (kind === 'pb') {
+        const val = ((b << 7) | a) - 8192;
+        add(bends, ch, [t, pyRound(val * rng[ch] * 100 / 8192.0)]);
+      }
+    }
+    return [bends, mods];
+  }
+  function controlTicks(ctl, shift, rate) {
+    const out = {};
+    for (const [ch, lst] of Object.entries(ctl)) {
+      const ts = [], vs = [];
+      for (const [t, v] of lst) {
+        const tk = Math.max(0, pyRound((t - shift) * rate));
+        if (ts.length && ts[ts.length - 1] === tk) vs[vs.length - 1] = v;
+        else { ts.push(tk); vs.push(v); }
+      }
+      out[ch] = [ts, vs];
+    }
+    return out;
+  }
+  function controlAt(ctl, ch, t) {
+    const c = ctl[ch];
+    if (!c) return 0;
+    const [ts, vs] = c;
+    let lo = 0, hi = ts.length;
+    while (lo < hi) { const mid = (lo + hi) >> 1; if (ts[mid] <= t) lo = mid + 1; else hi = mid; }
+    return lo ? vs[lo - 1] : 0;
+  }
+  function bentFreq(ftab, note, cents) {
+    const n = clamp(note + Math.floor(cents / 100), 0, 127);
+    return clamp(Math.floor((ftab[n] * CENT_RATIO[((cents % 100) + 100) % 100] + 32768) / 65536), 1, 32767);
   }
 
   // A dal egy része: from..to (másodperc az eredeti MIDI idejében, a speed
@@ -358,7 +414,7 @@
     const tickn = clamp(pyRound(sr / 50.0), 1, 255);
     return [sr, tickn, sr / tickn];
   }
-  const polyCpuLoad = (div) => POLY_HANDLER_CYCLES / (CPU_CLOCK / (TVC_CLOCK / div));
+  const polyCpuLoad = (div, fastIrq, fastMix) => (POLY_HANDLER_CYCLES - (fastIrq ? 10 : 0) - (fastMix ? 11 : 0)) / (CPU_CLOCK / (TVC_CLOCK / div));
   function polyFreqTable(tuning, sr) {
     const out = [];
     for (let n = 0; n < 128; n++) out.push(clamp(pyRound(noteFreq(n, tuning) * 65536 / sr), 1, 32767));
@@ -373,7 +429,8 @@
     const full = 3 * polyPeak(vmax);
     for (let s = 0; s < 64; s++) {
       const g = s * gain / 100.0;
-      const v = mode === 'clean' ? g * ceiling / full
+      const v = mode === 'fast' ? Math.min(Math.floor(ceiling / 3), g * ceiling / full)
+        : mode === 'clean' ? g * ceiling / full
         : g <= knee ? g : knee + (ceiling - knee) * (1 - Math.exp(-(g - knee) / 12.0));
       out.push(clamp(pyRound(v), 0, ceiling));
     }
@@ -544,11 +601,12 @@
         if (c === '{') break;
         if (c !== ',') fail('szintaktikai hiba');
       }
-      let vl = 0x80, vlInc = 0, vlMult = 0, vr = 0x80, vrInc = 0, vrMult = 0, d = 0;
+      let vl = 0x80, vlInc = 0, vlMult = 0, vr = 0x80, vrInc = 0, vrMult = 0, d = 0, pb = 0x80, pbInc = 0;
       const frames = [];
       for (;;) {
         if (d) {
-          frames.push([(vl >> 8) & 0xFF, (vr >> 8) & 0xFF]);
+          frames.push([(vl >> 8) & 0xFF, (vr >> 8) & 0xFF, pb >> 8]);
+          pb += pbInc;
           d--;
           vl &= 0x3FFF;
           vl = vlMult ? (vl * vlMult + 64) >> 7 : vl + vlInc;
@@ -592,16 +650,25 @@
           else { vrMult = 0; if (!d) vr = (v << 8) | 0x80; else vrInc = step(vr); }
           if (readChar() !== ',') fail('szintaktikai hiba');
         }
-        expect('0'); readNumber(); expect(',');      // hangmagasság
+        expect('0');                                 // hangmagasság (768 = egy oktáv)
+        const pn = readNumber();
+        if (pn < -2048 || pn > 2047) fail('hibás hangmagasság');
+        const pv = (pn << 8) | 0x80;
+        pbInc = 0;
+        if (!d) pb = pv;
+        else if (pv !== pb) { let x = pv - pb; x += x < 0 ? -(d >> 1) : d >> 1; pbInc = Math.trunc(x / d); }
+        expect(',');
         expect('0'); readNumber(); expect(';');      // torzítás
       }
-      frames.push([0x80, flags ? 0xFF : 0x00]);
+      frames.push([0x80, flags ? 0xFF : 0x00, 0]);
       for (const n of progs) if (n >= 0) out.set(n, [frames, flags]);
     }
     return out;
   }
   // a hang burkológörbéje képkockánként (0..63); held képkocka után engedik el
-  function envelopeLevels([frames, flags], held) {
+  const envelopeLevels = (env, held) => envelopeFrames(env, held).map((f) => f[0]);
+  // képkockánként [hangerő 0..63, hangmagasság (768 = egy oktáv)]
+  function envelopeFrames([frames, flags], held) {
     let state = flags & 0xB0, releasing = false, ptr = 0, loop = null, t = 0;
     const out = [];
     while (out.length < held + ENV_TAIL_MAX) {
@@ -611,7 +678,7 @@
         if (frames[ptr][0] >= 0xC0) ptr++;
       }
       if (ptr >= frames.length) break;
-      let [b0, b1] = frames[ptr];
+      let [b0, b1, pt] = frames[ptr];
       if (b0 & 0xC0) {
         if (b1 === 0xFF) break;
         if (!releasing) {
@@ -619,13 +686,13 @@
           if (m === 0x40) { loop = ptr; ptr++; }
           else if (m === 0x80) {
             if (loop === null) break;
-            [b0, b1] = frames[loop];
+            [b0, b1, pt] = frames[loop];
             ptr = loop + 1;
           } else state = 0x10;
         } else ptr++;
         b0 &= 0x3F;
       } else ptr++;
-      out.push(Math.max(b0, b1));
+      out.push([Math.max(b0, b1), pt]);
       t++;
     }
     return out;
@@ -640,12 +707,17 @@
     for (const [st, en, n, v, ch, idx, pg] of ticks) {
       const base = velocityToVolume(v, o.curve, vmin, vmax);
       let seq;
-      if (env.has(pg)) seq = envelopeLevels(env.get(pg), en - st).map((x) => Math.floor((x * base * 2 + 63) / 126));
+      let pit = null;
+      if (env.has(pg)) {
+        const fr = envelopeFrames(env.get(pg), en - st);
+        seq = fr.map(([x]) => Math.floor((x * base * 2 + 63) / 126));
+        if (fr.some(([, p]) => p)) pit = fr.map(([, p]) => pyRound(p * 25 / 16.0));   // cent
+      }
       else if (o.decay) seq = Array.from({ length: en - st }, (_, k) => Math.max(Math.min(base, floor), base - Math.floor(k / o.decay)));
       else seq = new Array(en - st).fill(base);
       while (seq.length && !seq[seq.length - 1]) seq.pop();
       if (!seq.length) continue;
-      seqs.set(idx, [seq, en]);
+      seqs.set(idx, [seq, en, pit]);
       out.push([st, st + seq.length, n, v, ch, idx, pg]);
     }
     return [out, seqs];
@@ -687,6 +759,9 @@
     const cur = new Array(POLY_VOICES).fill(null);
     const reserved = new Array(POLY_VOICES).fill(0);
     const vslot = new Array(POLY_VOICES).fill(0);
+    const vfreq = new Array(POLY_VOICES).fill(null);
+    const bendOn = !!o.bend;
+    const [bends, mods] = o.bendCtl || [{}, {}];
     slotOf(o.wave);
     const setWave = (v, wave) => {
       const sl = slotOf(wave);
@@ -731,6 +806,7 @@
             setWave(v, wave);
             const dv = Math.max(1, drumLevel(vol0, o.drumVolume) - att);
             emit(0xB8 + v, note, (dv << 4) | dec, slide & 0xFF, slide >> 8);
+            stats.slides = (stats.slides || 0) + 1;
             lvl[v] = dv;
             reserved[v] = t + dur;
             cur[v] = null;
@@ -754,6 +830,7 @@
         setWave(v, chWaves[a[4]] || o.wave);
         emit(0x80 + 16 * v + vol, n);
         lvl[v] = vol;
+        vfreq[v] = ftab[n];
         stats.notes++;
         newCur.set(v, [idx, n]);
         placed.add(idx);
@@ -766,7 +843,22 @@
         if (cur[v] !== null && !fresh.has(v) && seqs.has(cur[v][0])) {
           const [idx, n] = cur[v];
           const lev = seqs.get(idx)[0][t - active.get(idx)[0]];
-          if (lev !== lvl[v]) { emit(0x80 + 16 * v + lev, n); lvl[v] = lev; }
+          if (lev !== lvl[v]) { emit(0x80 + 16 * v + lev, n); lvl[v] = lev; vfreq[v] = ftab[n]; }
+        }
+        // hajlítás, vibrato, a burkológörbe hangmagassága: B3+s lo hi
+        if (bendOn && cur[v] !== null) {
+          const [idx, n] = cur[v];
+          const a = active.get(idx), st = a[0], ch = a[4];
+          let c = controlAt(bends, ch, t);
+          const m = controlAt(mods, ch, t);
+          if (m) {
+            const k = Math.floor(t * VIB_HZ * 16 / tickRate) % 16;
+            c += pyRound(m * VIB_DEPTH * VIB_SIN[k] / (127 * 1000.0));
+          }
+          const sq = seqs.get(idx);
+          if (sq && sq[2] && t - st < sq[2].length) c += sq[2][t - st];
+          const f = bentFreq(ftab, n, c);
+          if (f !== vfreq[v]) { emit(0xB3 + v, f & 0xFF, f >> 8); vfreq[v] = f; stats.bends = (stats.bends || 0) + 1; }
         }
       }
       stats.peak_sum = Math.max(stats.peak_sum, lvl.reduce((a, x) => a + polyPeak(x), 0));
@@ -791,7 +883,7 @@
   const DEFAULTS = {
     mode: 'arp', prio: 'high', maxNotes: 3, arpBass: false, arpSpeed: 1, polyVolume: 9, polyKnee: 10, polyMix: 'clean',
     channels: null, drums: 'synth', transpose: 0, tuning: 440.0, speed: 1.0, rate: FRAME_RATE,
-    decay: 0, decayFloor: 6, curve: 0.7, minVolume: 6, maxVolume: 15, loop: false, loopPause: 0, drumVolume: 100, gain: 100, envelopes: null, background: false, from: null, to: null, trim: false,
+    decay: 0, decayFloor: 6, curve: 0.7, minVolume: 6, maxVolume: 15, loop: false, loopPause: 0, drumVolume: 100, gain: 100, envelopes: null, fastIrq: false, bend: false, cards: [], background: false, from: null, to: null, trim: false,
     polyDiv: 19, wave: 'square', channelWave: null,     // channelWave: {csatorna (1..16): hullámforma}
   };
 
@@ -813,10 +905,11 @@
     let drumNotes = useDrums ? collectNotes(division, events, new Set([DRUM_CHANNEL]), 0, o.speed) : [];
     let shift;
     [notes, drumNotes, shift, o.minLen] = selectRange(notes, drumNotes, o.from, o.to, o.speed, o.trim);
+    const bendRaw = o.bend ? collectControls(division, events, channels, o.speed) : null;
     const drums = useDrums ? drumHits(drumNotes, o.rate, o.curve) : new Map();
     if (!notes.length && !drums.size) throw new Error('a kiválasztott csatornákon (és részben) nincs hang');
     const floor = clamp(o.decayFloor, 0, 15);
-    let song, total, stats, pause = 0, rate, sr = null, polyInfo = null, gainMax = 100;
+    let song, total, stats, pause = 0, rate, sr = null, polyInfo = null, gainMax = 100, features = [];
     // gain: globális hangerő (%); 'max' = a legnagyobb, ami még nem torzít
     const gainAuto = o.gain === 'max';
     if (gainAuto) o.gain = 100;
@@ -835,6 +928,7 @@
         if (old === undefined || DRUM_PRIORITY.indexOf(hit[0]) < DRUM_PRIORITY.indexOf(old[0])) pd.set(tt, hit);
       }
       const ftab = polyFreqTable(o.tuning, sr);
+      o.bendCtl = bendRaw ? [controlTicks(bendRaw[0], shift, tickRate), controlTicks(bendRaw[1], shift, tickRate)] : null;
       const chWaves = {};
       for (const [ch, w] of Object.entries(o.channelWave || {})) {
         if (!TONE_WAVES.includes(w)) throw new Error('ismeretlen hullámforma: ' + w);
@@ -842,15 +936,26 @@
       }
       if (!TONE_WAVES.includes(o.wave)) throw new Error('ismeretlen hullámforma: ' + o.wave);
       const r = convertPoly(notes, pd, o, sr, tickRate, ftab, chWaves);
-      gainMax = maxGain(3 * polyPeak(o.polyVolume), r.stats.peak_sum);
+      gainMax = o.polyMix === 'fast' ? 100 : maxGain(3 * polyPeak(o.polyVolume), r.stats.peak_sum);
       if (gainAuto) o.gain = gainMax;
       const sl = r.slots.concat(new Array(MAX_SLOTS - r.slots.length).fill(0));
-      const data = [o.loop ? 1 : 0, o.envelopeData ? 0 : o.decay, floor, o.polyDiv, 0, 0, tickn, r.slots.length, ...sl, 0, 0, 0,
+      const data = [(o.loop ? 1 : 0) | (o.polyMix === 'fast' ? 2 : 0), o.envelopeData ? 0 : o.decay, floor, o.polyDiv, 0, 0, tickn, r.slots.length, ...sl, o.polyVolume, 0, 0,
         ...polyMixTable(o.polyKnee, 15, o.polyMix, o.polyVolume, o.gain)];
       for (const f of ftab) data.push(f & 0xFF, f >> 8);
       song = Uint8Array.from(data.concat(r.body));
       ({ total, stats, pause } = r);
-      polyInfo = { div: o.polyDiv, tickn, slots: r.slots, cpu: polyCpuLoad(o.polyDiv), tableBytes: 256 * (1 + 8 * r.slots.length) };
+      polyInfo = { div: o.polyDiv, tickn, slots: r.slots, cpu: polyCpuLoad(o.polyDiv, o.fastIrq, o.polyMix === 'fast'), tableBytes: 256 * (2 + 8 * r.slots.length) };
+      const used = new Set(r.slots.map((w) => WAVES[w]));
+      features = [['FEAT_DRUMS', (r.stats.slides || 0) > 0], ['FEAT_WAVE_PULSE', used.has('pulse')], ['FEAT_WAVE_TRI', used.has('triangle')],
+        ['FEAT_WAVE_SAW', used.has('saw')], ['FEAT_WAVE_NOISE', used.has('noise')], ['FEAT_WAVE_SINE', used.has('sine')],
+        ['FEAT_IRQ0038', !!o.fastIrq], ['FEAT_PITCH', (r.stats.bends || 0) > 0],
+        ['FEAT_CARDS', (o.cards || []).length > 0], ['FEAT_SN', (o.cards || []).includes('sn')],
+        ['FEAT_SID', (o.cards || []).includes('sid')], ['FEAT_SAA', (o.cards || []).includes('saa')],
+        ['FEAT_OPL', (o.cards || []).includes('opl')], ['FEAT_FASTMIX', o.polyMix === 'fast'],
+        ['FEAT_WAVE_PULSE12', used.has('pulse12')],
+        ['FEAT_DECAY', (o.envelopeData ? 0 : o.decay) > 0 || (r.stats.slides || 0) > 0],
+        ['FEAT_WAVECHG', r.slots.length > 1], ['FEAT_LOOP', !!o.loop]]
+        .filter((x) => x[1]).map((x) => x[0]);
       rate = tickRate;
     } else {
       let r = convert(notes, o, drums);
@@ -861,6 +966,7 @@
       for (const p of pitchTable(o.tuning)) data.push(p & 0xFF, p >> 8);
       let all = data.concat(r.body);
       if (drums.size) all = all.concat(buildKit(kitOffset, o.drumVolume * o.gain / 100.0));
+      features = [['FEAT_DRUMS', drums.size > 0], ['FEAT_BG', !!o.background]].filter((x) => x[1]).map((x) => x[0]);
       song = Uint8Array.from(all);
       ({ total, stats, pause } = r);
       rate = o.rate;
@@ -876,7 +982,7 @@
     // range: a mentett rész helye a teljes dal lejátszási idejében (másodperc),
     // a hossza az ismétlés előtti szünet nélkül
     return { song, mode: o.mode, total, rate, sampleRate: sr, stats, notes, used, warnings, options: o, poly: polyInfo,
-      range: { start: shift, length: (total - pause) / rate }, pause: pause / rate, gain: o.gain, gainMax };
+      range: { start: shift, length: (total - pause) / rate }, pause: pause / rate, gain: o.gain, gainMax, features };
   }
 
   // ---- .cas összeállítása ---------------------------------------------------------
@@ -904,6 +1010,29 @@
   }
   // ékezet nélküli fájlnév: Árvíztűrő -> Arvizturo
   const asciiName = (name) => String(name).normalize('NFKD').replace(/[^A-Za-z0-9_-]/g, '');
+  // ---- a lejátszók kapcsolható részei (build/features.inc) -------------------------
+  // a .cas-ba csak a dalhoz kellő kód kerül; ugyanaz, mint a midi2tvc.py
+  // POLY_FEATURES / MONO_FEATURES / features_inc
+  const POLY_FEATURES = ['FEAT_DRUMS', 'FEAT_WAVE_PULSE', 'FEAT_WAVE_TRI', 'FEAT_WAVE_SAW', 'FEAT_WAVE_NOISE', 'FEAT_WAVE_SINE', 'FEAT_IRQ0038', 'FEAT_PITCH',
+    'FEAT_CARDS', 'FEAT_SN', 'FEAT_SID', 'FEAT_SAA', 'FEAT_OPL', 'FEAT_FASTMIX', 'FEAT_WAVE_PULSE12',
+    'FEAT_DECAY', 'FEAT_WAVECHG', 'FEAT_LOOP'];
+  const MONO_FEATURES = ['FEAT_DRUMS', 'FEAT_BG'];
+  const featureNames = (mode) => (mode === 'poly' ? POLY_FEATURES : MONO_FEATURES);
+  const featuresInc = (result) => featureNames(result.mode).map((n) => n + ' equ ' + (result.features.includes(n) ? 1 : 0) + '\n').join('');
+  // a lejátszó fordítása a dalhoz (böngészős sjasmplus: assembler.js run) -> {cas, codeLen}
+  async function assembleCas(run, players, result, title) {
+    const asm = result.mode === 'poly' ? 'player_poly.asm' : 'player.asm';
+    const files = {
+      [asm]: players.sources[asm], 'cas.inc': players.sources['cas.inc'], 'chips.inc': players.sources['chips.inc'],
+      'build/features.inc': featuresInc(result), 'build/song.bin': result.song, 'build/title.bin': titleBytes(title),
+    };
+    const r = await run(files, asm, { raw: 'build/out.cas', sym: 'build/out.sym' });
+    const m = /^song: EQU 0x([0-9A-F]+)/m.exec(r.sym || '');
+    // cas: a kész fájl; codeLen: a BASIC programtól a dal elejéig (a lejátszó kódja)
+    return { cas: r.raw, codeLen: m ? parseInt(m[1], 16) - 0x19EF : null };
+  }
+
+  // tartalék: az előre fordított, minden funkciót tartalmazó lejátszó (players.js)
   function buildCas(player, song, title) {
     const code = Uint8Array.from(player.code);
     const suffix = Uint8Array.from(player.suffix || []);
@@ -936,7 +1065,7 @@
     ['arpSpeed', '--arp-speed'], ['polyVolume', '--poly-volume'], ['polyKnee', '--poly-knee'], ['polyMix', '--poly-mix'],
     ['channels', '--channels'], ['drums', '--drums'], ['transpose', '--transpose'], ['tuning', '--tuning'],
     ['speed', '--speed'], ['decay', '--decay'], ['decayFloor', '--decay-floor'], ['curve', '--curve'],
-    ['minVolume', '--min-volume'], ['maxVolume', '--max-volume'], ['loop', '--loop'], ['loopPause', '--loop-pause'], ['drumVolume', '--drum-volume'], ['gain', '--gain'], ['envelopes', '--envelopes'],
+    ['minVolume', '--min-volume'], ['maxVolume', '--max-volume'], ['loop', '--loop'], ['loopPause', '--loop-pause'], ['drumVolume', '--drum-volume'], ['gain', '--gain'], ['fastIrq', '--fast-irq'], ['bend', '--bend'], ['cards', '--cards'], ['envelopes', '--envelopes'],
     ['background', '--background'], ['from', '--from'], ['to', '--to'], ['trim', '--trim'], ['polyDiv', '--poly-div'], ['wave', '--wave'], ['channelWave', '--channel-wave'],
   ];
   function cliArgs(opts) {
@@ -945,6 +1074,7 @@
     for (const [k, flag] of CLI) {
       const v = o[k];
       if (k === 'channels') { if (v && v.length) out.push(flag, v.join(',')); continue; }
+      if (k === 'cards') { if (v && v.length) out.push(flag, v.join(',')); continue; }
       if (k === 'channelWave') {
         const items = Object.entries(v || {}).sort((x, y) => x[0] - y[0]).map(([ch, w]) => ch + '=' + w);
         if (items.length) out.push(flag, items.join(','));
@@ -990,6 +1120,7 @@
       '  cas.inc             a .cas fejléc és a BASIC indító sorok',
       '  build/song.bin      a dal adatai (formátum: a ' + asm + ' eleje)',
       '  build/title.bin     a cím (32 bájt, a BASIC PRINT sorban)',
+      '  build/features.inc  a lejátszóba kerülő részek (a dalhoz kellők)',
       '  build.sh            újrafordítás: ./build.sh -> build/' + name + '.cas',
       '',
       'A dal adatai a tvc-midi-player repó midi2tvc.py konverterével, ugyanezekkel',
@@ -1003,8 +1134,10 @@
       [name + '/' + midiName, midiBytes],
       [name + '/' + asm, enc(players.sources[asm])],
       [name + '/cas.inc', enc(players.sources['cas.inc'])],
+      [name + '/chips.inc', enc(players.sources['chips.inc'])],
       [name + '/build/song.bin', result.song],
       [name + '/build/title.bin', tb],
+      [name + '/build/features.inc', enc(featuresInc(result))],
       [name + '/build.sh', enc(build)],
       [name + '/README.txt', enc(readme)],
     ].concat(result.options.envelopes && typeof result.options.envelopes !== 'string'
@@ -1058,7 +1191,7 @@
 
   const api = {
     TVC_CLOCK, FRAME_RATE, CPU_CLOCK, POLY_VOICES, WAVES, WAVE_NAMES, DRUM_CHANNEL, DRUM_KIT, POLY_KIT, DEFAULTS,
-    compileEnvelopes, envelopeLevels, pyRound, parseMidi, collectNotes, pitchTable, polyFreqTable, polyMixTable, polyRates, noteFreq,
+    compileEnvelopes, envelopeLevels, envelopeFrames, featuresInc, featureNames, assembleCas, pyRound, parseMidi, collectNotes, pitchTable, polyFreqTable, polyMixTable, polyRates, noteFreq,
     convertMidi, buildCas, titleBytes, asciiName, selectRange, cliArgs, sourcePackage, zipFiles,
   };
   if (typeof module !== 'undefined' && module.exports) module.exports = api;

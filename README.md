@@ -86,6 +86,8 @@ Helyben a `web/index.html` közvetlenül megnyitható (`file://` is jó). A
 | `--curve`, `--min-volume`, `--max-volume` | MIDI erősség (velocity × CC7 × CC11) leképezése a 4 bites hangerőre |
 | `--loop` | a dal végtelenítve szól |
 | `--envelopes NÉV\|FÁJL` | többszólamú mód: hangszer-burkológörbék a midiplay formátumában: `midiplay` (a midiplay 2.4-es készlete), `tvc` (a TVC-s dav2play változat) vagy egy saját `envelope.txt` (lásd lent) |
+| `--bend` | többszólamú mód: hangmagasság-hajlítás (MIDI pitch bend, a tartomány RPN 0-ból, alap ±2 félhang), vibrato a modulációs kerékről (5,5 Hz, legfeljebb ±50 cent) és a burkológörbék hangmagassága (768 = egy oktáv). A frekvencia tickenként, egész számokkal (centtáblával) számolva, `B3+s lo hi` paranccsal |
+| `--fast-irq` | többszólamú mód: a mintakezelő a 0038h-ra kerül (kb. 4% CPU-val kevesebb) |
 | `--gain SZÁZALÉK` | globális hangerő (alap: 100; `max` = a legnagyobb, ami még nem torzít). Többszólamú módban a keverőtáblát szorozza; egyszólamúban a hangerőket, 15-ön megállva |
 | `--drum-volume SZÁZALÉK` | a szintetizált dob hangereje (alap: 100; a webes felületen 10–150%) |
 | `--loop-pause MP` | ismétlésnél ennyi másodperc szünet a dal vége után (a webes felületen 1–9 mp; alap: 0 = szünet nélkül folytatódik) |
@@ -151,6 +153,35 @@ ride > kolomp > perem > zárt cin). A dobütés erőssége halkítja a dobot.
   (a lejátszó tiltja), a b6/b7 a magnómotorokat vezérli (ezeket megőrzi).
 - Hangerő: `06h` b2–b5. A b0–b1 (videómód) és a b7 (nyomtató) változatlan
   marad. A lejátszó minden íráskor frissíti a ROM `0B12h` / `0B13h` tükrét is.
+
+## Moduláris lejátszók (`build/features.inc`)
+
+A lejátszók kapcsolható részei `IF FEAT_…` blokkok; a `.cas`-ba csak az
+kerül, amit a dal használ. A konverter a dalból dönti el, és a
+`build/features.inc`-be írja (a `build.sh` ezzel fordít):
+
+| lejátszó | rész | mikor kell |
+| --- | --- | --- |
+| többszólamú | `FEAT_DRUMS` | ha szól szintetizált dob (csúszás, `B8` esemény) |
+| többszólamú | `FEAT_WAVE_PULSE`, `_TRI`, `_SAW`, `_NOISE`, `_SINE` | ha a dal használja az adott hullámformát (a négyszög mindig) |
+| többszólamú | `FEAT_IRQ0038` | `--fast-irq`: a mintakezelő a 0038h-n (−10 ciklus mintánként; a 0038h–0088h területet a lejátszás alatt használja, a végén visszaállítja) |
+| többszólamú | `FEAT_FASTMIX` | `--poly-mix fast`: keverőtábla nélkül (a szólamtáblákban már a kimenet van, a kezelő csak összead: −11 ciklus mintánként; szólamonként 6 hangerőszint) |
+| többszólamú | `FEAT_WAVE_PULSE12` | ha a dal használja a keskeny (12,5%-os) impulzust (`--wave pulse12`) |
+| többszólamú | `FEAT_DECAY` | ha van lecsengés (`--decay`) vagy dob |
+| többszólamú | `FEAT_WAVECHG` | ha több hullámforma-hely van (`BB` esemény) |
+| többszólamú | `FEAT_LOOP` | `--loop` |
+| többszólamú | `FEAT_PITCH` | `--bend`, ha a dalban van hajlítás, vibrato vagy burkológörbe-hangmagasság (`B3+s lo hi` parancs) |
+| többszólamú | `FEAT_CARDS`, `FEAT_SN`, `FEAT_SID`, `FEAT_SAA`, `FEAT_OPL` | `--cards sn,sid,saa,opl`: hangkártya-felismerés és a kiválasztott chipek meghajtói (`chips.inc`) |
+| egycsatornás | `FEAT_DRUMS` | ha van dobkészlet |
+| egycsatornás | `FEAT_BG` | `--background` |
+
+A webes felület ugyanígy, a böngészőben fordít: a `build.sh`-éval azonos
+sjasmplus (v1.24.0, BSD licenc) WebAssemblyre fordítva (`web/sjasmplus/`,
+`web/assembler.js`; újraépítés Emscriptennel:
+`tools/build_sjasmplus_wasm.sh`). Egy fordítás néhány ms, és bájtra ugyanazt
+adja, mint a `build.sh`. Ha a fordító nem tölthető be, az előre fordított,
+minden részt tartalmazó lejátszó (`players.js`) a tartalék. A felület kiírja,
+mi került a lejátszóba és mekkora.
 
 ## A többszólamú lejátszó (`player_poly.asm`)
 
@@ -259,6 +290,41 @@ küldi (a fázis nem ugrik), a lejátszó változatlan. Az elengedés utáni
 lecsengéshez a hang tovább foglalja a szólamot, de csak akkor, ha az új
 hangoknak nem kell. A dal adata így nagyobb: a DuckTales 4,2 helyett 4,9–6,7
 KB (a beállításoktól függően).
+
+### Hangkártyák (`--cards`, `chips.inc`)
+
+A többszólamú lejátszóba hangkártya-meghajtók is kerülhetnek. Indításkor a
+program a bővítőhelyek RAM-területén (`0040h + 30h·hely`) megkeresi a kártya
+nevét; ha talál ilyet, a dal a kártyán szól, különben a beépített hangon. A
+kártyán ugyanazok az események és szólamállapotok futnak (hangerő,
+lecsengés, csúszás, hajlítás, burkológörbék), csak a mintánkénti DAC-keverés
+helyett tickenként a chip regisztereibe kerül a három szólam: a processzor
+szinte szabad. A zaj-hullámformájú szólam (dobok) a chip zajcsatornáján
+szól.
+
+| kártya | név a slot területén | chip, port |
+| --- | --- | --- |
+| GameCard | `JOY+SN` | SN76489 a hely `+0` portján |
+| Multichip Soundcard | `SndMx` | SN76489 `+0`, SAA1099 `+2` adat / `+3` cím, YM3812 (OPL2) `+4` regiszter / `+5` adat |
+| TVC256k++ | `256k++` | vSID: a kártya `E0h+n` regiszterei, `+0` sorszám, `+1` érték |
+
+A `--cards` lista: `sn` (SN76489), `sid` (vSID), `saa` (SAA1099), `opl`
+(OPL2). Ha több is szólhatna, a sorrend: vSID, OPL2, SAA1099, SN76489.
+
+Az SN76489 órajele 3 579 545 Hz, az osztó `N = órajel / (32 f)`, a
+lejátszó tickenként 24/16 bites osztással számolja a fázisnövekményből; a
+hangerő 2 dB-es csillapítás. A vSID (985 337 Hz) frekvenciája
+`F · sid_k / 65536`, a hangerő a kitartási szint (ha nő, a kapu újraindul). Az
+SAA1099 (8 MHz) `f = 15625 · 2^okt / (511 − N)`: a lejátszó úgy választja
+az oktávot, hogy az osztó a legpontosabb legyen; a zaj a 0. zajgenerátor. Az
+OPL2 (`f = Fnum · 49716 / 2^(20−blokk)`) a 0–2. FM-csatornát használja: a
+hangszín a hullámformából jön (négyszög: 1:2 arányú moduláció, páratlan
+felharmonikusok; fűrész: 1:1 visszacsatolással; háromszög, szinusz: majdnem
+tiszta szinusz), a hangerő a vivő csillapítása. A webes előnézet a kártya hangját is tudja
+(„Az előnézet a kártya hangjával”). Az emulátoros teszt GameCarddal,
+Multichip kártyával (SN76489, SAA1099, OPL2), TVC256k++ kártyával és kártya
+nélkül is lefut (hangmagasság, a kártya portjai, a végén a BASIC) (`CARDS=hely:kártya` a
+harnessben).
 
 ## Az egycsatornás lejátszó (`player.asm`)
 

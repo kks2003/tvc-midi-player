@@ -152,6 +152,11 @@ td.name .sub { display: block; font: 11.5px var(--font-mono); color: var(--muted
 .fields.compact .field label { font-size: 12px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .fields.compact .field input[type="number"], .fields.compact .field input[type="text"], .fields.compact .field select { padding: 4px 6px; font-size: 13px; }
 .fields.compact .check { font-size: 13px; }
+fieldset.opts { border: 1px solid var(--line); border-radius: var(--r); padding: 8px 10px 10px; margin: 0; display: grid; gap: 6px; }
+fieldset.opts legend { font-size: 12.5px; color: var(--muted); padding: 0 4px; }
+fieldset.opts .check { align-items: flex-start; font-size: 13px; }
+fieldset.opts .check input { margin-top: 2px; flex: none; }
+fieldset.opts .check.sub { margin-left: 22px; }
 .gainrow { display: flex; gap: 8px; min-width: 0; }
 .gainrow input { min-width: 0; flex: 1; }
 .gainrow.wide input { flex: 0 1 7em; }
@@ -306,7 +311,7 @@ footer code, .hint code { font-family: var(--font-mono); font-size: 12.5px; }
         <div class="fields" id="f-poly">
           <div class="field"><label for="polyVolume">Szólam hangereje</label><input id="polyVolume" type="number" min="1" max="15" value="9"></div>
           <div class="field"><label for="polyMix">Keverés</label>
-            <select id="polyMix"><option value="clean" selected>tiszta</option><option value="soft">hangos (telít)</option></select></div>
+            <select id="polyMix"><option value="clean" selected>tiszta</option><option value="soft">hangos (telít)</option><option value="fast">gyors (tiszta, keverőtábla nélkül)</option></select></div>
           <div class="field" id="kneeField" hidden><label for="polyKnee">Telítés térde</label><input id="polyKnee" type="number" min="1" max="15" value="10"></div>
           <div class="field wide"><label for="envSel">Hangszerek (burkológörbék)</label>
             <div class="gainrow"><select id="envSel">
@@ -316,9 +321,18 @@ footer code, .hint code { font-family: var(--font-mono); font-size: 12.5px; }
               <option value="file">saját envelope.txt…</option>
             </select><button id="envLoad" type="button" title="Másik envelope.txt betöltése" hidden>Másik fájl…</button><button id="envEdit" type="button" title="Burkológörbe-szerkesztő: hangszerenként szerkeszthető, meghallgatható, menthető">Szerkesztő…</button><input id="envFile" type="file" accept=".txt,text/plain" hidden></div></div>
           <p class="hint field wide" id="envHint" hidden>Hangszerenként felfutás, lecsengés, kitartás és elengedés, Varga István midiplay programjának hangszer-burkológörbéivel (GPL 2). A hangmagasság-változásokat és a torzítást a TVC nem használja; a dobok a saját dobkészlettel szólnak. A görbék tickenkénti hangerőváltásai miatt a dal adata nagyobb.</p>
-          <div class="field"><label for="wave">Hullámforma</label><select id="wave"><option value="square">négyszög</option><option value="pulse">impulzus (25%)</option><option value="triangle">háromszög</option><option value="saw">fűrész</option><option value="sine">szinusz</option></select></div>
+          <div class="field"><label for="wave">Hullámforma</label><select id="wave"><option value="square">négyszög</option><option value="pulse">impulzus (25%)</option><option value="triangle">háromszög</option><option value="saw">fűrész</option><option value="sine">szinusz</option><option value="pulse12">keskeny impulzus (12,5%)</option></select></div>
           <div class="field"><label for="polyDiv">Mintavétel</label>
             <select id="polyDiv"><option value="17">11 489 Hz · CPU 93%</option><option value="19" selected>10 280 Hz · CPU 83%</option><option value="21">9 301 Hz · CPU 75%</option><option value="23">8 492 Hz · CPU 69%</option><option value="28">6 975 Hz · CPU 56%</option></select></div>
+          <fieldset class="field wide opts" id="polyOpts"><legend>Mi kerüljön a programba?</legend>
+            <label class="check"><input id="bend" type="checkbox"> Hangmagasság-hajlítás és vibrato: a MIDI pitch bend (a hajlítási tartománnyal), a modulációs kerék vibratója és a hangszer-burkológörbék hangmagassága. Új lejátszó-parancs, csak akkor kerül bele, ha a dal használja.</label>
+            <label class="check"><input id="cardSn" type="checkbox"> Hangkártya: SN76489 (GameCard, Multichip). Ha a program indításkor ilyen kártyát talál, azon szól (3 hang + zaj), és a processzor szinte szabad; ha nem, a beépített hangon. </label>
+            <label class="check"><input id="cardSid" type="checkbox"> Hangkártya: a TVC256k++ vSID-je (C64 SID-emuláció: háromszög, fűrész, impulzus, zaj).</label>
+            <label class="check"><input id="cardOpl" type="checkbox"> Hangkártya: YM3812 (OPL2, Multichip): FM-hangszín a hullámformából (négyszög-, fűrész-, szinuszszerű).</label>
+            <label class="check"><input id="cardSaa" type="checkbox"> Hangkártya: SAA1099 (Multichip): négyszög és zaj. Ha több kártya vagy chip van, a sorrend: vSID, OPL2, SAA1099, SN76489.</label>
+            <label class="check sub"><input id="prevCard" type="checkbox" checked> Az előnézet a kártya hangjával szóljon (kártya nélkül a beépített hangon szól).</label>
+            <label class="check"><input id="fastIrq" type="checkbox"> Gyors megszakítás: a mintakezelő a 0038h-n (−10 ciklus mintánként, kb. 4% CPU). A 0038h–0088h területet (a 0. kártyahely munkaterületét is) a lejátszás alatt használja, a végén visszaállítja.</label>
+          </fieldset>
           <p class="hint field wide">Tiszta keverésnél a három szólam együtt sem vezérli túl a 4 bites kimenetet; a hangos keverés erősebb, de a csúcsokat összenyomja (szinusznál, háromszögnél torzítás). A hullámforma csatornánként is megadható a Csatornák táblázatban. Kisebb mintavételnél több processzoridő marad szabadon, de tompább a hang.</p>
         </div>
         <div class="fields" id="f-arp" hidden>
@@ -367,6 +381,7 @@ footer code, .hint code { font-family: var(--font-mono); font-size: 12.5px; }
         <h2 id="h-res">Eredmény</h2>
         <div class="stats" id="stats"></div>
         <div class="mem" id="mem"></div>
+        <p class="hint" id="featInfo"></p>
         <ul class="warns" id="warns"></ul>
       </section>
 
@@ -494,11 +509,18 @@ footer code, .hint code { font-family: var(--font-mono); font-size: 12.5px; }
 <script src="players.js"></script>
 <script src="envelopes.js"></script>
 <script src="envedit.js"></script>
+<script src="assembler.js"></script>
 <script src="preview.js"></script>
 <script>
 (function () {
   'use strict';
   const M = window.Midi2Tvc, PV = window.TvcPreview, PLAYERS = window.TVC_PLAYERS;
+  // a böngészős sjasmplus (web/sjasmplus): a lejátszó minden dalhoz a kellő
+  // részekkel fordul; ha nem tölthető be, az előre fordított, teljes lejátszó
+  let asmRun = null, asmError = null, casGen = 0, casExact = false;
+  const asmReady = window.TvcAssembler.loadAssembler('sjasmplus/')
+    .then((run) => { asmRun = run; return run; })
+    .catch((e) => { asmError = e; return null; });
   const SAMPLE_B64 = 'TVRoZAAAAAYAAQAEAeBNVHJrAAAAEwD/UQMHoSCeAP9RAwtxsAD/LwBNVHJrAAAATACQPGSDOIA8ACiQPmSDOIA+ACiQQGSDOIBAACiQQWSDOIBBACiQQ2SDOIBDACiQRWSDOIBFACiQR2SDOIBHACiQSGSDOIBIAAD/LwBNVHJrAAAAeZ4AkTxaAJFAWgCRQ1oAkSRQhwSBPAAAgUAAAIFDADyRPFoAkUFaAJFFWocEgTwAAIFBAACBRQA8kTtaAJE+WgCRQVoAkUNahwSBOwAAgT4AAIFBAACBQwA8kTxaAJFAWgCRQ1qHBIE8AACBQAAAgUMAPIEkAAD/LwBNVHJrAAAAbqVAmSRueIkkAHiZKkZ4iSoAeJkmbniJJgB4mSpGeIkqAHiZJG54iSQAeJkqRniJKgB4mSZueIkmAHiZKkZ4iSoAeJkkbniJJAB4mSpGeIkqAHiZJm54iSYAeJkqRniJKgB4mTF/g2CJMQAA/y8A';
   const $ = (id) => document.getElementById(id);
   const NOTE_NAMES = ['C', 'C♯', 'D', 'D♯', 'E', 'F', 'F♯', 'G', 'G♯', 'A', 'A♯', 'H'];
@@ -627,7 +649,7 @@ footer code, .hint code { font-family: var(--font-mono); font-size: 12.5px; }
         const sel = document.createElement('select');
         sel.id = 'chw-' + c.ch;
         sel.setAttribute('aria-label', c.ch + '. csatorna hullámformája');
-        sel.innerHTML = '<option value="">alap</option><option value="square">négyszög</option><option value="pulse">impulzus</option><option value="triangle">háromszög</option><option value="saw">fűrész</option><option value="sine">szinusz</option>';
+        sel.innerHTML = '<option value="">alap</option><option value="square">négyszög</option><option value="pulse">impulzus</option><option value="triangle">háromszög</option><option value="saw">fűrész</option><option value="sine">szinusz</option><option value="pulse12">keskeny impulzus</option>';
         if (channelWave[c.ch]) sel.value = channelWave[c.ch];
         sel.addEventListener('change', () => {
           if (sel.value) channelWave[c.ch] = sel.value; else delete channelWave[c.ch];
@@ -659,7 +681,7 @@ footer code, .hint code { font-family: var(--font-mono); font-size: 12.5px; }
       loopPause: $('loop').checked && $('loopPauseOn').checked ? Math.max(1, Math.min(9, Math.round(num('loopPause')) || 1)) : 0,
       background: mode !== 'poly' && $('background').checked,
       from: rangeFrom, to: rangeTo, trim: $('trim').checked,
-      wave: $('wave').value, polyDiv: num('polyDiv'), envelopes: envOption(),
+      wave: $('wave').value, polyDiv: num('polyDiv'), fastIrq: $('fastIrq').checked, bend: $('bend').checked, cards: [$('cardSn').checked && 'sn', $('cardSid').checked && 'sid', $('cardSaa').checked && 'saa', $('cardOpl').checked && 'opl'].filter(Boolean), envelopes: envOption(),
       channelWave: mode === 'poly' ? Object.fromEntries(Object.entries(channelWave).filter(([ch]) => channelSel.has(+ch))) : null,
     };
   }
@@ -731,6 +753,16 @@ footer code, .hint code { font-family: var(--font-mono); font-size: 12.5px; }
     },
   });
   $('envEdit').addEventListener('click', () => envEditor.open());
+  // a mintavétel-választó CPU-feliratai (a gyors megszakítással kevesebb)
+  function updateDivLabels() {
+    for (const opt of $('polyDiv').options) {
+      const div = +opt.value, hz = 195312.5 / div;
+      const cpu = (253 - ($('fastIrq').checked ? 10 : 0) - ($('polyMix').value === 'fast' ? 11 : 0)) * hz / 3125000;
+      opt.textContent = Math.round(hz).toLocaleString('hu-HU') + ' Hz · CPU ' + Math.round(100 * cpu) + '%';
+    }
+  }
+  $('fastIrq').addEventListener('change', updateDivLabels);
+  $('polyMix').addEventListener('change', updateDivLabels);
   function showModeFields() {
     const mode = document.querySelector('input[name="mode"]:checked').value;
     for (const m of ['poly', 'arp', 'mono']) $('f-' + m).hidden = m !== mode;
@@ -779,9 +811,14 @@ footer code, .hint code { font-family: var(--font-mono); font-size: 12.5px; }
       return;
     }
     const player = o.mode === 'poly' ? PLAYERS.poly : PLAYERS.mono;
-    casBytes = M.buildCas(player, result.song, $('title').value || fileBase);
-    const newSim = PV.simulate(result.song, o.mode, 44100);
-    const newFull = full === result ? newSim : PV.simulate(full.song, o.mode, 44100);
+    casBytes = M.buildCas(player, result.song, $('title').value || fileBase);   // tartalék, amíg a fordító dolgozik
+    casExact = false;
+    const gen = ++casGen;
+    // az előnézet kártyája: amelyik a gépen szólna (a vSID előbb)
+    const pcard = o.mode !== 'poly' || !$('prevCard').checked ? undefined
+      : ['sid', 'opl', 'saa', 'sn'].find((c) => o.cards.includes(c));
+    const newSim = PV.simulate(result.song, o.mode, 44100, pcard);
+    const newFull = full === result ? newSim : PV.simulate(full.song, o.mode, 44100, pcard);
     if (wasPlaying) stop();
     sim = newSim; fullSim = newFull; fullResult = full;
     // a teljes dalon ugyanoda (tempóváltásnál arányosan), a rész határai közé
@@ -796,6 +833,7 @@ footer code, .hint code { font-family: var(--font-mono); font-size: 12.5px; }
     drawRoll();
     setOutputsEnabled(true);
     updateEmuLink();
+    compileCas(gen, warns);
     store.set('opts', JSON.stringify(Object.assign({}, o, { channels: undefined, envelopes: typeof o.envelopes === 'string' ? o.envelopes : undefined })));
   }
   // a globális hangerő: a torzítás nélküli legnagyobb érték, és ha afölött
@@ -827,6 +865,30 @@ footer code, .hint code { font-family: var(--font-mono); font-size: 12.5px; }
     $('gain').value = result.gainMax;
     regenerate();
   });
+  // a lejátszó fordítása a dalhoz kellő részekkel (néhány ms); a régebbi kérés eldobva
+  async function compileCas(gen, warns) {
+    const run = asmRun || await asmReady;
+    if (gen !== casGen || !result) return;
+    if (!run) {
+      $('featInfo').textContent = 'A böngészős fordító nem tölthető be' + (asmError ? ' (' + asmError.message + ')' : '') +
+        ': a .cas az előre fordított, minden részt tartalmazó lejátszóval készül.';
+      return;
+    }
+    try {
+      const r = await M.assembleCas(run, PLAYERS, result, $('title').value || fileBase);
+      if (gen !== casGen) return;
+      casBytes = r.cas;
+      casExact = true;
+      const player = { code: Array.from(r.cas.subarray(144, 144 + r.codeLen)) };
+      renderStats(player, warns);
+      renderBasic(player);
+      updateEmuLink();
+    } catch (e) {
+      if (gen === casGen) $('featInfo').textContent = 'A lejátszó fordítása nem sikerült (' + e.message + '); a .cas az előre fordított, teljes lejátszóval készül.';
+    }
+  }
+  const FEAT_LABELS = { FEAT_DRUMS: 'dobok', FEAT_BG: 'háttér-mód', FEAT_WAVE_PULSE: 'impulzus', FEAT_WAVE_TRI: 'háromszög',
+    FEAT_WAVE_SAW: 'fűrész', FEAT_WAVE_NOISE: 'zaj', FEAT_WAVE_SINE: 'szinusz', FEAT_IRQ0038: 'gyors megszakítás', FEAT_PITCH: 'hajlítás', FEAT_CARDS: 'kártyafelismerés', FEAT_SN: 'SN76489', FEAT_SID: 'vSID', FEAT_SAA: 'SAA1099', FEAT_OPL: 'OPL2', FEAT_FASTMIX: 'gyors keverés', FEAT_WAVE_PULSE12: 'keskeny impulzus', FEAT_DECAY: 'lecsengés', FEAT_WAVECHG: 'hullámforma-váltás', FEAT_LOOP: 'ismétlés' };
   function renderStats(player, warns) {
     const r = result, s = r.stats;
     const secs = r.total / r.rate;
@@ -841,6 +903,13 @@ footer code, .hint code { font-family: var(--font-mono); font-size: 12.5px; }
     items.push([s.drums, 'dobütés']);
     $('stats').innerHTML = items.map(([b, l]) => '<div class="stat"><b></b><span></span></div>').join('');
     [...$('stats').children].forEach((el, i) => { el.children[0].textContent = items[i][0]; el.children[1].textContent = items[i][1]; });
+    // a lejátszóba kerülő részek
+    const on = r.features.map((n) => FEAT_LABELS[n] || n);
+    const all = M.featureNames(r.mode).length;
+    $('featInfo').textContent = casExact
+      ? 'A lejátszó a dalhoz fordítva (' + player.code.length.toLocaleString('hu-HU') + ' bájt a BASIC-kel): ' +
+        (on.length ? 'alap + ' + on.join(', ') : 'csak az alap') + '; ' + (all - r.features.length) + ' rész kimaradt, mert ez a dal nem használja.'
+      : 'A lejátszó fordítása folyamatban…';
     // memória: a program 19EFh-tól; a 32k-s gépen 7FFFh a felső határ
     const start = 0x19EF, codeEnd = start + player.code.length, end = codeEnd + r.song.length;
     // poly: a hullámtáblák a program után, lapra igazítva (induláskor készülnek)
@@ -1323,7 +1392,7 @@ footer code, .hint code { font-family: var(--font-mono); font-size: 12.5px; }
   $('loopPauseOn').addEventListener('change', syncPause);
   syncPause();
   for (const id of ['polyVolume', 'polyKnee', 'polyMix', 'maxNotes', 'arpSpeed', 'arpBass', 'prio', 'drums', 'transpose', 'decay',
-    'decayFloor', 'speed', 'title', 'tuning', 'curve', 'minVolume', 'maxVolume', 'gain', 'drumVolume', 'loop', 'loopPauseOn', 'loopPause', 'background', 'wave', 'polyDiv', 'trim']) {
+    'decayFloor', 'speed', 'title', 'tuning', 'curve', 'minVolume', 'maxVolume', 'gain', 'drumVolume', 'fastIrq', 'bend', 'cardSn', 'cardSid', 'cardSaa', 'cardOpl', 'prevCard', 'loop', 'loopPauseOn', 'loopPause', 'background', 'wave', 'polyDiv', 'trim']) {
     $(id).addEventListener(($(id).type === 'checkbox' || $(id).tagName === 'SELECT') ? 'change' : 'input', regenerate);
   }
   $('fileInput').addEventListener('change', (e) => {
@@ -1369,10 +1438,13 @@ footer code, .hint code { font-family: var(--font-mono); font-size: 12.5px; }
         if (el.type === 'checkbox') el.checked = !!v; else if (v !== undefined) el.value = v;
       }
       if (o.loopPause > 0) { $('loopPauseOn').checked = true; $('loopPause').value = o.loopPause; }
+      if (Array.isArray(o.cards)) { $('cardSn').checked = o.cards.includes('sn'); $('cardSid').checked = o.cards.includes('sid');
+        $('cardSaa').checked = o.cards.includes('saa'); $('cardOpl').checked = o.cards.includes('opl'); }
       if (o.envelopes === 'midiplay' || o.envelopes === 'tvc') { $('envSel').value = o.envelopes; $('envHint').hidden = false; }
     }
   } catch (e) { /* alapbeállítások */ }
   syncPause();   // a visszaállított „Végtelenítve” szerint
+  updateDivLabels();
   syncDrums();
   window.addEventListener('pageshow', syncPause);   // a böngésző is visszatöltheti az űrlapot
   showModeFields();

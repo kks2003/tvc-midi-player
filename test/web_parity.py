@@ -15,7 +15,7 @@ a csomag build.sh-ja és a README-ben megadott parancssor is ugyanezt a
 
     python3 test/web_parity.py [további.mid ...]
 """
-import json, os, shlex, shutil, subprocess, sys, tempfile, zipfile
+import json, math, os, shlex, shutil, subprocess, sys, tempfile, zipfile
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 REPO = os.path.dirname(HERE)
@@ -46,6 +46,18 @@ CASES = [
     (["--loop", "--loop-pause", "3"], {"loop": True, "loopPause": 3}),
     (["--drum-volume", "60"], {"drumVolume": 60}),
     (["--gain", "150"], {"gain": 150}),
+    (["--mode", "poly", "--bend"], {"mode": "poly", "bend": True}),
+    (["--mode", "poly", "--cards", "sn", "--bend", "--fast-irq"], {"mode": "poly", "cards": ["sn"], "bend": True, "fastIrq": True}),
+    (["--mode", "poly", "--cards", "sn,sid"], {"mode": "poly", "cards": ["sn", "sid"]}),
+    (["--mode", "poly", "--cards", "saa"], {"mode": "poly", "cards": ["saa"]}),
+    (["--mode", "poly", "--cards", "opl,sn"], {"mode": "poly", "cards": ["sn", "opl"]}),
+    (["--mode", "poly", "--cards", "sn,sid,saa,opl", "--fast-irq"], {"mode": "poly", "cards": ["sn", "sid", "saa", "opl"], "fastIrq": True}),
+    (["--mode", "poly", "--bend", "--envelopes", "tvc", "--from", "1", "--to", "6"],
+     {"mode": "poly", "bend": True, "envelopes": "tvc", "from": 1, "to": 6}),
+    (["--mode", "poly", "--fast-irq", "--wave", "sine"], {"mode": "poly", "fastIrq": True, "wave": "sine"}),
+    (["--mode", "poly", "--poly-mix", "fast"], {"mode": "poly", "polyMix": "fast"}),
+    (["--mode", "poly", "--wave", "pulse12", "--cards", "sid,opl"], {"mode": "poly", "wave": "pulse12", "cards": ["sid", "opl"]}),
+    (["--mode", "poly", "--poly-mix", "fast", "--fast-irq", "--gain", "max"], {"mode": "poly", "polyMix": "fast", "fastIrq": True, "gain": "max"}),
     (["--mode", "poly", "--envelopes", "midiplay"], {"mode": "poly", "envelopes": "midiplay"}),
     (["--mode", "poly", "--envelopes", "tvc", "--loop", "--decay", "3", "--gain", "max"],
      {"mode": "poly", "envelopes": "tvc", "loop": True, "decay": 3, "gain": "max"}),
@@ -73,14 +85,45 @@ const M = require(process.argv[2] + '/web/midi2tvc.js');
 const P = require(process.argv[2] + '/web/players.js');
 require(process.argv[2] + '/web/envelopes.js');
 const job = JSON.parse(fs.readFileSync(process.argv[3], 'utf8'));
-const r = M.convertMidi(new Uint8Array(fs.readFileSync(job.midi)), job.opts);
-const cas = M.buildCas(r.mode === 'poly' ? P.poly : P.mono, r.song, job.title);
-fs.writeFileSync(job.out, cas);
-const name = 'par';
-const files = M.sourcePackage({ players: P, result: r, midiBytes: new Uint8Array(fs.readFileSync(job.midi)),
-  midiName: name + '.mid', name, title: job.title, casBytes: cas });
-fs.writeFileSync(job.zip, M.zipFiles(files, /\.sh$/));
+const A = require(process.argv[2] + '/web/assembler.js');
+const SjasmPlus = require(process.argv[2] + '/web/sjasmplus/sjasmplus.js');
+(async () => {
+  const r = M.convertMidi(new Uint8Array(fs.readFileSync(job.midi)), job.opts);
+  // a böngészős sjasmplus a dalhoz kellő részekkel fordít; mellette a tartalék
+  // (előre fordított, minden funkcióval) is összeáll
+  const run = await A.createAssembler(SjasmPlus, fs.readFileSync(process.argv[2] + '/web/sjasmplus/sjasmplus.wasm'));
+  const cas = (await M.assembleCas(run, P, r, job.title)).cas;
+  fs.writeFileSync(job.out, cas);
+  M.buildCas(r.mode === 'poly' ? P.poly : P.mono, r.song, job.title);
+  const name = 'par';
+  const files = M.sourcePackage({ players: P, result: r, midiBytes: new Uint8Array(fs.readFileSync(job.midi)),
+    midiName: name + '.mid', name, title: job.title, casBytes: cas });
+  fs.writeFileSync(job.zip, M.zipFiles(files, /\.sh$/));
+})();
 """
+
+
+def bend_midi():
+    """próbadal: pitch bend (RPN 0 tartomány 12 félhang), modulációs kerék"""
+    import struct
+    def vlq(n):
+        b = [n & 0x7F]
+        n >>= 7
+        while n:
+            b.append(0x80 | (n & 0x7F))
+            n >>= 7
+        return bytes(reversed(b))
+    ev = [(0, bytes((0xB0, 101, 0))), (0, bytes((0xB0, 100, 0))), (0, bytes((0xB0, 6, 12))),
+          (0, bytes((0xC0, 80))), (0, bytes((0x90, 60, 100))), (0, bytes((0x91, 48, 90)))]
+    for k in range(1, 40):
+        v = 8192 + int(8000 * math.sin(k / 6.0))
+        ev.append((k * 24, bytes((0xE0, v & 0x7F, v >> 7))))
+    ev += [(960, bytes((0xB1, 1, 127))), (1900, bytes((0x80, 60, 0))), (1920, bytes((0x90, 64, 100))),
+           (2880, bytes((0xE0, 0, 64))), (3840, bytes((0x80, 64, 0))), (3840, bytes((0x81, 48, 0)))]
+    trk = b"".join(vlq(t - p) + e for (t, e), p in zip(ev, [0] + [x[0] for x in ev])) + b"\x00\xff\x2f\x00"
+    path = os.path.join(tempfile.mkdtemp(prefix="tvcbend_"), "bend.mid")
+    open(path, "wb").write(b"MThd" + struct.pack(">IHHH", 6, 0, 1, 480) + b"MTrk" + struct.pack(">I", len(trk)) + trk)
+    return path
 
 
 def main():
@@ -88,6 +131,8 @@ def main():
     duck = os.path.join(REPO, "examples", "ducktales", "ducktales.mid")
     if not sys.argv[1:] and os.path.exists(duck):
         mids.append(duck)
+    if not sys.argv[1:]:
+        mids.append(bend_midi())
     subprocess.check_call([sys.executable, os.path.join(REPO, "tools", "export_players.py")],
                           stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
     tmp = tempfile.mkdtemp(prefix="tvcweb_")
@@ -96,6 +141,9 @@ def main():
     bad = n = 0
     for mid in mids:
         for args, opts in CASES:
+            # a hajlítás próbadala rövid: csak az alap és a --bend esetek
+            if mid.endswith("bend.mid") and args and "--bend" not in args and args != ["--mode", "poly"]:
+                continue
             name = "par"
             src = os.path.join(tmp, name + ".mid")
             shutil.copy(mid, src)

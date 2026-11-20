@@ -329,6 +329,97 @@ def main():
         d4 = struct.unpack("<%dh" % w.getnframes(), w.readframes(w.getnframes()))
     check("poly: ESC: leáll a hang", max(d4[-rate:]) - min(d4[-rate:]) < 200)
 
+    # 3b. --fast-irq: a mintakezelő a 0038h-n; a 0038h..0088h terület visszaáll
+    def poly_run(extra, name, secs, dump=None):
+        subprocess.check_call([os.path.join(REPO, "build.sh"), mid, "--mode", "poly", "--decay", "4"] + extra,
+                              stdout=subprocess.DEVNULL)
+        shutil.copy(os.path.join(REPO, "build", "teszt.cas"), "/files/%s.cas" % name)
+        w_ = os.path.join(out, name + ".wav")
+        sc = os.path.join(out, name + ".ppm")
+        env_ = dict(os.environ, SCREEN=sc)
+        if dump:
+            env_["DUMP"] = dump
+        r_ = subprocess.check_output([exe, args.roms, name, str(secs), w_, os.path.join(out, name + "_ports.txt")],
+                                     env=env_).decode()
+        with wave.open(w_) as w:
+            d_ = struct.unpack("<%dh" % w.getnframes(), w.readframes(w.getnframes()))
+        return r_, d_, sc
+    # (ugyanazzal a fájlnévvel: a FILE: eszköz a 0070h-tól tartja a nevét)
+    rb, _, _ = poly_run([], "pirq", 16, "0038,51")
+    rf, df, sf = poly_run(["--fast-irq"], "pirq", 16, "0038,51")
+    check("fast-irq: a dal végén a BASIC hiba nélkül folytatja", basic_ok(sf))
+    st = next((i for i in range(len(df)) if abs(df[i] - df[0]) > 200), None)
+    check("fast-irq: szól a hang", st is not None)
+    if st is not None:
+        cents = []
+        for k, n in ((0.1, 60), (0.6, 62), (3.6, 72)):
+            f = zero_cross_freq(df[st + int(k * rate): st + int((k + 0.3) * rate)], rate)
+            cents.append(1200 * math.log2(f / midi2tvc.note_freq(n, 440.0)) if f else 999)
+        check("fast-irq: a hangmagasság pontos (±5 cent)", all(abs(c) < 5 for c in cents),
+              ", ".join("%.1f" % c for c in cents))
+    db = rb.split("dump 0038:")[1].split("\n")[0].strip()
+    dfa = rf.split("dump 0038:")[1].split("\n")[0].strip()
+    check("fast-irq: a 0038h..0088h terület a végén ugyanaz, mint nélküle", db == dfa,
+          "" if db == dfa else "eltér")
+    check("fast-irq: a rendszer IT-belépése visszaállt", isr_restored(rf))
+
+    # 3b2. gyors keverés (--poly-mix fast, FEAT_FASTMIX), a gyors megszakítással is
+    for extra, label in ((["--poly-mix", "fast"], "gyors keverés"),
+                         (["--poly-mix", "fast", "--fast-irq"], "gyors keverés + fast-irq")):
+        rm, dm, sm = poly_run(extra, "fmix", 14)
+        check("%s: a dal végén a BASIC folytatja, az IT-belépő visszaállt" % label,
+              basic_ok(sm) and isr_restored(rm))
+        st = next((i for i in range(len(dm)) if abs(dm[i] - dm[0]) > 200), None)
+        check("%s: szól a hang" % label, st is not None)
+        if st is not None:
+            cents = []
+            for k, n in ((0.1, 60), (0.6, 62), (3.6, 72)):
+                f = zero_cross_freq(dm[st + int(k * rate): st + int((k + 0.3) * rate)], rate)
+                cents.append(1200 * math.log2(f / midi2tvc.note_freq(n, 440.0)) if f else 999)
+            check("%s: a hangmagasság pontos (±5 cent)" % label, all(abs(c) < 5 for c in cents),
+                  ", ".join("%.1f" % c for c in cents))
+
+    # 3c. hangkártyák: GameCard (2. hely), Multichip (3. hely), TVC256k++, és kártya nélkül;
+    # a Multichip mindhárom chipjével (SAA1099, OPL2 külön fordítással; mind együtt: OPL2)
+    built = None
+    for bcards, cards, label, port in (
+            ("sn,sid", "2:3", "SN76489, GameCard", "30"), ("sn,sid", "3:4", "SN76489, Multichip", "40"),
+            ("sn,sid", "0:5", "vSID, TVC256k++", "11"), ("sn,sid", "", "kártya nélkül", None),
+            ("saa", "3:4", "SAA1099, Multichip", "43"), ("opl", "3:4", "OPL2, Multichip", "45"),
+            ("sn,sid,saa,opl", "3:4", "mind, Multichip (OPL2 szól)", "45")):
+        if built != bcards:
+            subprocess.check_call([os.path.join(REPO, "build.sh"), mid, "--mode", "poly", "--decay", "4",
+                                   "--cards", bcards], stdout=subprocess.DEVNULL)
+            shutil.copy(os.path.join(REPO, "build", "teszt.cas"), "/files/sncard.cas")
+            built = bcards
+        w_ = os.path.join(out, "sncard.wav")
+        sc = os.path.join(out, "sncard.ppm")
+        lg = os.path.join(out, "sncard_ports.txt")
+        r_ = subprocess.check_output([exe, args.roms, "sncard", "14", w_, lg],
+                                     env=dict(os.environ, SCREEN=sc, CARDS=cards, ALLPORTS="1")).decode()
+        with wave.open(w_) as w:
+            d_ = struct.unpack("<%dh" % w.getnframes(), w.readframes(w.getnframes()))
+        st = next((i for i in range(len(d_)) if abs(d_[i] - d_[0]) > 200), None)
+        check("%s: szól a hang" % label, st is not None)
+        if st is not None:
+            cents = []
+            for k, n in ((0.1, 60), (3.6, 72)):
+                f = zero_cross_freq(d_[st + int(k * rate): st + int((k + 0.3) * rate)], rate)
+                cents.append(1200 * math.log2(f / midi2tvc.note_freq(n, 440.0)) if f else 999)
+            check("%s: a hangmagasság (C4, C5: ±10 cent)" % label, all(abs(c) < 10 for c in cents),
+                  ", ".join("%.1f" % c for c in cents))
+        writes = {}
+        for line in open(lg):
+            p_ = line.split()
+            if len(p_) >= 3:
+                writes[p_[2].lower()] = writes.get(p_[2].lower(), 0) + 1
+        if port:
+            check("%s: a kártya portjára ír, a beépített hang csendben" % label,
+                  writes.get(port, 0) > 1000 and writes.get("06", 0) < 20,
+                  "%sh: %d, 06h: %d" % (port, writes.get(port, 0), writes.get("06", 0)))
+        check("%s: a dal végén a BASIC folytatja, az IT-belépő visszaállt" % label,
+              basic_ok(sc) and isr_restored(r_))
+
     # 4. háttér-mód (--background): a zene szól, a BASIC közben dolgozik
     subprocess.check_call([os.path.join(REPO, "build.sh"), mid, "--background", "--loop", "--decay", "4"])
     shutil.copy(os.path.join(REPO, "build", "teszt.cas"), "/files/bg.cas")

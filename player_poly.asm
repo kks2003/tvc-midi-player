@@ -55,7 +55,7 @@ LEVELS      equ 8                   ; hangerőszint hullámformánként
 MAX_SLOTS   equ 5
 
 ; ---- dal adatformátum (midi2tvc.py --mode poly) ---------------------------
-; +0   flags: b0 = ismétlés
+; +0   flags: b0 = ismétlés, b1 = gyors keverés (FEAT_FASTMIX)
 ; +1   lecsengés (tick / hangerőlépés, 0 = nincs)
 ; +2   lecsengés alsó szintje
 ; +3   a mintaóra osztója (mintafrekvencia = 195312,5 / osztó)
@@ -63,13 +63,16 @@ MAX_SLOTS   equ 5
 ; +6   minta / tick
 ; +7   a hullámforma-helyek száma (1..5)
 ; +8   5 bájt: helyenként a hullámforma (0 négyszög, 1 impulzus 25%,
-;      2 háromszög, 3 fűrész, 4 zaj, 5 szinusz)
-; +13  3 bájt tartalék
-; +16  64 bájt keverőtábla: összeg (0..45) -> kimenet (0..15)
+;      2 háromszög, 3 fűrész, 4 zaj, 5 szinusz, 6 impulzus 12,5%)
+; +13  a szólamok legnagyobb hangereje (vmax; a hangkártyák skálázásához)
+; +14  2 bájt tartalék
+; +16  64 bájt keverőtábla: összeg (0..45) -> kimenet (0..15); gyors keverésnél
+;      (flags b1, FEAT_FASTMIX) szólamonként: érték (0..15) -> kimenet (0..5)
 ; +80  128 x dw fázisnövekmény (MIDI hangjegy -> f * 65536 / mintafrekvencia)
 ; +336 eseménylista:
 ;   80+16*s+h  n        hang a szólamon (s = 0..2, h = hangerő 0..15), n = hangjegy
 ;   B0+s                a szólam elhallgat
+;   B3+s lo hi          a szólam fázisnövekménye (hajlítás, vibrato; FEAT_PITCH)
 ;   B8+s n vd lo hi     csúszó / lecsengő hang (dob): n = kezdőhang, v/d hangerő
 ;                       és lecsengés (0-ig), lo hi = fázisnövekmény-változás / tick
 ;   BB+s h              a szólam hullámforma-helye (h = 0..4)
@@ -84,6 +87,7 @@ SONG_LOOP   equ song+4
 SONG_TICKN  equ song+6
 SONG_NSLOTS equ song+7
 SONG_WAVES  equ song+8
+SONG_VMAX   equ song+13
 SONG_MIX    equ song+16
 SONG_FREQ   equ song+80
 SONG_EVENTS equ song+336
@@ -98,6 +102,7 @@ VS_FLOOR    equ 7
 VS_SLOT     equ 8                   ; hullámforma-hely
 VS_SIZE     equ 9
 
+            include "build/features.inc"   ; a dalhoz kellő részek (midi2tvc)
             include "cas.inc"
 
 ; ---- belépés ----------------------------------------------------------------
@@ -116,6 +121,12 @@ start:
             push af
             ex af, af'
             di
+            IF FEAT_CARDS
+            call detect_card        ; hangkártya: azon szól (chips.inc)
+            ld a, (card_type)
+            or a
+            jp nz, chip_main
+            ENDIF
             call build_tables
             jr nc, .mem_ok
             ld hl, -1               ; nincs elég memória a tábláknak
@@ -126,7 +137,9 @@ start:
             and 0C3h
             ld c, a
             ld hl, SONG_MIX
-            ld de, mixtab
+            ld a, (mix_page)        ; a keverőtábla lapja (build_tables)
+            ld d, a
+            ld e, 0
             ld b, 64
 .mt:        ld a, (hl)
             add a, a
@@ -136,6 +149,37 @@ start:
             inc hl
             inc de
             djnz .mt
+            IF FEAT_FASTMIX
+            ; gyors keverés: a szólamtáblákba közvetlenül a kimenet kerül
+            ; (keverőtábla[érték] << 2, legfeljebb 5 << 2), a kezelő csak összead
+            ld a, (tab_base)
+            inc a                   ; a 0. lap a csend: marad 0
+            ld h, a
+            ld l, 0
+            ld a, (SONG_NSLOTS)
+            add a, a
+            add a, a
+            add a, a
+            ld b, a                 ; B = lapok
+.fp:        ld a, (hl)
+            ld e, a
+            ld d, 0
+            push hl
+            ld hl, SONG_MIX
+            add hl, de
+            ld a, (hl)
+            pop hl
+            cp 6
+            jr c, .f5
+            ld a, 5
+.f5:        add a, a
+            add a, a
+            ld (hl), a
+            inc l
+            jr nz, .fp
+            inc h
+            djnz .fp
+            ENDIF
             ld a, (V_PORT03)        ; billentyűzet: a 7. sor marad kiválasztva
             and 0F0h
             or 07h
@@ -144,6 +188,16 @@ start:
             out (P_CRTCREG), a      ; magnókezelésnél: 10. regiszter = 23h)
             ld a, 23h
             out (P_CRTCDAT), a
+            IF FEAT_IRQ0038
+            ld hl, IRQVEC           ; a 0038h-tól a terület mentése, és oda
+            ld de, saved_irq        ; a kezelő (ugrás nélkül: -10 ciklus/minta)
+            ld bc, IRQ_LEN
+            ldir
+            ld hl, irq_code
+            ld de, IRQVEC
+            ld bc, IRQ_LEN
+            ldir
+            ELSE
             ld hl, IRQVEC           ; a megszakítás a mi kezelőnkre ugrik
             ld de, saved_irq
             ld bc, 3
@@ -152,8 +206,17 @@ start:
             ld (IRQVEC), a
             ld hl, it_handler
             ld (IRQVEC + 1), hl
+            ENDIF
             ld a, (SONG_TICKN)
             ld (tickn + 1), a
+            IF FEAT_FASTMIX
+            ld a, (V_PORT06)        ; a kezelő bemásolása után (FEAT_IRQ0038)
+            and 0C3h
+            ld (fmc + 1), a
+            ELSE
+            ld a, (mix_page)        ; a kezelő bemásolása után (FEAT_IRQ0038)
+            ld (mixpg + 1), a
+            ENDIF
             call tick_work          ; az első események
             ld ix, 0
             ld iy, 0
@@ -179,6 +242,7 @@ start:
 
 ; ---- vége -------------------------------------------------------------------
             di
+the_end:
             ld a, (V_PORT05)        ; hang-IT ki
             and 0C0h
             ld (V_PORT05), a
@@ -189,7 +253,11 @@ start:
             out (P_AMP), a
             ld hl, saved_irq
             ld de, IRQVEC
+            IF FEAT_IRQ0038
+            ld bc, IRQ_LEN          ; a 0038h-tól az eredeti (a 0. kártyahely területe is)
+            ELSE
             ld bc, 3
+            ENDIF
             ldir
             ld a, 10                ; a kurzor-IT vissza
             out (P_CRTCREG), a
@@ -220,6 +288,14 @@ exit:
 ; ---- mintamegszakítás -------------------------------------------------------
 ; árnyékregiszterek: HL' = 3. fázis, BC' munka, D' összeg, E' tickszámláló;
 ; IX, IY = 1. és 2. fázis.  Ciklus: 13 (IM 1) + 10 (JP) + 230
+; (FEAT_FASTMIX: keverőtábla nélkül, 219)
+; FEAT_IRQ0038: a kezelő (a tick belépőjével együtt) a 0038h-ra fordítva, ide
+; csak bemásoljuk (a 0038h..0038h+IRQ_LEN terület a végén visszaáll), így az
+; ugrás elmarad: 13 + 230 ciklus
+            IF FEAT_IRQ0038
+irq_code:
+            DISP IRQVEC
+            ENDIF
 it_handler:
             ex af, af'              ; 4
             exx                     ; 4
@@ -243,9 +319,13 @@ w2:         ld b, 0                 ; 7
 w3:         ld b, 0                 ; 7
             ld a, (bc)              ; 7
             add a, d                ; 4
+            IF FEAT_FASTMIX
+fmc:        or 0                    ; 7   a 06h többi bitje (induláskor írjuk be)
+            ELSE
             ld c, a                 ; 4
-            ld b, high mixtab       ; 7
+mixpg:      ld b, 0                 ; 7   a keverőtábla lapja (induláskor írjuk be)
             ld a, (bc)              ; 7
+            ENDIF
             out (P_AMP), a          ; 11
             dec e                   ; 4
             jr z, tick_entry        ; 7
@@ -279,6 +359,11 @@ tickn:      ld e, 0                 ; minta / tick (induláskor írjuk be)
             pop af
             ei
             ret
+            IF FEAT_IRQ0038
+            ENT
+irq_code_end:
+IRQ_LEN     equ irq_code_end - irq_code
+            ENDIF
 
 tick_work:
             in a, (P_KBDIN)
@@ -295,9 +380,11 @@ tick_work:
 init_song:
             ld hl, SONG_EVENTS
             ld (ptr), hl
+            IF FEAT_LOOP
             ld de, (SONG_LOOP)
             add hl, de
             ld (loop_ptr), hl
+            ENDIF
             ld hl, 0
             ld (wait), hl
             xor a
@@ -363,10 +450,18 @@ events:
             jr c, .note
             cp 0B3h
             jp c, .off
+            IF FEAT_PITCH
+            cp 0B6h
+            jp c, .freq
+            ENDIF
             cp 0B8h
             jr c, .next
             cp 0BBh
+            IF FEAT_DRUMS
             jp c, .slide
+            ELSE
+            jr c, .next
+            ENDIF
             cp 0BEh
             jp c, .wave
             cp 0BFh
@@ -388,11 +483,13 @@ events:
             ld (wait), hl
             ret
 .end:
+            IF FEAT_LOOP
             ld a, (SONG_FLAGS)
             rrca
             jr nc, .finish
             ld hl, (loop_ptr)
             jr .next
+            ENDIF
 .finish:
             dec hl
             ld (ptr), hl
@@ -443,7 +540,23 @@ events:
             ld (hl), 0
             pop hl
             jp .next
+            IF FEAT_PITCH
+.freq:                              ; B3+s lo hi: fázisnövekmény (hajlítás, vibrato)
+            sub 0B3h
+            ld c, (hl)
+            inc hl
+            ld b, (hl)
+            inc hl
+            push hl
+            call voice_hl           ; HL = VS_F
+            ld (hl), c
+            inc hl
+            ld (hl), b
+            pop hl
+            jp .next
+            ENDIF
 .wave:                              ; BB+s h
+            IF FEAT_WAVECHG
             sub 0BBh
             ld c, (hl)
             inc hl
@@ -454,6 +567,11 @@ events:
             ld (hl), c
             pop hl
             jp .next
+            ELSE
+            inc hl                  ; egy hullámforma-hely: nincs váltás
+            jp .next
+            ENDIF
+            IF FEAT_DRUMS
 .slide:                             ; B8+s n vd lo hi
             sub 0B8h
             ld c, (hl)              ; hangjegy
@@ -496,6 +614,7 @@ events:
             ld (de), a              ; VS_FLOOR = 0
             jp .next
 
+            ENDIF
 ; ---- lecsengés, csúszás, majd a megszakítás operandusai -------------------
 voices:
             ld hl, vstate
@@ -515,6 +634,7 @@ voices:
 ; HL = a szólam állapota, BC = a táblalap operandusa; kilépéskor HL a következő
 voice1:
             push bc
+            IF FEAT_DRUMS
             ld e, (hl)              ; F += csúszás
             inc hl
             ld d, (hl)
@@ -532,9 +652,14 @@ voice1:
             ld (hl), e
             ld de, VS_VOL
             add hl, de              ; HL = VS_VOL
+            ELSE
+            ld de, VS_VOL
+            add hl, de              ; HL = VS_VOL (csúszás nincs: dob nélkül)
+            ENDIF
             ld a, (hl)
             ld c, a                 ; C = hangerő
             inc hl
+            IF FEAT_DECAY
             ld a, (hl)              ; VS_DEC
             inc hl                  ; VS_CNT
             or a
@@ -554,6 +679,10 @@ voice1:
             ld (hl), c              ; VS_VOL
             inc hl
             inc hl
+            ELSE
+            inc hl                  ; lecsengés nincs a dalban
+            inc hl                  ; VS_CNT
+            ENDIF
 .nodec:
             inc hl                  ; VS_FLOOR
             inc hl                  ; VS_SLOT
@@ -594,6 +723,8 @@ build_tables:
             add a, a
             inc a
             add a, h
+            ld (mix_page), a        ; a táblák után a keverőtábla lapja
+            inc a
             ld b, a                 ; B = a táblák utáni lap
             ld a, (V_HIMEM + 1)     ; a BASIC verme alatt maradjon 2 lap
             sub 2
@@ -649,16 +780,29 @@ build_tables:
 ; A = a wave_id hullámforma C. mintája (0..255)
 wave_sample:
             ld a, (wave_id)
-            or a
-            jr z, .square
-            dec a
+            IF FEAT_WAVE_PULSE
+            cp 1
             jr z, .pulse
-            dec a
+            ENDIF
+            IF FEAT_WAVE_TRI
+            cp 2
             jr z, .triangle
-            dec a
+            ENDIF
+            IF FEAT_WAVE_SAW
+            cp 3
             jr z, .saw
-            dec a
-            jr nz, .sine
+            ENDIF
+            IF FEAT_WAVE_SINE
+            cp 5
+            jr z, .sine
+            ENDIF
+            IF FEAT_WAVE_PULSE12
+            cp 6
+            jr z, .pulse12
+            ENDIF
+            IF FEAT_WAVE_NOISE
+            cp 4
+            jr nz, .square
             ld de, (lfsr)           ; zaj
             ld b, 8
 .n:         srl d
@@ -671,22 +815,36 @@ wave_sample:
             ld (lfsr), de
             ld a, e
             ret
+            ENDIF
 .square:    ld a, c
             rlca
             sbc a, a
             cpl                     ; 0..127: 255, 128..255: 0
             ret
+            IF FEAT_WAVE_PULSE
 .pulse:     ld a, c
             cp 64
             sbc a, a                ; 0..63: 255
             ret
+            ENDIF
+            IF FEAT_WAVE_PULSE12
+.pulse12:   ld a, c
+            cp 32
+            sbc a, a                ; 0..31: 255
+            ret
+            ENDIF
+            IF FEAT_WAVE_TRI
 .triangle:  ld a, c
             add a, a
             ret nc
             cpl                     ; 128..255: lefelé
             ret
+            ENDIF
+            IF FEAT_WAVE_SAW
 .saw:       ld a, c
             ret
+            ENDIF
+            IF FEAT_WAVE_SINE
 .sine:      push hl                 ; negyed-szinusz táblából, tükrözve
             ld a, c
             bit 6, a
@@ -711,11 +869,21 @@ sine_q:
             db 219, 221, 223, 225, 227, 229, 231, 233, 234, 236, 238, 239, 241, 242, 243, 245
             db 246, 247, 248, 249, 250, 251, 252, 252, 253, 253, 254, 254, 255, 255, 255, 255
 
+            ENDIF
+            IF FEAT_CARDS
+            include "chips.inc"
+            ENDIF
+
 ; ---- változók ---------------------------------------------------------------
 ; a dal hossza (a weboldal buildCas-a is ide írja be)
 song_len:   dw song_end - song
+            IF FEAT_IRQ0038
+saved_irq:  ds IRQ_LEN
+            ELSE
 saved_irq:  ds 3
+            ENDIF
 tab_base:   db 0
+mix_page:   db 0
 wave_id:    db 0
 lfsr:       dw 0
 ptr:        dw 0
@@ -724,8 +892,7 @@ wait:       dw 0
 done:       db 0
 in_tick:    db 0
 vstate:     ds 3 * VS_SIZE
-            align 256
-mixtab:     ds 64                   ; a keverőtábla a 06h többi bitjével
+; a keverőtábla (a 06h többi bitjével) futás közben a hullámtáblák utáni lapon
 
 song:       incbin "build/song.bin"
 song_end:
