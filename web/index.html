@@ -429,6 +429,15 @@ footer code, .hint code { font-family: var(--font-mono); font-size: 12.5px; }
           <input id="fname" type="text" maxlength="16" spellcheck="false" autocomplete="off" aria-describedby="fnameHint"><span>.cas</span>
         </div>
         <p class="hint" id="fnameHint">Legfeljebb 16 karakter, ékezet és szóköz nélkül (a TVC így kezeli); üresen a MIDI-fájl nevét kapja.</p>
+        <div class="namerow">
+          <label for="compress">Tömörítés</label>
+          <select id="compress" aria-describedby="compressHint">
+            <option value="auto" selected>ha kell (42 155 bájt fölött)</option>
+            <option value="on">mindig (rövidebb betöltés)</option>
+            <option value="off">ki</option>
+          </select>
+        </div>
+        <p class="hint" id="compressHint">Önkicsomagoló .cas (auTVC, Márta Krisztián / Murphy): betöltés után a teljes 64 KB RAM-ba kicsomagolja magát, és ugyanúgy indul. 42 155 bájtnál hosszabb programot a TVC csak így tölt be. A többszólamú lejátszó nagy dalnál a lejátszás alatt a C000h–FFFFh-n az U3 RAM-ot használja (csak 64k-s gépen).</p>
         <div class="actions">
           <button id="dlBtn" class="primary" type="button" disabled>.cas letöltése</button>
           <button id="srcBtn" type="button" disabled>Forrás letöltése (.zip)</button>
@@ -510,6 +519,7 @@ footer code, .hint code { font-family: var(--font-mono); font-size: 12.5px; }
 <script src="envelopes.js"></script>
 <script src="envedit.js"></script>
 <script src="assembler.js"></script>
+<script src="autvc-core.js"></script>
 <script src="preview.js"></script>
 <script>
 (function () {
@@ -517,7 +527,8 @@ footer code, .hint code { font-family: var(--font-mono); font-size: 12.5px; }
   const M = window.Midi2Tvc, PV = window.TvcPreview, PLAYERS = window.TVC_PLAYERS;
   // a böngészős sjasmplus (web/sjasmplus): a lejátszó minden dalhoz a kellő
   // részekkel fordul; ha nem tölthető be, az előre fordított, teljes lejátszó
-  let asmRun = null, asmError = null, casGen = 0, casExact = false;
+  let asmRun = null, asmError = null, casGen = 0, casExact = false, casPlain = 0;
+  const AUTVC = typeof autvcCoreFactory === 'function' ? autvcCoreFactory() : null;
   const asmReady = window.TvcAssembler.loadAssembler('sjasmplus/')
     .then((run) => { asmRun = run; return run; })
     .catch((e) => { asmError = e; return null; });
@@ -526,7 +537,7 @@ footer code, .hint code { font-family: var(--font-mono); font-size: 12.5px; }
   const NOTE_NAMES = ['C', 'C♯', 'D', 'D♯', 'E', 'F', 'F♯', 'G', 'G♯', 'A', 'A♯', 'H'];
   const noteName = (n) => NOTE_NAMES[n % 12] + (Math.floor(n / 12) - 1);
   const hex4 = (n) => n.toString(16).toUpperCase().padStart(4, '0') + 'h';
-  const fmtTime = (s) => Math.floor(s / 60) + ':' + (s % 60).toFixed(1).padStart(4, '0');
+  const fmtTime = (s) => { s = Math.round(s * 10) / 10; return Math.floor(s / 60) + ':' + (s % 60).toFixed(1).padStart(4, '0'); };
   const MODE_HINTS = {
     poly: '3 szólam választható hullámformával, szoftveres keverés a DAC-ként használt hangerőregiszteren. A dobok is szólamot kapnak.',
     arp: 'A hardveres hangoszcillátor; akkordnál a hangok tickenként (~50 Hz) váltakoznak.',
@@ -681,7 +692,7 @@ footer code, .hint code { font-family: var(--font-mono); font-size: 12.5px; }
       loopPause: $('loop').checked && $('loopPauseOn').checked ? Math.max(1, Math.min(9, Math.round(num('loopPause')) || 1)) : 0,
       background: mode !== 'poly' && $('background').checked,
       from: rangeFrom, to: rangeTo, trim: $('trim').checked,
-      wave: $('wave').value, polyDiv: num('polyDiv'), fastIrq: $('fastIrq').checked, bend: $('bend').checked, cards: [$('cardSn').checked && 'sn', $('cardSid').checked && 'sid', $('cardSaa').checked && 'saa', $('cardOpl').checked && 'opl'].filter(Boolean), envelopes: envOption(),
+      wave: $('wave').value, polyDiv: num('polyDiv'), fastIrq: $('fastIrq').checked, bend: $('bend').checked, compress: $('compress').value, cards: [$('cardSn').checked && 'sn', $('cardSid').checked && 'sid', $('cardSaa').checked && 'saa', $('cardOpl').checked && 'opl'].filter(Boolean), envelopes: envOption(),
       channelWave: mode === 'poly' ? Object.fromEntries(Object.entries(channelWave).filter(([ch]) => channelSel.has(+ch))) : null,
     };
   }
@@ -878,6 +889,13 @@ footer code, .hint code { font-family: var(--font-mono); font-size: 12.5px; }
       const r = await M.assembleCas(run, PLAYERS, result, $('title').value || fileBase);
       if (gen !== casGen) return;
       casBytes = r.cas;
+      casPlain = r.cas.length;
+      // önkicsomagoló (auTVC): ha a program a közvetlenül betölthetőnél hosszabb, vagy kérték
+      const cm = $('compress').value;
+      if (cm === 'on' || (cm === 'auto' && r.cas.length - 144 > M.LOAD_LIMIT)) {
+        try { casBytes = AUTVC.build({ input: r.cas, autorun: true, lineNumber: 1 }).bytes; }
+        catch (e) { warns = warns.concat(['a tömörítés nem sikerült (' + e.message + ')']); }
+      }
       casExact = true;
       const player = { code: Array.from(r.cas.subarray(144, 144 + r.codeLen)) };
       renderStats(player, warns);
@@ -888,14 +906,15 @@ footer code, .hint code { font-family: var(--font-mono); font-size: 12.5px; }
     }
   }
   const FEAT_LABELS = { FEAT_DRUMS: 'dobok', FEAT_BG: 'háttér-mód', FEAT_WAVE_PULSE: 'impulzus', FEAT_WAVE_TRI: 'háromszög',
-    FEAT_WAVE_SAW: 'fűrész', FEAT_WAVE_NOISE: 'zaj', FEAT_WAVE_SINE: 'szinusz', FEAT_IRQ0038: 'gyors megszakítás', FEAT_PITCH: 'hajlítás', FEAT_CARDS: 'kártyafelismerés', FEAT_SN: 'SN76489', FEAT_SID: 'vSID', FEAT_SAA: 'SAA1099', FEAT_OPL: 'OPL2', FEAT_FASTMIX: 'gyors keverés', FEAT_WAVE_PULSE12: 'keskeny impulzus', FEAT_DECAY: 'lecsengés', FEAT_WAVECHG: 'hullámforma-váltás', FEAT_LOOP: 'ismétlés' };
+    FEAT_WAVE_SAW: 'fűrész', FEAT_WAVE_NOISE: 'zaj', FEAT_WAVE_SINE: 'szinusz', FEAT_IRQ0038: 'gyors megszakítás', FEAT_PITCH: 'hajlítás', FEAT_CARDS: 'kártyafelismerés', FEAT_SN: 'SN76489', FEAT_SID: 'vSID', FEAT_SAA: 'SAA1099', FEAT_OPL: 'OPL2', FEAT_FASTMIX: 'gyors keverés', FEAT_WAVE_PULSE12: 'keskeny impulzus', FEAT_DECAY: 'lecsengés', FEAT_WAVECHG: 'hullámforma-váltás', FEAT_LOOP: 'ismétlés', FEAT_BIGMEM: 'nagy dal (U3 RAM)' };
   function renderStats(player, warns) {
     const r = result, s = r.stats;
     const secs = r.total / r.rate;
     const items = [
       [fmtTime(secs), 'hossz'],
       [r.song.length.toLocaleString('hu-HU'), 'bájt dal'],
-      [casBytes.length.toLocaleString('hu-HU'), 'bájt .cas'],
+      [casBytes.length.toLocaleString('hu-HU'), casExact && casBytes.length !== casPlain
+        ? 'bájt .cas (tömörítve, eredetileg ' + casPlain.toLocaleString('hu-HU') + ')' : 'bájt .cas'],
     ];
     if (r.mode === 'poly') items.push([s.notes, 'hangindítás'], [s.voices_max, 'szólam egyszerre'],
       [Math.round(r.sampleRate).toLocaleString('hu-HU') + ' Hz', 'mintavétel'], [Math.round(100 * r.poly.cpu) + '%', 'CPU a keverésre']);
@@ -914,7 +933,8 @@ footer code, .hint code { font-family: var(--font-mono); font-size: 12.5px; }
     const start = 0x19EF, codeEnd = start + player.code.length, end = codeEnd + r.song.length;
     // poly: a hullámtáblák a program után, lapra igazítva (induláskor készülnek)
     const tabStart = (end + 255) & 0xFF00, tabEnd = r.poly ? tabStart + r.poly.tableBytes : end;
-    const top = 0x7FFF, span = top - start;
+    const big = r.features.includes('FEAT_BIGMEM');
+    const top = big ? M.BIG_TOP - 1 : 0x7FFF, span = top - start;
     const pc = (x) => (100 * x / span).toFixed(2) + '%';
     $('mem').innerHTML =
       '<div class="membar" role="img" aria-label="Memória a 32k-s gépen"><i style="width:' + pc(codeEnd - start) +
@@ -923,12 +943,15 @@ footer code, .hint code { font-family: var(--font-mono); font-size: 12.5px; }
       '<div class="legend"><span><i class="dot" style="background:var(--v3)"></i>BASIC + lejátszó ' + hex4(start) + '–' + hex4(codeEnd - 1) +
       '</span><span><i class="dot" style="background:var(--accent)"></i>dal –' + hex4(end - 1) + '</span>' +
       (r.poly ? '<span><i class="dot" style="background:var(--v1)"></i>hullámtáblák –' + hex4(tabEnd - 1) + '</span>' : '') +
-      '<span>32k-s gép: ' + hex4(top) + '-ig</span></div>';
+      (big ? '<span>64k-s gép, a lejátszás alatt az U3 RAM is: ' + hex4(top) + '-ig</span></div>'
+        : '<span>32k-s gép: ' + hex4(top) + '-ig</span></div>');
     const w = $('warns');
     w.innerHTML = '';
     for (const t of r.warnings.concat(warns)) { const li = document.createElement('li'); li.textContent = 'Figyelem: ' + t + '.'; w.appendChild(li); }
-    if (tabEnd > top - 512) { const li = document.createElement('li'); li.textContent = 'Figyelem: a program a hullámtáblákkal ' + hex4(tabEnd - 1) + '-ig ér, a 32k-s gépen nem fér el (kevesebb féle hullámforma kevesebb helyet kér).'; w.appendChild(li); }
-    if (r.song.length > 20000) { const li = document.createElement('li'); li.textContent = 'Figyelem: a dal ' + r.song.length + ' bájt, a 32k-s gépen kevés lehet a hely.'; w.appendChild(li); }
+    if (big) { const li = document.createElement('li'); li.textContent = 'Nagy dal: csak 64k-s gépen szól (a lejátszás alatt a C000h–FFFFh-n az U3 RAM-ot használja)' + (casExact ? '' : '; a pontos lejátszó fordítása kell hozzá') + '.'; w.appendChild(li); }
+    else if (tabEnd > top - 512) { const li = document.createElement('li'); li.textContent = 'Figyelem: a program a hullámtáblákkal ' + hex4(tabEnd - 1) + '-ig ér, a 32k-s gépen nem fér el (kevesebb féle hullámforma kevesebb helyet kér).'; w.appendChild(li); }
+    if (casExact && casBytes.length === casPlain && casPlain - 144 > M.LOAD_LIMIT) { const li = document.createElement('li'); li.textContent = 'Figyelem: a program ' + (casPlain - 144) + ' bájt, tömörítés nélkül a TVC nem tölti be (legfeljebb ' + M.LOAD_LIMIT + ').'; w.appendChild(li); }
+    if (!big && r.song.length > 20000) { const li = document.createElement('li'); li.textContent = 'Figyelem: a dal ' + r.song.length + ' bájt, a 32k-s gépen kevés lehet a hely.'; w.appendChild(li); }
   }
   function renderBasic(player) {
     const c = player.code;
@@ -1352,7 +1375,7 @@ footer code, .hint code { font-family: var(--font-mono); font-size: 12.5px; }
     const name = baseName();
     const files = M.sourcePackage({
       players: PLAYERS, result, midiBytes, midiName: name + '.mid', name,
-      title: $('title').value || fileBase, casBytes,
+      title: $('title').value || fileBase, casBytes, compressed: casExact && casBytes.length !== casPlain,
     });
     saveFile(name + '-forras.zip', M.zipFiles(files, /\.sh$/), name + '-forras.zip');
   });
@@ -1392,7 +1415,7 @@ footer code, .hint code { font-family: var(--font-mono); font-size: 12.5px; }
   $('loopPauseOn').addEventListener('change', syncPause);
   syncPause();
   for (const id of ['polyVolume', 'polyKnee', 'polyMix', 'maxNotes', 'arpSpeed', 'arpBass', 'prio', 'drums', 'transpose', 'decay',
-    'decayFloor', 'speed', 'title', 'tuning', 'curve', 'minVolume', 'maxVolume', 'gain', 'drumVolume', 'fastIrq', 'bend', 'cardSn', 'cardSid', 'cardSaa', 'cardOpl', 'prevCard', 'loop', 'loopPauseOn', 'loopPause', 'background', 'wave', 'polyDiv', 'trim']) {
+    'decayFloor', 'speed', 'title', 'tuning', 'curve', 'minVolume', 'maxVolume', 'gain', 'drumVolume', 'fastIrq', 'bend', 'cardSn', 'cardSid', 'cardSaa', 'cardOpl', 'prevCard', 'loop', 'loopPauseOn', 'loopPause', 'background', 'wave', 'polyDiv', 'trim', 'compress']) {
     $(id).addEventListener(($(id).type === 'checkbox' || $(id).tagName === 'SELECT') ? 'change' : 'input', regenerate);
   }
   $('fileInput').addEventListener('change', (e) => {

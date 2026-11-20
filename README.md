@@ -94,6 +94,7 @@ Helyben a `web/index.html` közvetlenül megnyitható (`file://` is jó). A
 | `--background` | egycsatornás lejátszó: háttérben szól, a BASIC közben fut (lásd lent) |
 | `--from MP`, `--to MP` | csak a dal egy része (másodperc az eredeti MIDI idejében, a `--speed` előtt); a belelógó hangok a határon kezdődnek / végződnek |
 | `--trim` | az első hang előtti csend kimarad (a `--to`-val kijelölt rész végén az utolsó hang utáni is) |
+| `--compress auto\|on\|off` | önkicsomagoló `.cas` (auTVC; a `build.sh` végzi, `node` kell): `auto` = ha a program 42 155 bájtnál hosszabb (ennél hosszabbat a TVC közvetlenül nem tölt be), `on` = mindig (rövidebb betöltés), `off` = soha |
 | `--title` | a betöltés után kiírt cím (alapból a fájlnév); a magyar ékezetes betűk a TVC kódjaival (Á..Ű = `80h..88h`, á..ű = `90h..98h`), legfeljebb 32 karakter |
 
 A kimeneti fájl neve ékezet nélküli (`Árvíztűrő.mid` → `build/Arvizturo.cas`).
@@ -326,6 +327,34 @@ Multichip kártyával (SN76489, SAA1099, OPL2), TVC256k++ kártyával és kárty
 nélkül is lefut (hangmagasság, a kártya portjai, a végén a BASIC) (`CARDS=hely:kártya` a
 harnessben).
 
+### Nagy dalok és tömörítés (`--compress`, `FEAT_BIGMEM`)
+
+A BASIC program a `19EFh`-tól legfeljebb a `C000h` alatti részig érhet
+(fölötte a rendszer-ROM van), és a TVC közvetlenül legfeljebb 42 155 bájtos
+programot tölt be. Nagyobb dalhoz:
+
+- **Tömörítés:** a `build.sh` (és a webes felület) 42 155 bájt fölött
+  önkicsomagoló `.cas`-t készít az auTVC-vel (`tools/autvc.js`,
+  `web/autvc-core.js`): betöltés után a program a teljes 64 KB RAM-ba
+  kicsomagolja magát, és ugyanúgy indul. `--compress on`-nal kisebb dalnál is
+  kérhető (rövidebb betöltés), `--compress off`-fal kikapcsolható.
+- **Az U3 RAM (`FEAT_BIGMEM`, automatikus):** ha a dal a hullámtáblákkal
+  nem fér el a BASIC területén, a többszólamú lejátszó a lejátszás alatt a
+  `C000h–FFFFh`-ra a ROM helyett az U3 RAM-ot kapcsolja (a lejátszás alatt
+  a ROM nem kell: a megszakítást a saját kezelője viszi), a végén a `P_SAVE`
+  (`0003h`) szerinti lapozás visszaáll. Csak 64k-s gépen szól.
+- **A BASIC verme:** a `HIMEM` (`BFFFh`) alatti `BE00h–BFFFh` a futó BASIC
+  verme, ezért a `.cas`-ban a dal ezt átugorja (kitöltés), a lejátszó
+  induláskor a terület tartalmát az U3 tetejére (`FE00h`) menti, saját vermet
+  használ, és a dal második felét a lyukhoz húzza (így a dal újra folytonos);
+  a végén a vermet visszamásolja.
+
+Így a dal a táblákkal együtt kb. `FD00h`-ig, azaz kb. 55 KB-ig érhet (egy
+hullámformával). Az egycsatornás lejátszó a ROM megszakításkezelőjét
+használja, ezért ott marad a 42 155 bájtos határ. Az emulátoros teszt egy
+16 perces, 54 KB-os dallal ellenőrzi (a lyuk és a `C000h` körül a dal
+folytonos, szól, ESC után a lapozás és a BASIC rendben).
+
 ## Az egycsatornás lejátszó (`player.asm`)
 
 - A `.cas` egy kétsoros BASIC programot tartalmaz (`1 PRINT "cím"`,
@@ -471,6 +500,9 @@ Akiktől ötletet és tudást vettünk át:
   valamint a [midiplay](https://github.com/istvan-v/midiplay) (GPL 2 vagy
   későbbi): a hangszer-burkológörbék formátuma, működése és a két mellékelt
   készlet (`envelopes/`).
+- **Márta Krisztián (Murphy)**: auTVC 2.0, önkicsomagoló TVC programok; a
+  `web/autvc-core.js` ennek böngészős változata (aPLib-formátum: Jørgen
+  Ibsen, apultra: Emmanuel Marty), a nagy dalok tömörítése ezzel készül.
 
 ## Licenc
 

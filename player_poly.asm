@@ -48,6 +48,16 @@ V_PORT03    equ 0B11h
 V_PORT05    equ 0B12h
 V_PORT06    equ 0B13h
 V_HIMEM     equ 0B19h
+P_SAVE      equ 0003h               ; a 02h port (lapozás) utoljára kiírt értéke
+P_MEM       equ 02h
+; FEAT_BIGMEM: a BASIC verme a HIMEM (BFFFh) alatt van; ezt a területet (HOLE_LO..
+; HOLE_HI) a fájlban a dal átugorja, a lejátszás alatt a tartalmát az U3 tetejére
+; mentjük (SAVE_AREA), és saját vermet használunk (OWN_SP alatt); a táblák legfeljebb
+; OWN_SP - 256-ig érhetnek (midi2tvc.py BIG_TOP)
+HOLE_LO     equ 0BE00h
+HOLE_HI     equ 0C000h
+SAVE_AREA   equ 0FE00h
+OWN_SP      equ 0FE00h
 IRQVEC      equ 0038h
 
 KEYMASK     equ 28h                 ; 7. sor: b3 ESC, b5 SPACE (0 = lenyomva)
@@ -121,6 +131,29 @@ start:
             push af
             ex af, af'
             di
+            IF FEAT_BIGMEM
+            ; nagy dal: a C000h..FFFFh lapra a ROM helyett az U3 RAM (a lejátszás
+            ; alatt a ROM nem kell: a megszakítás a 0038h-n a mi kezelőnk), a
+            ; végén (exit) a P_SAVE szerinti lapozás vissza
+            ld a, (P_SAVE)
+            and 3Fh
+            or 80h
+            out (P_MEM), a
+            ld (saved_sp), sp       ; a BASIC verme (a fenti PUSH-okkal) félre
+            ld hl, HOLE_LO
+            ld de, SAVE_AREA
+            ld bc, HOLE_HI - HOLE_LO
+            ldir
+            ld sp, OWN_SP
+            ld bc, (split_len)      ; ha a dal a lyukon át ér: a második fele
+            ld a, b                 ; a lyukhoz, így újra folytonos
+            or c
+            jr z, .nosplit
+            ld hl, HOLE_HI
+            ld de, HOLE_LO
+            ldir
+.nosplit:
+            ENDIF
             IF FEAT_CARDS
             call detect_card        ; hangkártya: azon szól (chips.inc)
             ld a, (card_type)
@@ -272,6 +305,18 @@ the_end:
             out (P_IRQCLR), a
             ld hl, 0
 exit:
+            IF FEAT_BIGMEM
+            di
+            ld (ret_hl), hl
+            ld hl, SAVE_AREA        ; a BASIC verme vissza
+            ld de, HOLE_LO
+            ld bc, HOLE_HI - HOLE_LO
+            ldir
+            ld sp, (saved_sp)
+            ld a, (P_SAVE)          ; a ROM vissza a 3. lapra
+            out (P_MEM), a
+            ld hl, (ret_hl)
+            ENDIF
             ex af, af'
             pop af
             ex af, af'
@@ -680,8 +725,7 @@ voice1:
             inc hl
             inc hl
             ELSE
-            inc hl                  ; lecsengés nincs a dalban
-            inc hl                  ; VS_CNT
+            inc hl                  ; VS_CNT (lecsengés nincs a dalban)
             ENDIF
 .nodec:
             inc hl                  ; VS_FLOOR
@@ -723,13 +767,19 @@ build_tables:
             add a, a
             inc a
             add a, h
+            IF FEAT_BIGMEM
+            ret c                   ; FFFFh fölé érne
+            ENDIF
             ld (mix_page), a        ; a táblák után a keverőtábla lapja
             inc a
             ld b, a                 ; B = a táblák utáni lap
+            IF !FEAT_BIGMEM         ; (nagy dalnál az U3 is RAM: a konverter ellenőrzi,
+                                    ; hogy a táblák FFFFh-ig elférnek)
             ld a, (V_HIMEM + 1)     ; a BASIC verme alatt maradjon 2 lap
             sub 2
             cp b
             ret c
+            ENDIF
             xor a                   ; lap 0: csend
 .zero:      ld (hl), a
             inc l
@@ -876,7 +926,14 @@ sine_q:
 
 ; ---- változók ---------------------------------------------------------------
 ; a dal hossza (a weboldal buildCas-a is ide írja be)
+            IF FEAT_BIGMEM
+saved_sp:   dw 0
+ret_hl:     dw 0
+split_len:  dw SPLIT_LEN            ; a lyuk utáni rész hossza (0: nincs lyuk)
+song_len:   dw SONG_BYTES           ; a lyuk nélkül (induláskor összehúzzuk)
+            ELSE
 song_len:   dw song_end - song
+            ENDIF
             IF FEAT_IRQ0038
 saved_irq:  ds IRQ_LEN
             ELSE
@@ -894,6 +951,19 @@ in_tick:    db 0
 vstate:     ds 3 * VS_SIZE
 ; a keverőtábla (a 06h többi bitjével) futás közben a hullámtáblák utáni lapon
 
-song:       incbin "build/song.bin"
+song:
+            IF FEAT_BIGMEM
+            IF $ + SONG_BYTES > HOLE_LO
+            incbin "build/song.bin", 0, HOLE_LO - song
+            ds HOLE_HI - HOLE_LO    ; a BASIC verme: itt a dal kimarad
+            incbin "build/song.bin", HOLE_LO - song
+SPLIT_LEN   equ SONG_BYTES - (HOLE_LO - song)
+            ELSE
+            incbin "build/song.bin"
+SPLIT_LEN   equ 0
+            ENDIF
+            ELSE
+            incbin "build/song.bin"
+            ENDIF
 song_end:
 prog_end:

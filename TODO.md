@@ -73,6 +73,16 @@ kicsi és gyors, vagy teljes tudású, vagy egy adott hangkártyára szabott.
   (`--cards`) viszont könnyű: ott tickenként egyszer fut, a CPU szinte szabad
   — ez lehet az első lépés.
 
+## Nagy dalok
+
+- [x] **Tömörítés** (auTVC, `--compress`, a webes felületen „Tömörítés”): 42 155
+  bájt fölött automatikus, kisebb dalnál kérhető.
+- [x] **Az U3 RAM a többszólamú lejátszónak** (`FEAT_BIGMEM`): a dal a táblákkal
+  kb. `FD00h`-ig; a BASIC verme (`BE00h–BFFFh`) helyén a dal kimarad, a
+  lejátszó induláskor összehúzza. Emulátorban tesztelve (16 perces, 54 KB-os dal).
+- [ ] Az egycsatornás lejátszó nagy dalhoz (most 42 155 bájt): a ROM-ot
+  használja (megszakítás), ezért az U3 csak a dal adatainak lapozásával menne.
+
 ## 2. Konverter
 
 - [ ] **Okosabb szólamválasztás:** csatornánként „mindig szóljon” / „csak ha
