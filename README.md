@@ -239,6 +239,21 @@ hangerő nagyobbika számít, a hangmagasság-változás és a torzítás nincs
 használva, a dobok (negatív számok) helyett a saját dobkészlet szól. Ahol a
 fájl egy programot nem ír le, ott a megszokott lecsengés marad.
 
+**Szerkesztő a webes felületen** (Hangszerek → „Szerkesztő…”): a készlet
+hangszer-blokkokra bontva szerkeszthető (programszámok, szakaszok, L/R/S
+jelek), a görbe rajzon látszik a billentyű elengedésével együtt, és egérrel
+vagy ujjal is szerkeszthető (a pontok húzhatók, dupla kattintás: új pont /
+törlés, az elengedés vonala is húzható), és a TVC
+többszólamú lejátszójának szimulációjával meghallgatható. Kiindulhat a két
+mellékelt készletből, egy saját fájlból vagy üresből; menthető `.txt`-be
+(ugyanebben a formátumban, a parancssori konverter is olvassa), és a
+„Használat a konverterben” gombbal azonnal kipróbálható a dalon. Ha
+dal van betöltve, a lista alapból csak a dalban szereplő hangszereket mutatja
+(hangszám, csatornák); a görbe nélküliek egy kattintással felvehetők, a
+közös görbéről egy hangszer leválasztható, és a meghallgatás a hangszer
+jellemző hangmagasságán szól. A szerkesztés a böngészőben megmarad
+(`localStorage`).
+
 A hangerőváltásokat a konverter tickenként a meglévő hangindító paranccsal
 küldi (a fázis nem ugrik), a lejátszó változatlan. Az elengedés utáni
 lecsengéshez a hang tovább foglalja a szólamot, de csak akkor, ha az új

@@ -210,6 +210,44 @@ pre.basic {
 .note { font-size: 13px; color: var(--muted); }
 .status { font-size: 13px; min-height: 1.2em; }
 footer { color: var(--muted); font-size: 13px; display: grid; gap: 8px; }
+
+/* burkológörbe-szerkesztő */
+#envDlg { width: min(1040px, calc(100vw - 16px)); max-height: calc(100vh - 16px); padding: 0; border: 1px solid var(--line); border-radius: var(--r); background: var(--surface); color: var(--ink); }
+#envDlg::backdrop { background: rgba(0, 0, 0, 0.45); }
+#envDlg .ee { display: grid; gap: 12px; padding: 16px; }
+#envDlg .eehead { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; justify-content: space-between; }
+#envDlg h2 { margin: 0; }
+#envDlg .eebar { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; font-size: 13.5px; }
+#envDlg .eebar select { max-width: 100%; }
+#envDlg .eemain { display: grid; grid-template-columns: 240px minmax(0, 1fr); gap: 14px; min-height: 0; }
+#eeList { list-style: none; margin: 0; padding: 0; overflow-y: auto; max-height: 470px; border: 1px solid var(--line); border-radius: var(--r); }
+#eeList li + li { border-top: 1px solid var(--line); }
+#eeList button { display: block; width: 100%; text-align: left; border: 0; border-radius: 0; padding: 5px 8px; font-size: 12.5px; font-weight: 400; background: transparent; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+#eeList button.on { background: var(--accent); color: var(--accent-ink); }
+#eeList button.missing { color: var(--muted); font-style: italic; }
+#envDlg .eeside { display: grid; gap: 6px; align-content: start; }
+#envDlg .eeside .row2 { display: flex; gap: 6px; flex-wrap: wrap; }
+#envDlg .eeside .row2 button { padding: 3px 8px; font-size: 12.5px; }
+#eeBlock { display: grid; gap: 10px; min-width: 0; }
+#eeBlock .eeprogs { display: flex; flex-wrap: wrap; gap: 8px 12px; align-items: center; font-size: 13.5px; }
+#eeProgs { width: 14em; max-width: 100%; font-family: var(--font-mono); }
+#eeNames { color: var(--muted); font-size: 12.5px; }
+#envDlg .segwrap { overflow-x: auto; }
+#envDlg table.segs { table-layout: auto; width: auto; font-size: 13px; }
+#envDlg table.segs th { padding: 0 4px 4px; }
+#envDlg table.segs td { padding: 2px 3px; border-top: 0; }
+#envDlg table.segs input, #envDlg table.segs select { width: 5.2em; padding: 3px 5px; font: 13px var(--font-mono); border: 1px solid var(--line); border-radius: 4px; background: var(--surface); color: inherit; }
+#envDlg table.segs select { width: 12.5em; font-family: inherit; }
+#envDlg .rowbtns { white-space: nowrap; }
+#envDlg .rowbtns button { padding: 1px 6px; font-size: 12px; min-width: 24px; }
+#envDlg .bad { border-color: var(--warn) !important; outline: 1px solid var(--warn); }
+#eeGraph { display: block; width: 100%; height: 210px; touch-action: none; cursor: crosshair; background: var(--sunk); border: 1px solid var(--line); border-radius: var(--r); }
+#envDlg .eeplay { display: flex; flex-wrap: wrap; gap: 8px 12px; align-items: center; font-size: 13px; }
+#envDlg .eeplay input[type=range] { width: 160px; accent-color: var(--accent); }
+#envDlg .eeplay input[type=number] { width: 4.5em; padding: 3px 5px; }
+#eeMsg { font-size: 13px; color: var(--muted); margin: 0; min-height: 1.2em; }
+#eeMsg.bad { color: var(--warn); }
+@media (max-width: 760px) { #envDlg .eemain { grid-template-columns: minmax(0, 1fr); } #eeList { max-height: 160px; } }
 footer p { margin: 0; max-width: 110ch; }
 footer .credits b { color: var(--ink); font-weight: 500; }
 footer code, .hint code { font-family: var(--font-mono); font-size: 12.5px; }
@@ -276,7 +314,7 @@ footer code, .hint code { font-family: var(--font-mono); font-size: 12.5px; }
               <option value="midiplay">midiplay 2.4</option>
               <option value="tvc">midiplay, TVC-s (dav2play) változat</option>
               <option value="file">saját envelope.txt…</option>
-            </select><button id="envLoad" type="button" title="Másik envelope.txt betöltése" hidden>Másik fájl…</button><input id="envFile" type="file" accept=".txt,text/plain" hidden></div></div>
+            </select><button id="envLoad" type="button" title="Másik envelope.txt betöltése" hidden>Másik fájl…</button><button id="envEdit" type="button" title="Burkológörbe-szerkesztő: hangszerenként szerkeszthető, meghallgatható, menthető">Szerkesztő…</button><input id="envFile" type="file" accept=".txt,text/plain" hidden></div></div>
           <p class="hint field wide" id="envHint" hidden>Hangszerenként felfutás, lecsengés, kitartás és elengedés, Varga István midiplay programjának hangszer-burkológörbéivel (GPL 2). A hangmagasság-változásokat és a torzítást a TVC nem használja; a dobok a saját dobkészlettel szólnak. A görbék tickenkénti hangerőváltásai miatt a dal adata nagyobb.</p>
           <div class="field"><label for="wave">Hullámforma</label><select id="wave"><option value="square">négyszög</option><option value="pulse">impulzus (25%)</option><option value="triangle">háromszög</option><option value="saw">fűrész</option><option value="sine">szinusz</option></select></div>
           <div class="field"><label for="polyDiv">Mintavétel</label>
@@ -395,6 +433,52 @@ footer code, .hint code { font-family: var(--font-mono); font-size: 12.5px; }
     </div>
   </div>
 
+  <dialog id="envDlg" aria-labelledby="eeTitle">
+    <div class="ee">
+      <div class="eehead">
+        <h2 id="eeTitle">Burkológörbe-szerkesztő</h2>
+        <button id="eeClose" type="button">Bezárás</button>
+      </div>
+      <div class="eebar">
+        <label for="eeSrc">Kiindulás:</label><select id="eeSrc"></select><button id="eeSrcLoad" type="button">Betöltés</button>
+        <button id="eeOpen" type="button">Fájl megnyitása…</button><input id="eeFile" type="file" accept=".txt,text/plain" hidden>
+        <button id="eeSave" type="button">Mentés fájlba</button>
+        <button id="eeApply" class="primary" type="button">Használat a konverterben</button>
+      </div>
+      <p id="eeMsg" role="status"></p>
+      <div class="eemain">
+        <div class="eeside">
+          <label class="check" id="eeOnlySongRow" hidden><input id="eeOnlySong" type="checkbox" checked> Csak a dalban szereplők</label>
+          <span class="hint" id="eeCount"></span>
+          <ul id="eeList"></ul>
+          <div class="row2"><button id="eeAdd" type="button">+ Új</button><button id="eeDup" type="button">Másolat</button><button id="eeDel" type="button">Törlés</button></div>
+        </div>
+        <div id="eeBlock">
+          <div class="eeprogs">
+            <label for="eeProgs">Programok</label><input id="eeProgs" type="text" spellcheck="false" title="MIDI programszámok vesszővel (0..127; negatív = dob); P = panoráma, :csatorna,hang = második réteg">
+            <label class="check"><input id="eeDecay" type="checkbox"> D: elengedés után végigfut</label>
+            <span id="eeNames"></span>
+          </div>
+          <div class="eeprogs"><button id="eeSplit" type="button" hidden></button><span class="hint" id="eeShared"></span></div>
+          <div class="segwrap"><table class="segs">
+            <thead><tr><th title="L = ismétlés eleje, R = ismétlés vége / elengedés, S = egy képkockán kitart">Jel</th><th title="képkocka, 1/50 s">Hossz</th><th title="0..63, vagy *n = szorzás n/128-cal képkockánként">Bal</th><th>Jobb</th><th title="a TVC-n nincs használva">Hangm.</th><th title="a TVC-n nincs használva">Torz.</th><th></th></tr></thead>
+            <tbody id="eeSegs"></tbody>
+          </table></div>
+          <div><button id="eeSegAdd" type="button">+ Szakasz</button></div>
+          <canvas id="eeGraph" aria-label="A burkológörbe: a megszólaló hangerő képkockánként, a billentyű elengedésével"></canvas>
+          <div class="eeplay">
+            <label for="eeHeld">Lenyomva:</label><input id="eeHeld" type="range" min="1" max="250" value="40"><span id="eeHeldVal"></span>
+            <label for="eeNote">Hang</label><input id="eeNote" type="number" min="24" max="96" value="60" title="MIDI hangjegy (60 = C4)">
+            <label for="eeVel">Erősség</label><input id="eeVel" type="number" min="1" max="127" value="100">
+            <button id="eePlay" type="button">▶ Meghallgatás</button>
+          </div>
+          <p class="hint">A grafikon szerkeszthető: a pontok (a szakaszok vége) húzhatók – vízszintesen a szakasz hossza, függőlegesen a hangerő változik; dupla kattintás egy pontra törli a szakaszt, üres helyre új pontot tesz (a szakaszt ott kettévágja). Az üres karika szorzós (*n) szakasz, annak csak a hossza húzható. A piros vonal (elengedés) is húzható.</p>
+          <p class="hint">A vastag vonal az, amit a TVC kap (a bal és jobb hangerő nagyobbika); a vékonyak a fájl bal és jobb értékei. A meghallgatás a TVC többszólamú lejátszójának szimulációja a jelenlegi beállításokkal (hullámforma, mintavétel, szólam hangereje). A hangmagasság és a torzítás a fájlban megmarad, de a TVC-n nincs használva.</p>
+        </div>
+      </div>
+    </div>
+  </dialog>
+
   <footer>
     <p><a href="https://github.com/kks2003/tvc-midi-player" target="_blank" rel="noopener">tvc-midi-player</a> (forráskód, parancssori konverter, assembly lejátszók, leírás) · a konverter a <code>midi2tvc.py</code> bájtra azonos JavaScript-portja; a lejátszók: <code>player_poly.asm</code>, <code>player.asm</code>.</p>
     <p class="credits"><b>Köszönet, akiktől ötletet és tudást vettünk át:</b>
@@ -409,6 +493,7 @@ footer code, .hint code { font-family: var(--font-mono); font-size: 12.5px; }
 <script src="midi2tvc.js"></script>
 <script src="players.js"></script>
 <script src="envelopes.js"></script>
+<script src="envedit.js"></script>
 <script src="preview.js"></script>
 <script>
 (function () {
@@ -609,6 +694,43 @@ footer code, .hint code { font-family: var(--font-mono); font-size: 12.5px; }
       regenerate();
     });
   });
+  // a burkológörbe-szerkesztő (envedit.js)
+  const envEditor = window.TvcEnvEditor.EnvEditor({
+    M, PV,
+    gmName: (n) => GM[n] || 'Program ' + n,
+    sources: () => [['midiplay', 'midiplay 2.4', window.TVC_ENVELOPES.midiplay],
+      ['tvc', 'midiplay, TVC-s (dav2play) változat', window.TVC_ENVELOPES.tvc]]
+      .concat(envCustom ? [['file', 'saját: ' + envCustom.name, envCustom.text]] : [], [['', 'üres (új készlet)', '']]),
+    options: () => options(),
+    // a dal hangszerei (a kiválasztott csatornák, dob nélkül): program -> csatornák, hangok száma
+    songPrograms: () => {
+      const m = new Map();
+      if (!fullResult) return m;
+      for (const n of fullResult.notes) {
+        if (n[4] === 9) continue;
+        const e = m.get(n[5]) || { chs: [], notes: 0, pitches: [] };
+        if (!e.chs.includes(n[4] + 1)) e.chs.push(n[4] + 1);
+        e.notes++;
+        e.pitches.push(n[2]);
+        m.set(n[5], e);
+      }
+      for (const e of m.values()) {
+        e.chs.sort((a, b) => a - b);
+        e.mid = e.pitches.sort((a, b) => a - b)[e.pitches.length >> 1];   // a jellemző hangmagasság
+      }
+      return m;
+    },
+    stopMain: () => { if (srcNode) stop(); },
+    apply: (name, text) => {
+      envCustom = { name, text };
+      $('envSel').querySelector('option[value="file"]').textContent = 'saját: ' + name;
+      $('envSel').value = 'file';
+      $('envHint').hidden = false;
+      $('envLoad').hidden = false;
+      regenerate();
+    },
+  });
+  $('envEdit').addEventListener('click', () => envEditor.open());
   function showModeFields() {
     const mode = document.querySelector('input[name="mode"]:checked').value;
     for (const m of ['poly', 'arp', 'mono']) $('f-' + m).hidden = m !== mode;
