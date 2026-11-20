@@ -35,7 +35,9 @@ def assemble(asm, title, song=b""):
     # tartalék (ha a böngészőben nem fut a sjasmplus): minden funkcióval
     names = POLY_FEATURES if asm == "player_poly.asm" else MONO_FEATURES
     with open(os.path.join(ROOT, "build", "features.inc"), "w") as f:
-        f.write(features_inc(names, set(names)))
+        # (a nagy dal módja nélkül: az csak 64k-s gépen menne, és a dal
+        # helyét a fordításkor kell tudni)
+        f.write(features_inc(names, set(names) - {"FEAT_BIGMEM"}))
     with open(os.path.join(ROOT, "build", "song.bin"), "wb") as f:
         f.write(song)
     with open(os.path.join(ROOT, "build", "title.bin"), "wb") as f:
@@ -76,6 +78,8 @@ def main():
     # a forráscsomaghoz (a weboldal "Forrás letöltése" gombja)
     result["sources"] = {name: open(os.path.join(ROOT, name), encoding="utf-8").read()
                          for name in ("player.asm", "player_poly.asm", "cas.inc", "chips.inc")}
+    # a tömörítő a forráscsomagba (ha a .cas önkicsomagoló)
+    result["sources"]["autvc-core.js"] = open(os.path.join(ROOT, "web", "autvc-core.js"), encoding="utf-8").read()
     out = os.path.join(ROOT, "web", "players.js")
     with open(out, "w") as f:
         f.write("// generálta: tools/export_players.py (ne szerkeszd kézzel)\n")

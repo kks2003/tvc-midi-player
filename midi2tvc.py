@@ -1224,6 +1224,10 @@ def main():
     ap.add_argument("--background", action="store_true",
                     help="egycsatornás lejátszó: háttérben szól, a BASIC közben fut "
                          "(EXT 0 leállítja, EXT 1 újraindítja)")
+    ap.add_argument("--compress", choices=("auto", "on", "off"), default="auto",
+                    help="önkicsomagoló .cas (auTVC; a build.sh végzi, node kell): auto = ha a "
+                         "program 42155 bájtnál nagyobb (ennél nagyobbat a TVC közvetlenül nem "
+                         "tölt be), on = mindig (rövidebb betöltés), off = soha")
     ap.add_argument("--max-size", type=int, default=20000,
                     help="figyelmeztet, ha az adat ennél nagyobb (a 32k-s TVC miatt)")
     args = ap.parse_args()
@@ -1344,8 +1348,50 @@ def ascii_name(name):
 POLY_FEATURES = ["FEAT_DRUMS", "FEAT_WAVE_PULSE", "FEAT_WAVE_TRI", "FEAT_WAVE_SAW",
                  "FEAT_WAVE_NOISE", "FEAT_WAVE_SINE", "FEAT_IRQ0038", "FEAT_PITCH",
                  "FEAT_CARDS", "FEAT_SN", "FEAT_SID", "FEAT_SAA", "FEAT_OPL", "FEAT_FASTMIX", "FEAT_WAVE_PULSE12",
-                 "FEAT_DECAY", "FEAT_WAVECHG", "FEAT_LOOP"]
-CARDS = ["sn", "sid", "saa", "opl"]                      # --cards: a lejátszóba kerülő kártyameghajtók
+                 "FEAT_DECAY", "FEAT_WAVECHG", "FEAT_LOOP", "FEAT_BIGMEM"]
+CARDS = ["sn", "sid", "saa", "opl"]
+# memória: a program a 19EFh-tól; a BASIC-nek (ROM a C000h-tól) a táblákkal együtt
+# legfeljebb BIG_LIMIT-ig; fölötte a többszólamú lejátszó a lejátszás alatt az U3
+# RAM-ot kapcsolja a C000h..FFFFh-ra (FEAT_BIGMEM, csak 64k-s gépen). A lejátszó
+# hossza (BASIC-kel) itt becslés, mert a fordítás a döntés után jön: az U3-ról
+# a felső becsléssel döntünk, a „nem fér el” hibához az alsóval; a pontos
+# ellenőrzés a fordítás után a build.sh-ban (és futáskor a lejátszóban).
+BASIC_START = 0x19EF
+PLAYER_EST = 3300
+PLAYER_MIN = 850
+BIG_LIMIT = 0xBC00
+BIG_TOP = 0xFD00                           # FEAT_BIGMEM: a lejátszó verme és mentése fölötte
+LOAD_LIMIT = 42155                         # ennél hosszabb programot a TVC nem tölt be
+
+
+def poly_tables_end(code_len, song_len, nslots):
+    """a hullámtáblák (és a keverőtábla lapja) vége, kizárólagos"""
+    end = BASIC_START + code_len + song_len
+    return ((end + 255) & ~255) + 256 * (2 + 8 * nslots)
+
+
+def check_fit(sym_path, song_path="build/song.bin", feat_path="build/features.inc"):
+    """a fordítás után (build.sh): elférnek-e a táblák; 0 = igen, 1 = nem"""
+    song_addr = None
+    for line in open(sym_path):
+        k, _, v = line.partition(": EQU ")
+        if k.strip() == "song":
+            song_addr = int(v, 16)
+    song = open(song_path, "rb").read()
+    big = "FEAT_BIGMEM equ 1" in open(feat_path).read()
+    end = poly_tables_end(song_addr - BASIC_START, len(song), song[7])
+    limit = BIG_TOP if big else BIG_LIMIT
+    if end > limit:
+        print("hiba: a program a hullámtáblákkal %04Xh-ig érne, legfeljebb %04Xh lehet%s"
+              % (end - 1, limit - 1, "" if big else " (a 64k-s gépen nagy dalként: FEAT_BIGMEM)"))
+        return 1
+    return 0
+
+
+def poly_memory(song_len, nslots):
+    """-> (a táblák vége a legkisebb lejátszóval, kell-e az U3)"""
+    return (poly_tables_end(PLAYER_MIN, song_len, nslots),
+            poly_tables_end(PLAYER_EST, song_len, nslots) > BIG_LIMIT)                      # --cards: a lejátszóba kerülő kártyameghajtók
 MONO_FEATURES = ["FEAT_DRUMS", "FEAT_BG"]
 
 
@@ -1353,10 +1399,12 @@ def features_inc(names, on):
     return "".join("%s equ %d\n" % (n, 1 if n in on else 0) for n in names)
 
 
-def write_features(args, names, on):
+def write_features(args, names, on, song_bytes=None):
     path = os.path.join(os.path.dirname(os.path.abspath(args.output)), "features.inc")
     with open(path, "w") as f:
         f.write(features_inc(names, on))
+        if song_bytes is not None:
+            f.write("SONG_BYTES equ %d\n" % song_bytes)
     print("a lejátszóba kerül: %s" % (", ".join(n[5:].lower() for n in names if n in on) or "csak az alap"))
 
 
@@ -1405,6 +1453,13 @@ def write_poly(args, notes, drums_sec, gain_auto=False):
         f.write(data)
     write_title(args)
     used = {WAVES[w] for w in slots}
+    tab_end, big = poly_memory(len(data), len(slots))
+    if tab_end > BIG_TOP:
+        sys.exit("a dal túl nagy: a hullámtáblákkal együtt a 64 KB-ban sem fér el "
+                 "(%d bájt; kevesebb féle hullámforma, rövidebb rész vagy --start/--end segít)" % len(data))
+    if big:
+        print("nagy dal: a lejátszás alatt a C000h..FFFFh-n az U3 RAM (csak 64k-s gépen); "
+              "ha a program 42155 bájtnál hosszabb, a build.sh tömöríti (auTVC)")
     write_features(args, POLY_FEATURES, {n for n, on in (
         ("FEAT_DRUMS", stats.get("slides", 0) > 0), ("FEAT_WAVE_PULSE", "pulse" in used),
         ("FEAT_WAVE_TRI", "triangle" in used), ("FEAT_WAVE_SAW", "saw" in used),
@@ -1415,7 +1470,7 @@ def write_poly(args, notes, drums_sec, gain_auto=False):
         ("FEAT_OPL", "opl" in args.cards), ("FEAT_FASTMIX", args.poly_mix == "fast"),
         ("FEAT_WAVE_PULSE12", "pulse12" in used),
         ("FEAT_DECAY", (0 if args.envelope_data else args.decay) > 0 or stats.get("slides", 0) > 0),
-        ("FEAT_WAVECHG", len(slots) > 1), ("FEAT_LOOP", args.loop)) if on})
+        ("FEAT_WAVECHG", len(slots) > 1), ("FEAT_LOOP", args.loop), ("FEAT_BIGMEM", big)) if on}, len(data))
     print("poly: %.0f Hz mintavétel (osztó %d), %.2f tick/s, a keverés a CPU %.0f%%-a; "
           "hullámformák: %s; táblák: %d bájt a program után"
           % (sr, args.poly_div, tick_rate, 100 * poly_cpu_load(args.poly_div, args.fast_irq, args.poly_mix == "fast"),
@@ -1427,7 +1482,7 @@ def write_poly(args, notes, drums_sec, gain_auto=False):
 
 def report(args, notes, total, rate, stats, size):
     used = sorted({n[2] for n in notes})
-    secs = total / rate
+    secs = round(total / rate, 1)          # kerekítve, hogy ne legyen 1:60.0
     print("%s: %d hang, %d:%04.1f, %d tick; %d hang, %d akkord, %d szünet, %d dobütés; %d bájt"
           % (os.path.basename(args.midi), len(notes), secs // 60, secs % 60, total,
              stats["notes"], stats["chords"], stats["rests"], stats["drums"], size))
@@ -1439,6 +1494,10 @@ def report(args, notes, total, rate, stats, size):
         print("figyelem: a 47,7 Hz alatti hangok egy oktávval feljebb szólnak")
     if size > args.max_size:
         print("figyelem: %d bájt, a 32k-s gépen kevés lehet a hely" % size)
+    if args.mode != "poly" and size + 1500 > LOAD_LIMIT:
+        print("figyelem: az egycsatornás lejátszóval a program legfeljebb %d bájt lehet (a "
+              "ROM-ot használja, így az U3 nem kapcsolható be); a többszólamú mód nagyobb dalt is "
+              "lejátszik" % LOAD_LIMIT)
 
 
 if __name__ == "__main__":

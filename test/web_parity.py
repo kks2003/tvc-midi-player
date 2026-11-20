@@ -56,6 +56,8 @@ CASES = [
      {"mode": "poly", "bend": True, "envelopes": "tvc", "from": 1, "to": 6}),
     (["--mode", "poly", "--fast-irq", "--wave", "sine"], {"mode": "poly", "fastIrq": True, "wave": "sine"}),
     (["--mode", "poly", "--poly-mix", "fast"], {"mode": "poly", "polyMix": "fast"}),
+    (["--mode", "poly", "--compress", "on"], {"mode": "poly", "compress": "on"}),
+    (["--mode", "poly", "--compress", "off", "--fast-irq"], {"mode": "poly", "compress": "off", "fastIrq": True}),
     (["--mode", "poly", "--wave", "pulse12", "--cards", "sid,opl"], {"mode": "poly", "wave": "pulse12", "cards": ["sid", "opl"]}),
     (["--mode", "poly", "--poly-mix", "fast", "--fast-irq", "--gain", "max"], {"mode": "poly", "polyMix": "fast", "fastIrq": True, "gain": "max"}),
     (["--mode", "poly", "--envelopes", "midiplay"], {"mode": "poly", "envelopes": "midiplay"}),
@@ -92,12 +94,17 @@ const SjasmPlus = require(process.argv[2] + '/web/sjasmplus/sjasmplus.js');
   // a böngészős sjasmplus a dalhoz kellő részekkel fordít; mellette a tartalék
   // (előre fordított, minden funkcióval) is összeáll
   const run = await A.createAssembler(SjasmPlus, fs.readFileSync(process.argv[2] + '/web/sjasmplus/sjasmplus.wasm'));
-  const cas = (await M.assembleCas(run, P, r, job.title)).cas;
+  let cas = (await M.assembleCas(run, P, r, job.title)).cas;
+  // önkicsomagoló (mint az index.html compileCas-a)
+  const cm = job.opts.compress || 'auto';
+  const plain = cas.length;
+  if (cm === 'on' || (cm === 'auto' && cas.length - 144 > M.LOAD_LIMIT))
+    cas = require(process.argv[2] + '/web/autvc-core.js').build({ input: cas, autorun: true, lineNumber: 1 }).bytes;
   fs.writeFileSync(job.out, cas);
   M.buildCas(r.mode === 'poly' ? P.poly : P.mono, r.song, job.title);
   const name = 'par';
   const files = M.sourcePackage({ players: P, result: r, midiBytes: new Uint8Array(fs.readFileSync(job.midi)),
-    midiName: name + '.mid', name, title: job.title, casBytes: cas });
+    midiName: name + '.mid', name, title: job.title, casBytes: cas, compressed: cas.length !== plain });
   fs.writeFileSync(job.zip, M.zipFiles(files, /\.sh$/));
 })();
 """
@@ -126,6 +133,37 @@ def bend_midi():
     return path
 
 
+def big_midi():
+    """nagy próbadal (16 perc, 3 szólam tizenhatodokban, ~54 KB): az U3-as nagy
+    dal (FEAT_BIGMEM, a lyuk a BASIC veremnek) és a tömörítés"""
+    import random
+    import struct
+    rnd = random.Random(5)
+    def vlq(n):
+        b = [n & 0x7F]
+        n >>= 7
+        while n:
+            b.append(0x80 | (n & 0x7F))
+            n >>= 7
+        return bytes(reversed(b))
+    ev = bytearray()
+    for _ in range(16 * 60 * 8):
+        ns = []
+        for ch, base in ((0, 60), (1, 48), (2, 72)):
+            n = base + rnd.randint(0, 12)
+            ns.append((ch, n))
+            ev += vlq(0) + bytes((0x90 | ch, n, rnd.randint(60, 127)))
+        for j, (ch, n) in enumerate(ns):
+            ev += vlq(24 if j == 0 else 0) + bytes((0x80 | ch, n, 0))
+    ev += b"\x00\xff\x2f\x00"
+    path = os.path.join(tempfile.mkdtemp(prefix="tvcbig_"), "nagy.mid")
+    open(path, "wb").write(b"MThd" + struct.pack(">IHHH", 6, 0, 1, 96) + b"MTrk" + struct.pack(">I", len(ev)) + bytes(ev))
+    return path
+
+
+BIG_CASES = [["--mode", "poly"], ["--mode", "poly", "--compress", "off", "--fast-irq"]]
+
+
 def main():
     mids = sys.argv[1:] or [os.path.join(REPO, "examples", "teszt.mid")]
     duck = os.path.join(REPO, "examples", "ducktales", "ducktales.mid")
@@ -133,6 +171,7 @@ def main():
         mids.append(duck)
     if not sys.argv[1:]:
         mids.append(bend_midi())
+        mids.append(big_midi())
     subprocess.check_call([sys.executable, os.path.join(REPO, "tools", "export_players.py")],
                           stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
     tmp = tempfile.mkdtemp(prefix="tvcweb_")
@@ -143,6 +182,9 @@ def main():
         for args, opts in CASES:
             # a hajlítás próbadala rövid: csak az alap és a --bend esetek
             if mid.endswith("bend.mid") and args and "--bend" not in args and args != ["--mode", "poly"]:
+                continue
+            # a nagy próbadal: csak a BIG_CASES
+            if mid.endswith("nagy.mid") and args not in BIG_CASES:
                 continue
             name = "par"
             src = os.path.join(tmp, name + ".mid")

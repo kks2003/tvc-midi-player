@@ -379,6 +379,45 @@ def main():
             check("%s: a hangmagasság pontos (±5 cent)" % label, all(abs(c) < 5 for c in cents),
                   ", ".join("%.1f" % c for c in cents))
 
+    # 3b3. nagy dal (16 perc, ~54 KB): önkicsomagoló .cas (auTVC), a lejátszás alatt
+    # az U3 RAM a C000h..FFFFh-n (FEAT_BIGMEM), a dal a BASIC verme (BE00h..BFFFh)
+    # helyén kimarad, induláskor összehúzzuk; ESC után a verem és a lapozás vissza
+    sys.path.insert(0, HERE)
+    import web_parity
+    big = web_parity.big_midi()
+    subprocess.check_call([os.path.join(REPO, "build.sh"), big, "--mode", "poly"], stdout=subprocess.DEVNULL)
+    shutil.copy(os.path.join(REPO, "build", "nagy.cas"), "/files/nagy.cas")
+    bsym = {}
+    for line in open(os.path.join(REPO, "build", "nagy.sym")):
+        if ": EQU " in line:
+            k, v = line.split(": EQU ")
+            bsym[k.strip()] = int(v, 16)
+    bsong = open(os.path.join(REPO, "build", "song.bin"), "rb").read()
+    check("nagy dal: tömörítve (a program 42155 bájtnál hosszabb)",
+          os.path.getsize(os.path.join(REPO, "build", "nagy.cas")) < len(bsong),
+          "%d bájt .cas, %d bájt dal" % (os.path.getsize(os.path.join(REPO, "build", "nagy.cas")), len(bsong)))
+    check("nagy dal: a dal a lyukon át ér (SPLIT_LEN > 0)", bsym.get("SPLIT_LEN", 0) > 0)
+    # lejátszás közben: a dal a memóriában folytonos (a lyuk és a C000h körül is)
+    rb_ = subprocess.check_output([exe, args.roms, "nagy", "7", os.path.join(out, "nagy.wav"),
+                                   os.path.join(out, "nagy_ports.txt")],
+                                  env=dict(os.environ, MACHINE="tvc64-12", DUMP="BD00,600")).decode()
+    mem = bytes(int(x, 16) for x in rb_.split("dump bd00:")[1].split("\n")[0].split())
+    off = 0xBD00 - bsym["song"]
+    check("nagy dal: lejátszás közben a dal folytonos a BASIC verme helyén és az U3-ban",
+          mem == bsong[off:off + len(mem)])
+    with wave.open(os.path.join(out, "nagy.wav")) as w:
+        dn = struct.unpack("<%dh" % w.getnframes(), w.readframes(w.getnframes()))
+    check("nagy dal: szól a hang", max(dn[-2 * rate:]) - min(dn[-2 * rate:]) > 2000)
+    sc = os.path.join(out, "nagy.ppm")
+    rn = subprocess.check_output([exe, args.roms, "nagy", "9", os.path.join(out, "nagy_esc.wav"),
+                                  os.path.join(out, "nagy_esc.txt"), "7"],
+                                 env=dict(os.environ, MACHINE="tvc64-12", SCREEN=sc, ALLPORTS="1")).decode()
+    pg = [l.split() for l in open(os.path.join(out, "nagy_esc.txt")) if l.split()[2] == "02"]
+    mine02 = [int(p[3], 16) for p in pg if bsym["start"] <= int(p[1], 16) < bsym["song"]]
+    check("nagy dal: az U3 be, a végén a ROM vissza (02h port)", mine02[:1] == [0xB0] and mine02[-1:] == [0x70],
+          " ".join("%02X" % v for v in mine02))
+    check("nagy dal: ESC után a BASIC folytatja, az IT-belépő visszaállt", basic_ok(sc) and isr_restored(rn))
+
     # 3c. hangkártyák: GameCard (2. hely), Multichip (3. hely), TVC256k++, és kártya nélkül;
     # a Multichip mindhárom chipjével (SAA1099, OPL2 külön fordítással; mind együtt: OPL2)
     built = None

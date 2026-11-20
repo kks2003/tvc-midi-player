@@ -883,7 +883,7 @@
   const DEFAULTS = {
     mode: 'arp', prio: 'high', maxNotes: 3, arpBass: false, arpSpeed: 1, polyVolume: 9, polyKnee: 10, polyMix: 'clean',
     channels: null, drums: 'synth', transpose: 0, tuning: 440.0, speed: 1.0, rate: FRAME_RATE,
-    decay: 0, decayFloor: 6, curve: 0.7, minVolume: 6, maxVolume: 15, loop: false, loopPause: 0, drumVolume: 100, gain: 100, envelopes: null, fastIrq: false, bend: false, cards: [], background: false, from: null, to: null, trim: false,
+    decay: 0, decayFloor: 6, curve: 0.7, minVolume: 6, maxVolume: 15, loop: false, loopPause: 0, drumVolume: 100, gain: 100, envelopes: null, fastIrq: false, bend: false, cards: [], compress: 'auto', background: false, from: null, to: null, trim: false,
     polyDiv: 19, wave: 'square', channelWave: null,     // channelWave: {csatorna (1..16): hullámforma}
   };
 
@@ -954,8 +954,12 @@
         ['FEAT_OPL', (o.cards || []).includes('opl')], ['FEAT_FASTMIX', o.polyMix === 'fast'],
         ['FEAT_WAVE_PULSE12', used.has('pulse12')],
         ['FEAT_DECAY', (o.envelopeData ? 0 : o.decay) > 0 || (r.stats.slides || 0) > 0],
-        ['FEAT_WAVECHG', r.slots.length > 1], ['FEAT_LOOP', !!o.loop]]
+        ['FEAT_WAVECHG', r.slots.length > 1], ['FEAT_LOOP', !!o.loop],
+        ['FEAT_BIGMEM', polyTablesEnd(PLAYER_EST, song.length, r.slots.length) > BIG_LIMIT]]
         .filter((x) => x[1]).map((x) => x[0]);
+      if (polyTablesEnd(PLAYER_MIN, song.length, r.slots.length) > BIG_TOP)
+        throw new Error('a dal túl nagy: a hullámtáblákkal együtt a 64 KB-ban sem fér el (' + song.length +
+          ' bájt; kevesebb féle hullámforma vagy rövidebb rész segít)');
       rate = tickRate;
     } else {
       let r = convert(notes, o, drums);
@@ -974,6 +978,8 @@
     const warnings = [];
     if (o.mode !== 'poly' && o.envelopes)
       warnings.push('a burkológörbék csak a többszólamú lejátszóval működnek');
+    if (o.mode !== 'poly' && song.length + 1500 > LOAD_LIMIT)
+      warnings.push('az egycsatornás lejátszóval a program legfeljebb ' + LOAD_LIMIT + ' bájt lehet (a ROM-ot használja, így az U3 nem kapcsolható be); a többszólamú mód nagyobb dalt is lejátszik');
     if (o.mode === 'poly' && o.background)
       warnings.push('a háttér-mód csak az egycsatornás lejátszóval működik (a poly a teljes CPU-t használja)');
     const used = [...new Set(notes.map((n) => n[2]))].sort((a, b) => a - b);
@@ -1015,10 +1021,15 @@
   // POLY_FEATURES / MONO_FEATURES / features_inc
   const POLY_FEATURES = ['FEAT_DRUMS', 'FEAT_WAVE_PULSE', 'FEAT_WAVE_TRI', 'FEAT_WAVE_SAW', 'FEAT_WAVE_NOISE', 'FEAT_WAVE_SINE', 'FEAT_IRQ0038', 'FEAT_PITCH',
     'FEAT_CARDS', 'FEAT_SN', 'FEAT_SID', 'FEAT_SAA', 'FEAT_OPL', 'FEAT_FASTMIX', 'FEAT_WAVE_PULSE12',
-    'FEAT_DECAY', 'FEAT_WAVECHG', 'FEAT_LOOP'];
+    'FEAT_DECAY', 'FEAT_WAVECHG', 'FEAT_LOOP', 'FEAT_BIGMEM'];
+  // memória (midi2tvc.py BASIC_START .. poly_memory): a BASIC-nek BIG_LIMIT-ig; fölötte
+  // a többszólamú lejátszó az U3 RAM-ot kapcsolja be (FEAT_BIGMEM, 64k-s gép)
+  const BASIC_START = 0x19EF, PLAYER_EST = 3300, PLAYER_MIN = 850, BIG_LIMIT = 0xBC00, BIG_TOP = 0xFD00, LOAD_LIMIT = 42155;
+  const polyTablesEnd = (codeLen, songLen, nslots) => ((BASIC_START + codeLen + songLen + 255) & ~255) + 256 * (2 + 8 * nslots);
   const MONO_FEATURES = ['FEAT_DRUMS', 'FEAT_BG'];
   const featureNames = (mode) => (mode === 'poly' ? POLY_FEATURES : MONO_FEATURES);
-  const featuresInc = (result) => featureNames(result.mode).map((n) => n + ' equ ' + (result.features.includes(n) ? 1 : 0) + '\n').join('');
+  const featuresInc = (result) => featureNames(result.mode).map((n) => n + ' equ ' + (result.features.includes(n) ? 1 : 0) + '\n').join('') +
+    (result.mode === 'poly' ? 'SONG_BYTES equ ' + result.song.length + '\n' : '');
   // a lejátszó fordítása a dalhoz (böngészős sjasmplus: assembler.js run) -> {cas, codeLen}
   async function assembleCas(run, players, result, title) {
     const asm = result.mode === 'poly' ? 'player_poly.asm' : 'player.asm';
@@ -1065,7 +1076,7 @@
     ['arpSpeed', '--arp-speed'], ['polyVolume', '--poly-volume'], ['polyKnee', '--poly-knee'], ['polyMix', '--poly-mix'],
     ['channels', '--channels'], ['drums', '--drums'], ['transpose', '--transpose'], ['tuning', '--tuning'],
     ['speed', '--speed'], ['decay', '--decay'], ['decayFloor', '--decay-floor'], ['curve', '--curve'],
-    ['minVolume', '--min-volume'], ['maxVolume', '--max-volume'], ['loop', '--loop'], ['loopPause', '--loop-pause'], ['drumVolume', '--drum-volume'], ['gain', '--gain'], ['fastIrq', '--fast-irq'], ['bend', '--bend'], ['cards', '--cards'], ['envelopes', '--envelopes'],
+    ['minVolume', '--min-volume'], ['maxVolume', '--max-volume'], ['loop', '--loop'], ['loopPause', '--loop-pause'], ['drumVolume', '--drum-volume'], ['gain', '--gain'], ['fastIrq', '--fast-irq'], ['bend', '--bend'], ['cards', '--cards'], ['compress', '--compress'], ['envelopes', '--envelopes'],
     ['background', '--background'], ['from', '--from'], ['to', '--to'], ['trim', '--trim'], ['polyDiv', '--poly-div'], ['wave', '--wave'], ['channelWave', '--channel-wave'],
   ];
   function cliArgs(opts) {
@@ -1093,7 +1104,7 @@
   // kész .cas, build.sh és README.txt; a build.sh-val bájtra ugyanez a .cas
   // fordul újra (sjasmplus)
   function sourcePackage(p) {
-    const { players, result, midiBytes, midiName, title, casBytes, name } = p;
+    const { players, result, midiBytes, midiName, title, casBytes, name, compressed } = p;
     const asm = result.mode === 'poly' ? 'player_poly.asm' : 'player.asm';
     const args = cliArgs(result.options);
     const tb = titleBytes(title);
@@ -1102,6 +1113,9 @@
       '# a ' + name + '.cas újrafordítása a forrásból (kell: sjasmplus)\n' +
       'set -e\ncd "$(dirname "$0")"\nmkdir -p build\n' +
       'sjasmplus --nologo --msg=war --raw=build/' + name + '.cas --sym=build/' + name + '.sym ' + asm + '\n' +
+      (compressed ? '# önkicsomagoló .cas (auTVC, kell: node)\n' +
+        'node -e "const c = require(\'./autvc-core.js\'), fs = require(\'fs\'), f = process.argv[1]; ' +
+        'fs.writeFileSync(f, c.build({ input: fs.readFileSync(f), autorun: true, lineNumber: 1 }).bytes)" build/' + name + '.cas\n' : '') +
       'if cmp -s build/' + name + '.cas ' + name + '.cas; then echo "kész: build/' + name + '.cas (azonos a csomagban lévővel)"; ' +
       'else echo "kész: build/' + name + '.cas (ELTÉR a csomagban lévőtől)"; fi\n';
     const pad = (t) => t + ' '.repeat(Math.max(1, 20 - t.length));
@@ -1122,13 +1136,14 @@
       '  build/title.bin     a cím (32 bájt, a BASIC PRINT sorban)',
       '  build/features.inc  a lejátszóba kerülő részek (a dalhoz kellők)',
       '  build.sh            újrafordítás: ./build.sh -> build/' + name + '.cas',
+    ].concat(compressed ? ['  autvc-core.js       a tömörítő (auTVC: önkicsomagoló .cas; node kell)'] : [], [
       '',
       'A dal adatai a tvc-midi-player repó midi2tvc.py konverterével, ugyanezekkel',
       'a beállításokkal így készíthetők el a MIDI-ből (a repó gyökeréből):',
       '',
       '  ' + cmd,
       '',
-    ].join('\n');
+    ]).join('\n');
     return [
       [name + '/' + name + '.cas', casBytes],
       [name + '/' + midiName, midiBytes],
@@ -1140,7 +1155,8 @@
       [name + '/build/features.inc', enc(featuresInc(result))],
       [name + '/build.sh', enc(build)],
       [name + '/README.txt', enc(readme)],
-    ].concat(result.options.envelopes && typeof result.options.envelopes !== 'string'
+    ].concat(compressed && players.sources['autvc-core.js'] ? [[name + '/autvc-core.js', enc(players.sources['autvc-core.js'])]] : [],
+      result.options.envelopes && typeof result.options.envelopes !== 'string'
       ? [[name + '/' + (result.options.envelopes.name || 'envelope.txt'), enc(result.options.envelopes.text)]] : []);
   }
 
@@ -1192,7 +1208,7 @@
   const api = {
     TVC_CLOCK, FRAME_RATE, CPU_CLOCK, POLY_VOICES, WAVES, WAVE_NAMES, DRUM_CHANNEL, DRUM_KIT, POLY_KIT, DEFAULTS,
     compileEnvelopes, envelopeLevels, envelopeFrames, featuresInc, featureNames, assembleCas, pyRound, parseMidi, collectNotes, pitchTable, polyFreqTable, polyMixTable, polyRates, noteFreq,
-    convertMidi, buildCas, titleBytes, asciiName, selectRange, cliArgs, sourcePackage, zipFiles,
+    convertMidi, buildCas, titleBytes, LOAD_LIMIT, BIG_TOP, BIG_LIMIT, polyTablesEnd, asciiName, selectRange, cliArgs, sourcePackage, zipFiles,
   };
   if (typeof module !== 'undefined' && module.exports) module.exports = api;
   else root.Midi2Tvc = api;
