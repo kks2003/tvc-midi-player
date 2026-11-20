@@ -84,6 +84,7 @@
           v.vol = a & 15; v.f = F(n); v.slide = 0; v.dec = decay; v.cnt = decay; v.floor = floor;
           v.note = n; v.drum = false;
         } else if (a < 0xB3) vs[a - 0xB0].vol = 0;
+        else if (a >= 0xB3 && a < 0xB6) { vs[a - 0xB3].f = song[ptr] | (song[ptr + 1] << 8); ptr += 2; }
         else if (a >= 0xB8 && a < 0xBB) {
           const v = vs[a - 0xB8], n = song[ptr++], b = song[ptr++];
           v.f = F(n); v.dec = b & 15; v.cnt = v.dec; v.vol = b >> 4; v.floor = 0;

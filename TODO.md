@@ -36,10 +36,12 @@ kicsi és gyors, vagy teljes tudású, vagy egy adott hangkártyára szabott.
   rövid, valódi dobminták a DAC-on (lábdob, pergő, cin, taps). Egy szólamot
   egyszeri lejátszású mintatáblára állít. Opció: mintakészlet (beépített vagy
   saját WAV), mintavétel, a minták hossza. Ára: néhány KB adat.
-- [ ] **Hangmagasság-hajlítás és vibrato.** A MIDI pitch bend, a modulációs
-  kerék és a burkológörbék hangmagasság-része (most kimarad). A lejátszó
-  csúszás-parancsával (`B8+s`) vagy egy új „frekvencia beállítás” paranccsal.
-- [ ] **0038h-s gyorsítás.** A mintakezelő a 0000h-tól másolva, hogy pontosan
+- [x] **Hangmagasság-hajlítás és vibrato** (`--bend`, `FEAT_PITCH`): MIDI pitch
+  bend (RPN 0 tartomány), vibrato a modulációs kerékről, a burkológörbék
+  hangmagassága; új `B3+s lo hi` parancs. Emulátorban ellenőrizve. (Az
+  egycsatornás lejátszóban még nincs.)
+- [x] **0038h-s gyorsítás** (`--fast-irq`, `FEAT_IRQ0038`, kapcsolható): emulátorban
+  mindhárom gépen ellenőrizve (hangmagasság, a 0038h–0088h terület visszaáll). Eredeti leírás: A mintakezelő a 0000h-tól másolva, hogy pontosan
   a 0038h-ra essen (a SID-lejátszó módszere: a terület mentése és
   visszaállítása). Mintánként −10 ciklus. A 0040h–006Fh a 0. kártyahely
   munkaterülete: mentés és visszaállítás kell, a dokumentáció szerint így

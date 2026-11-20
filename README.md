@@ -86,6 +86,8 @@ Helyben a `web/index.html` közvetlenül megnyitható (`file://` is jó). A
 | `--curve`, `--min-volume`, `--max-volume` | MIDI erősség (velocity × CC7 × CC11) leképezése a 4 bites hangerőre |
 | `--loop` | a dal végtelenítve szól |
 | `--envelopes NÉV\|FÁJL` | többszólamú mód: hangszer-burkológörbék a midiplay formátumában: `midiplay` (a midiplay 2.4-es készlete), `tvc` (a TVC-s dav2play változat) vagy egy saját `envelope.txt` (lásd lent) |
+| `--bend` | többszólamú mód: hangmagasság-hajlítás (MIDI pitch bend, a tartomány RPN 0-ból, alap ±2 félhang), vibrato a modulációs kerékről (5,5 Hz, legfeljebb ±50 cent) és a burkológörbék hangmagassága (768 = egy oktáv). A frekvencia tickenként, egész számokkal (centtáblával) számolva, `B3+s lo hi` paranccsal |
+| `--fast-irq` | többszólamú mód: a mintakezelő a 0038h-ra kerül (kb. 4% CPU-val kevesebb) |
 | `--gain SZÁZALÉK` | globális hangerő (alap: 100; `max` = a legnagyobb, ami még nem torzít). Többszólamú módban a keverőtáblát szorozza; egyszólamúban a hangerőket, 15-ön megállva |
 | `--drum-volume SZÁZALÉK` | a szintetizált dob hangereje (alap: 100; a webes felületen 10–150%) |
 | `--loop-pause MP` | ismétlésnél ennyi másodperc szünet a dal vége után (a webes felületen 1–9 mp; alap: 0 = szünet nélkül folytatódik) |
@@ -162,6 +164,8 @@ kerül, amit a dal használ. A konverter a dalból dönti el, és a
 | --- | --- | --- |
 | többszólamú | `FEAT_DRUMS` | ha szól szintetizált dob (csúszás, `B8` esemény) |
 | többszólamú | `FEAT_WAVE_PULSE`, `_TRI`, `_SAW`, `_NOISE`, `_SINE` | ha a dal használja az adott hullámformát (a négyszög mindig) |
+| többszólamú | `FEAT_IRQ0038` | `--fast-irq`: a mintakezelő a 0038h-n (−10 ciklus mintánként; a 0038h–0088h területet a lejátszás alatt használja, a végén visszaállítja) |
+| többszólamú | `FEAT_PITCH` | `--bend`, ha a dalban van hajlítás, vibrato vagy burkológörbe-hangmagasság (`B3+s lo hi` parancs) |
 | egycsatornás | `FEAT_DRUMS` | ha van dobkészlet |
 | egycsatornás | `FEAT_BG` | `--background` |
 

@@ -70,6 +70,7 @@ MAX_SLOTS   equ 5
 ; +336 eseménylista:
 ;   80+16*s+h  n        hang a szólamon (s = 0..2, h = hangerő 0..15), n = hangjegy
 ;   B0+s                a szólam elhallgat
+;   B3+s lo hi          a szólam fázisnövekménye (hajlítás, vibrato; FEAT_PITCH)
 ;   B8+s n vd lo hi     csúszó / lecsengő hang (dob): n = kezdőhang, v/d hangerő
 ;                       és lecsengés (0-ig), lo hi = fázisnövekmény-változás / tick
 ;   BB+s h              a szólam hullámforma-helye (h = 0..4)
@@ -395,6 +396,10 @@ events:
             jr c, .note
             cp 0B3h
             jp c, .off
+            IF FEAT_PITCH
+            cp 0B6h
+            jp c, .freq
+            ENDIF
             cp 0B8h
             jr c, .next
             cp 0BBh
@@ -479,6 +484,21 @@ events:
             ld (hl), 0
             pop hl
             jp .next
+            IF FEAT_PITCH
+.freq:                              ; B3+s lo hi: fázisnövekmény (hajlítás, vibrato)
+            sub 0B3h
+            ld c, (hl)
+            inc hl
+            ld b, (hl)
+            inc hl
+            push hl
+            call voice_hl           ; HL = VS_F
+            ld (hl), c
+            inc hl
+            ld (hl), b
+            pop hl
+            jp .next
+            ENDIF
 .wave:                              ; BB+s h
             sub 0BBh
             ld c, (hl)

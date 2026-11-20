@@ -122,6 +122,8 @@ def parse_midi(data):
                 events.append((tick, order, "on", ch, a, v))
             elif hi == 0x80 or hi == 0x90:
                 events.append((tick, order, "off", ch, a, 0))
+            elif hi == 0xE0:
+                events.append((tick, order, "pb", ch, a, v))
             elif hi == 0xB0:
                 events.append((tick, order, "cc", ch, a, v))
             order += 1
@@ -231,6 +233,83 @@ def collect_notes(division, events, channels, transpose, speed):
                 finish(ch, n, st, v, end)
     notes.sort()
     return notes
+
+
+# ---- hangmagasság-hajlítás, vibrato (--bend) ------------------------------------
+# A frekvencia egész számokkal: a hangjegy fázisnövekménye * 2^(cent/1200), a
+# centek 0..99-re táblából (a webes konverterrel bájtra azonos eredményért).
+CENT_RATIO = [65536, 65574, 65612, 65650, 65688, 65726, 65764, 65802, 65840, 65878, 65916, 65954, 65992, 66030, 66068, 66106, 66144, 66183, 66221, 66259, 66297, 66336, 66374, 66412, 66451, 66489, 66528, 66566, 66605, 66643, 66682, 66720, 66759, 66797, 66836, 66874, 66913, 66952, 66990, 67029, 67068, 67107, 67145, 67184, 67223, 67262, 67301, 67340, 67378, 67417, 67456, 67495, 67534, 67573, 67612, 67651, 67691, 67730, 67769, 67808, 67847, 67886, 67926, 67965, 68004, 68043, 68083, 68122, 68161, 68201, 68240, 68280, 68319, 68359, 68398, 68438, 68477, 68517, 68556, 68596, 68635, 68675, 68715, 68755, 68794, 68834, 68874, 68914, 68953, 68993, 69033, 69073, 69113, 69153, 69193, 69233, 69273, 69313, 69353, 69393]
+VIB_SIN = [0, 383, 707, 924, 1000, 924, 707, 383, 0, -383, -707, -924, -1000, -924, -707, -383]
+VIB_HZ = 5.5                        # a vibrato sebessége
+VIB_DEPTH = 50                      # cent teljes modulációnál
+
+
+def collect_controls(division, events, channels, speed):
+    """-> ({cs: [(mp, cent)]} hajlítás, {cs: [(mp, 0..127)]} moduláció).  A
+    hajlítási tartomány az RPN 0-ból (alap: 2 félhang)."""
+    conv = tick_to_seconds(division, events)
+    rng = [2] * 16
+    rpn = [[127, 127] for _ in range(16)]
+    bends, mods = {}, {}
+    for tick, _, kind, ch, a, b in events:
+        if channels is not None and ch not in channels:
+            continue
+        t = conv(tick) / speed
+        if kind == "cc":
+            if a == 101:
+                rpn[ch][0] = b
+            elif a == 100:
+                rpn[ch][1] = b
+            elif a == 6 and rpn[ch] == [0, 0]:
+                rng[ch] = b
+            elif a == 1:
+                mods.setdefault(ch, []).append((t, b))
+            elif a == 121:              # minden vezérlő alapra
+                bends.setdefault(ch, []).append((t, 0))
+                mods.setdefault(ch, []).append((t, 0))
+        elif kind == "pb":
+            val = ((b << 7) | a) - 8192
+            bends.setdefault(ch, []).append((t, int(round(val * rng[ch] * 100 / 8192.0))))
+    return bends, mods
+
+
+def control_ticks(ctl, shift, rate):
+    """{cs: [(mp, érték)]} -> {cs: ([tick], [érték])}; a rész előtti értékek a 0. tickre"""
+    out = {}
+    for ch, lst in ctl.items():
+        ts, vs = [], []
+        for t, v in lst:
+            tk = max(0, int(round((t - shift) * rate)))
+            if ts and ts[-1] == tk:
+                vs[-1] = v
+            else:
+                ts.append(tk)
+                vs.append(v)
+        out[ch] = (ts, vs)
+    return out
+
+
+def control_at(ctl, ch, t):
+    """a csatorna vezérlőértéke a t. tickben (0, ha nincs)"""
+    c = ctl.get(ch)
+    if not c:
+        return 0
+    ts, vs = c
+    lo, hi = 0, len(ts)
+    while lo < hi:
+        mid = (lo + hi) // 2
+        if ts[mid] <= t:
+            lo = mid + 1
+        else:
+            hi = mid
+    return vs[lo - 1] if lo else 0
+
+
+def bent_freq(ftab, note, cents):
+    """a hangjegy fázisnövekménye a hajlítással (cent)"""
+    n = note + cents // 100
+    n = max(0, min(127, n))
+    return max(1, min(32767, (ftab[n] * CENT_RATIO[cents % 100] + 32768) >> 16))
 
 
 def select_range(notes, drum_notes, start, end, speed, trim):
@@ -545,11 +624,13 @@ def compile_envelopes(text):
                 raise EnvelopeError("szintaktikai hiba a burkológörbe-fájlban")
         vl, vl_inc, vl_mult = 0x80, 0, 0
         vr, vr_inc, vr_mult = 0x80, 0, 0
+        pb, pb_inc = 0x80, 0
         d = 0
         frames = []
         while True:
             if d:
-                frames.append(((vl >> 8) & 0xFF, (vr >> 8) & 0xFF))
+                frames.append(((vl >> 8) & 0xFF, (vr >> 8) & 0xFF, pb >> 8))
+                pb += pb_inc
                 d -= 1
                 vl &= 0x3FFF
                 vl = (vl * vl_mult + 64) >> 7 if vl_mult else vl + vl_inc
@@ -621,13 +702,23 @@ def compile_envelopes(text):
                             vr_inc = tdiv(x, d)
                 if read_char() != ",":
                     raise EnvelopeError("szintaktikai hiba a burkológörbe-fájlban")
-            expect("0")                 # hangmagasság
-            read_number()
+            expect("0")                 # hangmagasság (768 = egy oktáv)
+            n = read_number()
+            if not -2048 <= n <= 2047:
+                raise EnvelopeError("hibás hangmagasság a burkológörbe-fájlban")
+            pv = (n << 8) | 0x80
+            pb_inc = 0
+            if not d:
+                pb = pv
+            elif pv != pb:
+                x = pv - pb
+                x += -(d >> 1) if x < 0 else d >> 1
+                pb_inc = tdiv(x, d)
             expect(",")
             expect("0")                 # torzítás
             read_number()
             expect(";")
-        frames.append((0x80, 0x00 if not flags else 0xFF))
+        frames.append((0x80, 0x00 if not flags else 0xFF, 0))
         for n in progs:
             if n >= 0:
                 out[n] = (frames, flags)
@@ -644,8 +735,14 @@ def load_envelopes(name):
 
 
 def envelope_levels(env, held):
-    """A hang burkológörbéje képkockánként (0..63), a midiplay lejátszója
-    szerint: held képkocka után engedik el.  A lista vége a hang vége."""
+    """A hang burkológörbéje képkockánként (0..63)"""
+    return [lv for lv, _ in envelope_frames(env, held)]
+
+
+def envelope_frames(env, held):
+    """A hang burkológörbéje képkockánként: (hangerő 0..63, hangmagasság a
+    fájl egységében, 768 = egy oktáv), a midiplay lejátszója szerint: held
+    képkocka után engedik el.  A lista vége a hang vége."""
     frames, flags = env
     state = flags & 0xB0
     releasing = False
@@ -661,7 +758,7 @@ def envelope_levels(env, held):
                 ptr += 1
         if ptr >= len(frames):
             break
-        b0, b1 = frames[ptr]
+        b0, b1, pt = frames[ptr]
         if b0 & 0xC0:
             if b1 == 0xFF:
                 break
@@ -673,7 +770,7 @@ def envelope_levels(env, held):
                 elif m == 0x80:
                     if loop is None:
                         break
-                    b0, b1 = frames[loop]
+                    b0, b1, pt = frames[loop]
                     ptr = loop + 1
                 else:
                     state = 0x10
@@ -682,7 +779,7 @@ def envelope_levels(env, held):
             b0 &= 0x3F
         else:
             ptr += 1
-        out.append(max(b0, b1))
+        out.append((max(b0, b1), pt))
         t += 1
     return out
 
@@ -710,8 +807,12 @@ def poly_envelope_ticks(ticks, args, vmin, vmax):
     floor = max(0, min(15, args.decay_floor))
     for st, en, n, v, ch, idx, pg in ticks:
         base = velocity_to_volume(v, args.curve, vmin, vmax)
+        pit = None
         if pg in env:
-            seq = [(x * base * 2 + 63) // 126 for x in envelope_levels(env[pg], en - st)]
+            fr = envelope_frames(env[pg], en - st)
+            seq = [(x * base * 2 + 63) // 126 for x, _ in fr]
+            if any(p for _, p in fr):
+                pit = [int(round(p * 25 / 16.0)) for _, p in fr]     # cent
         elif args.decay:            # a lejátszó lecsengése, itt kiszámolva
             seq = [max(min(base, floor), base - k // args.decay) for k in range(en - st)]
         else:
@@ -720,7 +821,7 @@ def poly_envelope_ticks(ticks, args, vmin, vmax):
             seq.pop()
         if not seq:
             continue
-        seqs[idx] = (seq, en)
+        seqs[idx] = (seq, en, pit)
         out.append((st, st + len(seq), n, v, ch, idx, pg))
     return out, seqs
 
@@ -758,6 +859,9 @@ def convert_poly(notes, drums, args, sr, tick_rate, ftab, ch_waves):
     cur = [None] * POLY_VOICES        # (idx, note)
     reserved = [0] * POLY_VOICES      # dob foglalja eddig a tickig
     vslot = [0] * POLY_VOICES         # a szólam hullámforma-helye a lejátszóban
+    vfreq = [None] * POLY_VOICES      # a szólam fázisnövekménye a lejátszóban
+    bend_on = bool(getattr(args, "bend", False))
+    bends, mods = getattr(args, "bend_ctl", None) or ({}, {})
     slot_of(args.wave)                # az alap hullámforma a 0. hely
 
     def set_wave(v, wave):
@@ -844,6 +948,7 @@ def convert_poly(notes, drums, args, sr, tick_rate, ftab, ch_waves):
             set_wave(v, ch_waves.get(ch, args.wave))
             emit(bytes((0x80 + 16 * v + vol, n)))
             lvl[v] = vol
+            vfreq[v] = ftab[n]
             stats["notes"] += 1
             new_cur[v] = (idx, n)
             placed.add(idx)
@@ -860,6 +965,24 @@ def convert_poly(notes, drums, args, sr, tick_rate, ftab, ch_waves):
                 if lev != lvl[v]:
                     emit(bytes((0x80 + 16 * v + lev, n)))
                     lvl[v] = lev
+                    vfreq[v] = ftab[n]
+            # hajlítás, vibrato, a burkológörbe hangmagassága: B3+s lo hi
+            if bend_on and cur[v] is not None:
+                idx, n = cur[v]
+                st, ch = active[idx][0], active[idx][4]
+                c = control_at(bends, ch, t)
+                m = control_at(mods, ch, t)
+                if m:
+                    k = int(t * VIB_HZ * 16 / tick_rate) % 16
+                    c += int(round(m * VIB_DEPTH * VIB_SIN[k] / (127 * 1000.0)))
+                sq = seqs.get(idx)
+                if sq and sq[2] and t - st < len(sq[2]):
+                    c += sq[2][t - st]
+                f = bent_freq(ftab, n, c)
+                if f != vfreq[v]:
+                    emit(bytes((0xB3 + v, f & 0xFF, f >> 8)))
+                    vfreq[v] = f
+                    stats["bends"] = stats.get("bends", 0) + 1
         stats["peak_sum"] = max(stats["peak_sum"], sum(poly_peak(x) for x in lvl))
         pending[0] += 1
     encode_wait_poly(out, pending[0])
@@ -1061,6 +1184,9 @@ def main():
     ap.add_argument("--min-volume", type=int, default=6)
     ap.add_argument("--max-volume", type=int, default=15)
     ap.add_argument("--loop", action="store_true", help="a dal végtelenítve szól")
+    ap.add_argument("--bend", action="store_true",
+                    help="többszólamú mód: hangmagasság-hajlítás (pitch bend, RPN-tartomány), vibrato "
+                         "a modulációs kerékről és a burkológörbék hangmagassága")
     ap.add_argument("--fast-irq", action="store_true",
                     help="többszólamú mód: a mintakezelő a 0038h-ra kerül (-10 ciklus mintánként; "
                          "a 0038h..0088h területet a lejátszás alatt használja, a végén visszaállítja)")
@@ -1125,6 +1251,9 @@ def main():
         ap.error("--to legyen nagyobb, mint --from")
     notes, drum_notes, shift, args.min_len = select_range(notes, drum_notes, args.start, args.end,
                                                           args.speed, args.trim)
+    if args.bend:
+        args.bend_raw = collect_controls(division, events, channels, args.speed)
+        args.bend_shift = shift
     drums = drum_hits(drum_notes, args.rate, args.curve) if use_drums else {}
     if not notes and not drums:
         sys.exit("a kiválasztott csatornákon (és részben) nincs hang")
@@ -1195,7 +1324,7 @@ def ascii_name(name):
 # a .cas-ba csak a dalhoz kellő kód kerül.  A sorrend és a szöveg a webes
 # konverterével (midi2tvc.js featuresInc) azonos.
 POLY_FEATURES = ["FEAT_DRUMS", "FEAT_WAVE_PULSE", "FEAT_WAVE_TRI", "FEAT_WAVE_SAW",
-                 "FEAT_WAVE_NOISE", "FEAT_WAVE_SINE", "FEAT_IRQ0038"]
+                 "FEAT_WAVE_NOISE", "FEAT_WAVE_SINE", "FEAT_IRQ0038", "FEAT_PITCH"]
 MONO_FEATURES = ["FEAT_DRUMS", "FEAT_BG"]
 
 
@@ -1230,6 +1359,9 @@ def write_poly(args, notes, drums_sec, gain_auto=False):
         if old is None or DRUM_PRIORITY.index(hit[0]) < DRUM_PRIORITY.index(old[0]):
             drums[tt] = hit
     ftab = poly_freq_table(args.tuning, sr)
+    if args.bend:
+        args.bend_ctl = (control_ticks(args.bend_raw[0], args.bend_shift, tick_rate),
+                         control_ticks(args.bend_raw[1], args.bend_shift, tick_rate))
     try:
         ch_waves = parse_channel_waves(args.channel_wave)
         body, total, stats, slots = convert_poly(notes, drums, args, sr, tick_rate, ftab, ch_waves)
@@ -1254,7 +1386,7 @@ def write_poly(args, notes, drums_sec, gain_auto=False):
         ("FEAT_DRUMS", stats.get("slides", 0) > 0), ("FEAT_WAVE_PULSE", "pulse" in used),
         ("FEAT_WAVE_TRI", "triangle" in used), ("FEAT_WAVE_SAW", "saw" in used),
         ("FEAT_WAVE_NOISE", "noise" in used), ("FEAT_WAVE_SINE", "sine" in used),
-        ("FEAT_IRQ0038", args.fast_irq)) if on})
+        ("FEAT_IRQ0038", args.fast_irq), ("FEAT_PITCH", stats.get("bends", 0) > 0)) if on})
     print("poly: %.0f Hz mintavétel (osztó %d), %.2f tick/s, a keverés a CPU %.0f%%-a; "
           "hullámformák: %s; táblák: %d bájt a program után"
           % (sr, args.poly_div, tick_rate, 100 * poly_cpu_load(args.poly_div, args.fast_irq),
