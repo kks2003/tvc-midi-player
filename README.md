@@ -86,6 +86,7 @@ Helyben a `web/index.html` közvetlenül megnyitható (`file://` is jó). A
 | `--curve`, `--min-volume`, `--max-volume` | MIDI erősség (velocity × CC7 × CC11) leképezése a 4 bites hangerőre |
 | `--loop` | a dal végtelenítve szól |
 | `--envelopes NÉV\|FÁJL` | többszólamú mód: hangszer-burkológörbék a midiplay formátumában: `midiplay` (a midiplay 2.4-es készlete), `tvc` (a TVC-s dav2play változat) vagy egy saját `envelope.txt` (lásd lent) |
+| `--env-player` | többszólamú mód, `--envelopes`-szal: a burkológörbéket a lejátszó lépteti (`FEAT_ENVPLAY`): a dalban használt hangszerek görbéi táblaként kerülnek a programba, hangonként csak egy indító (`B6`) és egy elengedő (`B7`) parancs; a dal adata kisebb, a hang ugyanaz |
 | `--bend` | többszólamú mód: hangmagasság-hajlítás (MIDI pitch bend, a tartomány RPN 0-ból, alap ±2 félhang), vibrato a modulációs kerékről (5,5 Hz, legfeljebb ±50 cent) és a burkológörbék hangmagassága (768 = egy oktáv). A frekvencia tickenként, egész számokkal (centtáblával) számolva, `B3+s lo hi` paranccsal |
 | `--fast-irq` | többszólamú mód: a mintakezelő a 0038h-ra kerül (kb. 4% CPU-val kevesebb) |
 | `--gain SZÁZALÉK` | globális hangerő (alap: 100; `max` = a legnagyobb, ami még nem torzít). Többszólamú módban a keverőtáblát szorozza; egyszólamúban a hangerőket, 15-ön megállva |
@@ -171,6 +172,7 @@ kerül, amit a dal használ. A konverter a dalból dönti el, és a
 | többszólamú | `FEAT_DECAY` | ha van lecsengés (`--decay`) vagy dob |
 | többszólamú | `FEAT_WAVECHG` | ha több hullámforma-hely van (`BB` esemény) |
 | többszólamú | `FEAT_LOOP` | `--loop` |
+| többszólamú | `FEAT_ENVPLAY` | `--env-player`: burkológörbe-léptető és a használt hangszerek görbéi (a dal végén, a fejléc `+14` szava mutat rá) |
 | többszólamú | `FEAT_PITCH` | `--bend`, ha a dalban van hajlítás, vibrato vagy burkológörbe-hangmagasság (`B3+s lo hi` parancs) |
 | többszólamú | `FEAT_CARDS`, `FEAT_SN`, `FEAT_SID`, `FEAT_SAA`, `FEAT_OPL` | `--cards sn,sid,saa,opl`: hangkártya-felismerés és a kiválasztott chipek meghajtói (`chips.inc`) |
 | egycsatornás | `FEAT_DRUMS` | ha van dobkészlet |
@@ -276,6 +278,18 @@ belül eltér a nullától (a midiplay kórus-hangszerei, pl. 88 és 89, két
 ellentétesen elhangolt rétegben szólnak, a TVC-n csak egy), a görbe az átlagra
 igazodik, így nem hamis, a vibrato megmarad. Ahol a
 fájl egy programot nem ír le, ott a megszokott lecsengés marad.
+
+**A görbék a lejátszóban (`--env-player`, választható):** alapból a konverter
+számolja ki a görbéket, és tickenként hangerő-parancsokat ír a dalba (a
+lejátszóba nem kerül semmi, de a dal nagy). A `--env-player`-rel a dalban
+használt hangszerek görbéi táblaként kerülnek a programba, és a lejátszó
+lépteti őket (a midiplay `daveplay`-ével azonos módon, mint a konverter):
+hangonként csak `B6 sv n e` (szólam, hangerő, hangjegy, görbe) és az
+elengedéskor `B7 s`. A hang ugyanaz (az előnézetben mintára azonos, lecsengés
+nélkül; az emulátoros teszt lejátszás közben a szólamok hangerejét veti össze
+az előnézettel). A Fear of the Dark tvc-görbékkel 49,3 helyett 35,8 KB, a
+DuckTales 3-as lecsengéssel 6,9 helyett 4,7 KB. Ha egy hang nem az elején kap
+szólamot, a régi módon szól.
 
 **Szerkesztő a webes felületen** (Hangszerek → „Szerkesztő…”): a készlet
 hangszer-blokkokra bontva szerkeszthető (programszámok, szakaszok, L/R/S

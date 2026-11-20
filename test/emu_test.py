@@ -418,6 +418,43 @@ def main():
           " ".join("%02X" % v for v in mine02))
     check("nagy dal: ESC után a BASIC folytatja, az IT-belépő visszaállt", basic_ok(sc) and isr_restored(rn))
 
+    # 3b4. burkológörbék a lejátszóban (--env-player, FEAT_ENVPLAY): lejátszás közben a
+    # szólamok hangereje ugyanaz, mint az előnézetben ugyanannál az eseménynél
+    duck = os.path.join(REPO, "examples", "ducktales", "ducktales.mid")
+    subprocess.check_call([os.path.join(REPO, "build.sh"), duck, "--mode", "poly", "--envelopes", "tvc",
+                           "--env-player"], stdout=subprocess.DEVNULL)
+    shutil.copy(os.path.join(REPO, "build", "ducktales.cas"), "/files/denv.cas")
+    esym = {}
+    for line in open(os.path.join(REPO, "build", "ducktales.sym")):
+        if ": EQU " in line:
+            k, v = line.split(": EQU ")
+            esym[k.strip()] = int(v, 16)
+    esong = os.path.join(out, "denv.bin")
+    shutil.copy(os.path.join(REPO, "build", "song.bin"), esong)
+    js = ("const PV=require(process.argv[1]+'/web/preview.js');const fs=require('fs');const st=[];"
+          "PV.simulate(new Uint8Array(fs.readFileSync(process.argv[2])),'poly',44100,undefined,"
+          "(p,w,v)=>st.push(p+' '+w+' '+v.join(',')));console.log(st.join('\\n'))")
+    trace = set(subprocess.check_output(["node", "-e", js, REPO, esong]).decode().split("\n"))
+    base = esym["ptr"]
+    good = bad_ = 0
+    for secs in (8, 11, 14):
+        r_ = subprocess.check_output([exe, args.roms, "denv", str(secs), os.path.join(out, "denv.wav"),
+                                      os.path.join(out, "denv_ports.txt")],
+                                     env=dict(os.environ, DUMP="%04X,30" % base)).decode()
+        b_ = [int(x, 16) for x in r_.split("dump %04x:" % base)[1].split("\n")[0].split()]
+        at = lambda a: b_[a - base]
+        if at(esym["in_tick"]):
+            continue                    # egy tick közepén: nem összevethető
+        ptr_ = at(esym["ptr"]) | (at(esym["ptr"] + 1) << 8)
+        st_ = "%d %d %s" % (ptr_ - esym["song"], at(esym["wait"]) | (at(esym["wait"] + 1) << 8),
+                            ",".join(str(at(esym["vstate"] + 9 * v + 4)) for v in range(3)))
+        if st_ in trace:
+            good += 1
+        else:
+            bad_ += 1
+    check("burkológörbe a lejátszóban: a szólamok hangereje egyezik az előnézettel",
+          good > 0 and bad_ == 0, "%d egyezik, %d eltér" % (good, bad_))
+
     # 3c. hangkártyák: GameCard (2. hely), Multichip (3. hely), TVC256k++, és kártya nélkül;
     # a Multichip mindhárom chipjével (SAA1099, OPL2 külön fordítással; mind együtt: OPL2)
     built = None
