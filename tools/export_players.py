@@ -75,7 +75,7 @@ def main():
         result[key] = entry
     # a forráscsomaghoz (a weboldal "Forrás letöltése" gombja)
     result["sources"] = {name: open(os.path.join(ROOT, name), encoding="utf-8").read()
-                         for name in ("player.asm", "player_poly.asm", "cas.inc")}
+                         for name in ("player.asm", "player_poly.asm", "cas.inc", "chips.inc")}
     out = os.path.join(ROOT, "web", "players.js")
     with open(out, "w") as f:
         f.write("// generálta: tools/export_players.py (ne szerkeszd kézzel)\n")

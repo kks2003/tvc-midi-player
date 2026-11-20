@@ -64,7 +64,8 @@ MAX_SLOTS   equ 5
 ; +7   a hullámforma-helyek száma (1..5)
 ; +8   5 bájt: helyenként a hullámforma (0 négyszög, 1 impulzus 25%,
 ;      2 háromszög, 3 fűrész, 4 zaj, 5 szinusz)
-; +13  3 bájt tartalék
+; +13  a szólamok legnagyobb hangereje (vmax; a hangkártyák skálázásához)
+; +14  2 bájt tartalék
 ; +16  64 bájt keverőtábla: összeg (0..45) -> kimenet (0..15)
 ; +80  128 x dw fázisnövekmény (MIDI hangjegy -> f * 65536 / mintafrekvencia)
 ; +336 eseménylista:
@@ -85,6 +86,7 @@ SONG_LOOP   equ song+4
 SONG_TICKN  equ song+6
 SONG_NSLOTS equ song+7
 SONG_WAVES  equ song+8
+SONG_VMAX   equ song+13
 SONG_MIX    equ song+16
 SONG_FREQ   equ song+80
 SONG_EVENTS equ song+336
@@ -118,6 +120,12 @@ start:
             push af
             ex af, af'
             di
+            IF FEAT_CARDS
+            call detect_card        ; hangkártya: azon szól (chips.inc)
+            ld a, (card_type)
+            or a
+            jp nz, chip_main
+            ENDIF
             call build_tables
             jr nc, .mem_ok
             ld hl, -1               ; nincs elég memória a tábláknak
@@ -196,6 +204,7 @@ start:
 
 ; ---- vége -------------------------------------------------------------------
             di
+the_end:
             ld a, (V_PORT05)        ; hang-IT ki
             and 0C0h
             ld (V_PORT05), a
@@ -794,6 +803,10 @@ sine_q:
             db 246, 247, 248, 249, 250, 251, 252, 252, 253, 253, 254, 254, 255, 255, 255, 255
 
             ENDIF
+            IF FEAT_CARDS
+            include "chips.inc"
+            ENDIF
+
 ; ---- változók ---------------------------------------------------------------
 ; a dal hossza (a weboldal buildCas-a is ide írja be)
 song_len:   dw song_end - song

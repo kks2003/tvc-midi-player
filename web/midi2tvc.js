@@ -882,7 +882,7 @@
   const DEFAULTS = {
     mode: 'arp', prio: 'high', maxNotes: 3, arpBass: false, arpSpeed: 1, polyVolume: 9, polyKnee: 10, polyMix: 'clean',
     channels: null, drums: 'synth', transpose: 0, tuning: 440.0, speed: 1.0, rate: FRAME_RATE,
-    decay: 0, decayFloor: 6, curve: 0.7, minVolume: 6, maxVolume: 15, loop: false, loopPause: 0, drumVolume: 100, gain: 100, envelopes: null, fastIrq: false, bend: false, background: false, from: null, to: null, trim: false,
+    decay: 0, decayFloor: 6, curve: 0.7, minVolume: 6, maxVolume: 15, loop: false, loopPause: 0, drumVolume: 100, gain: 100, envelopes: null, fastIrq: false, bend: false, cards: [], background: false, from: null, to: null, trim: false,
     polyDiv: 19, wave: 'square', channelWave: null,     // channelWave: {csatorna (1..16): hullámforma}
   };
 
@@ -938,7 +938,7 @@
       gainMax = maxGain(3 * polyPeak(o.polyVolume), r.stats.peak_sum);
       if (gainAuto) o.gain = gainMax;
       const sl = r.slots.concat(new Array(MAX_SLOTS - r.slots.length).fill(0));
-      const data = [o.loop ? 1 : 0, o.envelopeData ? 0 : o.decay, floor, o.polyDiv, 0, 0, tickn, r.slots.length, ...sl, 0, 0, 0,
+      const data = [o.loop ? 1 : 0, o.envelopeData ? 0 : o.decay, floor, o.polyDiv, 0, 0, tickn, r.slots.length, ...sl, o.polyVolume, 0, 0,
         ...polyMixTable(o.polyKnee, 15, o.polyMix, o.polyVolume, o.gain)];
       for (const f of ftab) data.push(f & 0xFF, f >> 8);
       song = Uint8Array.from(data.concat(r.body));
@@ -947,7 +947,8 @@
       const used = new Set(r.slots.map((w) => WAVES[w]));
       features = [['FEAT_DRUMS', (r.stats.slides || 0) > 0], ['FEAT_WAVE_PULSE', used.has('pulse')], ['FEAT_WAVE_TRI', used.has('triangle')],
         ['FEAT_WAVE_SAW', used.has('saw')], ['FEAT_WAVE_NOISE', used.has('noise')], ['FEAT_WAVE_SINE', used.has('sine')],
-        ['FEAT_IRQ0038', !!o.fastIrq], ['FEAT_PITCH', (r.stats.bends || 0) > 0]]
+        ['FEAT_IRQ0038', !!o.fastIrq], ['FEAT_PITCH', (r.stats.bends || 0) > 0],
+        ['FEAT_CARDS', (o.cards || []).length > 0], ['FEAT_SN', (o.cards || []).includes('sn')]]
         .filter((x) => x[1]).map((x) => x[0]);
       rate = tickRate;
     } else {
@@ -1006,7 +1007,8 @@
   // ---- a lejátszók kapcsolható részei (build/features.inc) -------------------------
   // a .cas-ba csak a dalhoz kellő kód kerül; ugyanaz, mint a midi2tvc.py
   // POLY_FEATURES / MONO_FEATURES / features_inc
-  const POLY_FEATURES = ['FEAT_DRUMS', 'FEAT_WAVE_PULSE', 'FEAT_WAVE_TRI', 'FEAT_WAVE_SAW', 'FEAT_WAVE_NOISE', 'FEAT_WAVE_SINE', 'FEAT_IRQ0038', 'FEAT_PITCH'];
+  const POLY_FEATURES = ['FEAT_DRUMS', 'FEAT_WAVE_PULSE', 'FEAT_WAVE_TRI', 'FEAT_WAVE_SAW', 'FEAT_WAVE_NOISE', 'FEAT_WAVE_SINE', 'FEAT_IRQ0038', 'FEAT_PITCH',
+    'FEAT_CARDS', 'FEAT_SN'];
   const MONO_FEATURES = ['FEAT_DRUMS', 'FEAT_BG'];
   const featureNames = (mode) => (mode === 'poly' ? POLY_FEATURES : MONO_FEATURES);
   const featuresInc = (result) => featureNames(result.mode).map((n) => n + ' equ ' + (result.features.includes(n) ? 1 : 0) + '\n').join('');
@@ -1014,7 +1016,7 @@
   async function assembleCas(run, players, result, title) {
     const asm = result.mode === 'poly' ? 'player_poly.asm' : 'player.asm';
     const files = {
-      [asm]: players.sources[asm], 'cas.inc': players.sources['cas.inc'],
+      [asm]: players.sources[asm], 'cas.inc': players.sources['cas.inc'], 'chips.inc': players.sources['chips.inc'],
       'build/features.inc': featuresInc(result), 'build/song.bin': result.song, 'build/title.bin': titleBytes(title),
     };
     const r = await run(files, asm, { raw: 'build/out.cas', sym: 'build/out.sym' });
@@ -1056,7 +1058,7 @@
     ['arpSpeed', '--arp-speed'], ['polyVolume', '--poly-volume'], ['polyKnee', '--poly-knee'], ['polyMix', '--poly-mix'],
     ['channels', '--channels'], ['drums', '--drums'], ['transpose', '--transpose'], ['tuning', '--tuning'],
     ['speed', '--speed'], ['decay', '--decay'], ['decayFloor', '--decay-floor'], ['curve', '--curve'],
-    ['minVolume', '--min-volume'], ['maxVolume', '--max-volume'], ['loop', '--loop'], ['loopPause', '--loop-pause'], ['drumVolume', '--drum-volume'], ['gain', '--gain'], ['fastIrq', '--fast-irq'], ['bend', '--bend'], ['envelopes', '--envelopes'],
+    ['minVolume', '--min-volume'], ['maxVolume', '--max-volume'], ['loop', '--loop'], ['loopPause', '--loop-pause'], ['drumVolume', '--drum-volume'], ['gain', '--gain'], ['fastIrq', '--fast-irq'], ['bend', '--bend'], ['cards', '--cards'], ['envelopes', '--envelopes'],
     ['background', '--background'], ['from', '--from'], ['to', '--to'], ['trim', '--trim'], ['polyDiv', '--poly-div'], ['wave', '--wave'], ['channelWave', '--channel-wave'],
   ];
   function cliArgs(opts) {
@@ -1065,6 +1067,7 @@
     for (const [k, flag] of CLI) {
       const v = o[k];
       if (k === 'channels') { if (v && v.length) out.push(flag, v.join(',')); continue; }
+      if (k === 'cards') { if (v && v.length) out.push(flag, v.join(',')); continue; }
       if (k === 'channelWave') {
         const items = Object.entries(v || {}).sort((x, y) => x[0] - y[0]).map(([ch, w]) => ch + '=' + w);
         if (items.length) out.push(flag, items.join(','));
@@ -1124,6 +1127,7 @@
       [name + '/' + midiName, midiBytes],
       [name + '/' + asm, enc(players.sources[asm])],
       [name + '/cas.inc', enc(players.sources['cas.inc'])],
+      [name + '/chips.inc', enc(players.sources['chips.inc'])],
       [name + '/build/song.bin', result.song],
       [name + '/build/title.bin', tb],
       [name + '/build/features.inc', enc(featuresInc(result))],

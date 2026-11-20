@@ -28,6 +28,7 @@ int ep_set_machine_type(int);
 int ep_reset_memory(int);
 int ep_load_rom(int, const char *, int);
 int ep_reset(int);
+void ep_set_tvc_slot(int, int);
 int ep_run(int);
 int ep_pc();
 int ep_read_memory(int);
@@ -134,6 +135,19 @@ int main(int argc, char **argv)
   for (auto &r : roms) {
     std::string p = std::string("/tmp/tvcroms/") + r.f;
     if (ep_load_rom(r.seg, p.c_str(), 0) != 0) { std::fprintf(stderr, "rom %s: %s\n", r.f, ep_last_error()); return 1; }
+  }
+  // CARDS=hely:kártya,... (kártya: 0 üres, 1 VT-DOS, 2 FILE:, 3 GameCard,
+  // 4 Multichip, 5 TVC256k++; alap: 0. hely VT-DOS, 1. hely FILE:)
+  if (const char *c = std::getenv("CARDS")) {
+    std::string cs(c);
+    size_t pos = 0;
+    while (pos < cs.size()) {
+      int sl = -1, cd = -1;
+      if (std::sscanf(cs.c_str() + pos, "%d:%d", &sl, &cd) == 2) ep_set_tvc_slot(sl, cd);
+      size_t q = cs.find(',', pos);
+      if (q == std::string::npos) break;
+      pos = q + 1;
+    }
   }
   ep_reset(1);
   runMs(4000);

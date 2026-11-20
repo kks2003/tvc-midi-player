@@ -363,6 +363,39 @@ def main():
           "" if db == dfa else "eltér")
     check("fast-irq: a rendszer IT-belépése visszaállt", isr_restored(rf))
 
+    # 3c. hangkártya (--cards sn): GameCard (2. hely), Multichip (3. hely), és kártya nélkül
+    subprocess.check_call([os.path.join(REPO, "build.sh"), mid, "--mode", "poly", "--decay", "4", "--cards", "sn"],
+                          stdout=subprocess.DEVNULL)
+    shutil.copy(os.path.join(REPO, "build", "teszt.cas"), "/files/sncard.cas")
+    for cards, label, port in (("2:3", "GameCard", "30"), ("3:4", "Multichip", "40"), ("", "kártya nélkül", None)):
+        w_ = os.path.join(out, "sncard.wav")
+        sc = os.path.join(out, "sncard.ppm")
+        lg = os.path.join(out, "sncard_ports.txt")
+        r_ = subprocess.check_output([exe, args.roms, "sncard", "14", w_, lg],
+                                     env=dict(os.environ, SCREEN=sc, CARDS=cards, ALLPORTS="1")).decode()
+        with wave.open(w_) as w:
+            d_ = struct.unpack("<%dh" % w.getnframes(), w.readframes(w.getnframes()))
+        st = next((i for i in range(len(d_)) if abs(d_[i] - d_[0]) > 200), None)
+        check("SN76489, %s: szól a hang" % label, st is not None)
+        if st is not None:
+            cents = []
+            for k, n in ((0.1, 60), (3.6, 72)):
+                f = zero_cross_freq(d_[st + int(k * rate): st + int((k + 0.3) * rate)], rate)
+                cents.append(1200 * math.log2(f / midi2tvc.note_freq(n, 440.0)) if f else 999)
+            check("SN76489, %s: a hangmagasság (C4, C5: ±10 cent)" % label, all(abs(c) < 10 for c in cents),
+                  ", ".join("%.1f" % c for c in cents))
+        writes = {}
+        for line in open(lg):
+            p_ = line.split()
+            if len(p_) >= 3:
+                writes[p_[2].lower()] = writes.get(p_[2].lower(), 0) + 1
+        if port:
+            check("SN76489, %s: a kártya portjára ír, a beépített hang csendben" % label,
+                  writes.get(port, 0) > 1000 and writes.get("06", 0) < 20,
+                  "%sh: %d, 06h: %d" % (port, writes.get(port, 0), writes.get("06", 0)))
+        check("SN76489, %s: a dal végén a BASIC folytatja, az IT-belépő visszaállt" % label,
+              basic_ok(sc) and isr_restored(r_))
+
     # 4. háttér-mód (--background): a zene szól, a BASIC közben dolgozik
     subprocess.check_call([os.path.join(REPO, "build.sh"), mid, "--background", "--loop", "--decay", "4"])
     shutil.copy(os.path.join(REPO, "build", "teszt.cas"), "/files/bg.cas")
