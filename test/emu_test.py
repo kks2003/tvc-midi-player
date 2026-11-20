@@ -363,12 +363,35 @@ def main():
           "" if db == dfa else "eltér")
     check("fast-irq: a rendszer IT-belépése visszaállt", isr_restored(rf))
 
-    # 3c. hangkártya (--cards sn): GameCard (2. hely), Multichip (3. hely), és kártya nélkül
-    subprocess.check_call([os.path.join(REPO, "build.sh"), mid, "--mode", "poly", "--decay", "4", "--cards", "sn,sid"],
-                          stdout=subprocess.DEVNULL)
-    shutil.copy(os.path.join(REPO, "build", "teszt.cas"), "/files/sncard.cas")
-    for cards, label, port in (("2:3", "SN76489, GameCard", "30"), ("3:4", "SN76489, Multichip", "40"),
-                               ("0:5", "vSID, TVC256k++", "11"), ("", "kártya nélkül", None)):
+    # 3b2. gyors keverés (--poly-mix fast, FEAT_FASTMIX), a gyors megszakítással is
+    for extra, label in ((["--poly-mix", "fast"], "gyors keverés"),
+                         (["--poly-mix", "fast", "--fast-irq"], "gyors keverés + fast-irq")):
+        rm, dm, sm = poly_run(extra, "fmix", 14)
+        check("%s: a dal végén a BASIC folytatja, az IT-belépő visszaállt" % label,
+              basic_ok(sm) and isr_restored(rm))
+        st = next((i for i in range(len(dm)) if abs(dm[i] - dm[0]) > 200), None)
+        check("%s: szól a hang" % label, st is not None)
+        if st is not None:
+            cents = []
+            for k, n in ((0.1, 60), (0.6, 62), (3.6, 72)):
+                f = zero_cross_freq(dm[st + int(k * rate): st + int((k + 0.3) * rate)], rate)
+                cents.append(1200 * math.log2(f / midi2tvc.note_freq(n, 440.0)) if f else 999)
+            check("%s: a hangmagasság pontos (±5 cent)" % label, all(abs(c) < 5 for c in cents),
+                  ", ".join("%.1f" % c for c in cents))
+
+    # 3c. hangkártyák: GameCard (2. hely), Multichip (3. hely), TVC256k++, és kártya nélkül;
+    # a Multichip mindhárom chipjével (SAA1099, OPL2 külön fordítással; mind együtt: OPL2)
+    built = None
+    for bcards, cards, label, port in (
+            ("sn,sid", "2:3", "SN76489, GameCard", "30"), ("sn,sid", "3:4", "SN76489, Multichip", "40"),
+            ("sn,sid", "0:5", "vSID, TVC256k++", "11"), ("sn,sid", "", "kártya nélkül", None),
+            ("saa", "3:4", "SAA1099, Multichip", "43"), ("opl", "3:4", "OPL2, Multichip", "45"),
+            ("sn,sid,saa,opl", "3:4", "mind, Multichip (OPL2 szól)", "45")):
+        if built != bcards:
+            subprocess.check_call([os.path.join(REPO, "build.sh"), mid, "--mode", "poly", "--decay", "4",
+                                   "--cards", bcards], stdout=subprocess.DEVNULL)
+            shutil.copy(os.path.join(REPO, "build", "teszt.cas"), "/files/sncard.cas")
+            built = bcards
         w_ = os.path.join(out, "sncard.wav")
         sc = os.path.join(out, "sncard.ppm")
         lg = os.path.join(out, "sncard_ports.txt")

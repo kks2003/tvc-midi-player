@@ -50,8 +50,11 @@ kicsi és gyors, vagy teljes tudású, vagy egy adott hangkártyára szabott.
   nélkül: `cp pwm / sbc a,a / and vol`) új hullámformaként.
 - [ ] **Hosszú zajtábla** 23 bites LFSR-ből és 16 hangerőszint a cinekhez és a
   pergőhöz (most 256 bájtos zaj, 8 szint).
-- [ ] **Tiszta keverés keverőtábla nélkül** (a szólamtáblákba előre
-  beépített arány): mintánként −18 ciklus, a lineáris keverésnél.
+- [x] **Tiszta keverés keverőtábla nélkül** (`--poly-mix fast`,
+  `FEAT_FASTMIX`): a szólamtáblákba induláskor a kimenet kerül (0..5, << 2), a
+  kezelő csak összead és a 06h többi bitjét hozzá-OR-olja: mintánként −11
+  ciklus (a −18-ból 7 az `OR`). Emulátorban ellenőrizve (a DAC-szintek
+  eloszlása egyezik az előnézettel).
 - [ ] 4. szólam alacsonyabb mintavétellel, ha a CPU-idő engedi.
 - [ ] **Háttér-mód a többszólamú lejátszóhoz** gépi kódú programok mellé
   (belépési pontok: indítás, leállítás, képkocka-szinkron), alacsony
@@ -78,7 +81,10 @@ Mindhárom kártyát emulálja az Ep128web (a `web/src/tvc_soundcards.cpp`,
 így a tesztek emulátorban futhatnak. A bővítőhely `n` (0..3) I/O portjai:
 `10h + 10h·n` … `1Fh + 10h·n`.
 
-- [ ] **TVC Multichip Soundcard**
+- [x] **TVC Multichip Soundcard**: SN76489 (`--cards sn`), SAA1099
+  (`--cards saa`) és OPL2 (`--cards opl`, 3 FM-csatorna, hangszín a
+  hullámformából) meghajtó, emulátorban tesztelve, előnézettel. Még lehetne:
+  az OPL2 9 csatornája és General MIDI-hangszínek, az SAA1099 6 csatornája.
   ([dikdom/TVC-Multichip-Soundcard](https://github.com/dikdom/TVC-Multichip-Soundcard)):
   SN76489, SAA1099 és YM3812 (OPL2) hangchip, akár egyszerre. A repó `doc/`
   könyvtárában van a kártya leírása és a chipek adatlapjai. Portok (a
@@ -91,7 +97,7 @@ Mindhárom kártyát emulálja az Ep128web (a `web/src/tvc_soundcards.cpp`,
   - Licenc: a kártya repója CC BY-NC-SA 4.0, ez nem fér össze a GPL-lel, ezért
     a kódját nem vehetjük át, a meghajtót az adatlapokból és a kártya
     leírásából magunk írjuk meg.
-- [ ] **TVC 256k++ kártya, vSID**: a kártya egy C64 SID-et (MOS 6581/8580)
+- [x] **TVC 256k++ kártya, vSID** (`--cards sid`), emulátorban tesztelve. Eredeti terv:: a kártya egy C64 SID-et (MOS 6581/8580)
   emulál, 985 337 Hz-es SID-órajellel, 41 kHz-es mintavétellel, szűrők
   nélkül (TVC256K_Help). A SID-regiszterek ($00–$18) a kártya `E0h + n`
   regiszterei: a bővítőhely `+0` portjára a regiszter sorszáma, a `+1`-re az
@@ -106,7 +112,7 @@ Mindhárom kártyát emulálja az Ep128web (a `web/src/tvc_soundcards.cpp`,
   a 3. és 4. botkormány.
 - [x] Felismerés indításkor: a kártyahelyek azonosítója (`5Ah` port, a
   0040h/0070h/00A0h/00D0h táblák) és a kártyák saját jelzései alapján.
-- [ ] Emulátoros teszt mindhárom kártyával (az Ep128web harness kártyával is
+- [x] Emulátoros teszt mindhárom kártyával; az előnézet szimulálja a chipeket. Eredeti terv: (az Ep128web harness kártyával is
   induljon, és a kártyák hangja is kerüljön a felvételbe); a webes előnézetbe
   a chipek hangja (SN76489, SAA1099, OPL2, SID) szimulálva vagy az Ep128web
   moduljaiból.

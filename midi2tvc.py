@@ -488,9 +488,11 @@ def poly_rates(div):
     return sr, tickn, sr / tickn
 
 
-def poly_cpu_load(div, fast_irq=False):
-    """a keverés CPU-része; fast_irq: a kezelő a 0038h-n (az ugrás elmarad)"""
-    return (POLY_HANDLER_CYCLES - (10 if fast_irq else 0)) / (CPU_CLOCK / (TVC_CLOCK / div))
+def poly_cpu_load(div, fast_irq=False, fast_mix=False):
+    """a keverés CPU-része; fast_irq: a kezelő a 0038h-n (az ugrás elmarad);
+    fast_mix: keverőtábla nélkül (-11 ciklus)"""
+    return (POLY_HANDLER_CYCLES - (10 if fast_irq else 0) - (11 if fast_mix else 0)) / \
+        (CPU_CLOCK / (TVC_CLOCK / div))
 
 
 def poly_freq_table(tuning, sr):
@@ -508,6 +510,8 @@ def poly_peak(vol):
 
 def poly_mix_table(knee, ceiling=15, mode="clean", vmax=9, gain=100):
     """A szólamok összege (0..45) -> 4 bites kimenet.
+    fast:  mint a clean, de szólamonként (a lejátszó a szólamtáblákba írja,
+           keverőtábla nélkül összead): érték -> 0..5
     clean: a három szólam teljes összege (3 x a szólam legnagyobb csúcsa)
            lineárisan 0..15-re, így nem telít (a dobok csúcsán legfeljebb
            egy pillanatra)
@@ -518,7 +522,9 @@ def poly_mix_table(knee, ceiling=15, mode="clean", vmax=9, gain=100):
     full = 3 * poly_peak(vmax)
     for s in range(64):
         g = s * gain / 100.0
-        if mode == "clean":
+        if mode == "fast":
+            v = min(ceiling // 3, g * ceiling / float(full))
+        elif mode == "clean":
             v = g * ceiling / float(full)
         elif g <= knee:
             v = g
@@ -1149,9 +1155,11 @@ def main():
                     help="poly: többszólamú motor (a build.sh a player_poly.asm-et fordítja)")
     ap.add_argument("--poly-volume", type=int, default=9,
                     help="poly: egy szólam legnagyobb hangereje (alap: 9)")
-    ap.add_argument("--poly-mix", choices=("clean", "soft"), default="clean",
+    ap.add_argument("--poly-mix", choices=("clean", "soft", "fast"), default="clean",
                     help="poly: keverés; clean = a három szólam összege arányosan 0..15-re, "
-                         "nem telít (alap); soft = hangosabb, a térd fölött lágyan telít")
+                         "nem telít (alap); soft = hangosabb, a térd fölött lágyan telít; "
+                         "fast = mint a clean, de keverőtábla nélkül (-11 ciklus mintánként, "
+                         "szólamonként 6 szint)")
     ap.add_argument("--poly-knee", type=int, default=10,
                     help="poly, --poly-mix soft: a keverőtábla eddig lineáris (alap: 10)")
     ap.add_argument("--poly-div", type=int, default=19,
@@ -1189,7 +1197,8 @@ def main():
                          "a modulációs kerékről és a burkológörbék hangmagassága")
     ap.add_argument("--cards", default="", metavar="LISTA",
                     help="többszólamú mód: hangkártya-meghajtók vesszővel (sn = SN76489: GameCard, "
-                         "Multichip; sid = a TVC256k++ vSID-je); ha a program indításkor talál "
+                         "Multichip; sid = a TVC256k++ vSID-je; saa = SAA1099, opl = YM3812 (OPL2): "
+                         "Multichip); ha a program indításkor talál "
                          "ilyen kártyát, azon szól")
     ap.add_argument("--fast-irq", action="store_true",
                     help="többszólamú mód: a mintakezelő a 0038h-ra kerül (-10 ciklus mintánként; "
@@ -1333,8 +1342,8 @@ def ascii_name(name):
 # konverterével (midi2tvc.js featuresInc) azonos.
 POLY_FEATURES = ["FEAT_DRUMS", "FEAT_WAVE_PULSE", "FEAT_WAVE_TRI", "FEAT_WAVE_SAW",
                  "FEAT_WAVE_NOISE", "FEAT_WAVE_SINE", "FEAT_IRQ0038", "FEAT_PITCH",
-                 "FEAT_CARDS", "FEAT_SN", "FEAT_SID"]
-CARDS = ["sn", "sid"]                      # --cards: a lejátszóba kerülő kártyameghajtók
+                 "FEAT_CARDS", "FEAT_SN", "FEAT_SID", "FEAT_SAA", "FEAT_OPL", "FEAT_FASTMIX"]
+CARDS = ["sn", "sid", "saa", "opl"]                      # --cards: a lejátszóba kerülő kártyameghajtók
 MONO_FEATURES = ["FEAT_DRUMS", "FEAT_BG"]
 
 
@@ -1378,10 +1387,12 @@ def write_poly(args, notes, drums_sec, gain_auto=False):
     except ValueError as e:
         sys.exit(str(e))
     top = max_gain(3 * poly_peak(args.poly_volume), stats["peak_sum"])
+    if args.poly_mix == "fast":
+        top = 100                           # szólamonként telítene
     if gain_auto:
         args.gain = top
     print("hangerő: %g%% (torzítás nélkül legfeljebb %d%%)" % (args.gain, top))
-    header = struct.pack("<BBBBHBB", 1 if args.loop else 0, 0 if args.envelope_data else args.decay,
+    header = struct.pack("<BBBBHBB", (1 if args.loop else 0) | (2 if args.poly_mix == "fast" else 0), 0 if args.envelope_data else args.decay,
                          max(0, min(15, args.decay_floor)), args.poly_div, 0, tickn, len(slots))
     header += bytes(slots + [0] * (MAX_SLOTS - len(slots))) + bytes((args.poly_volume, 0, 0))
     data = header + bytes(poly_mix_table(args.poly_knee, mode=args.poly_mix, vmax=args.poly_volume,
@@ -1398,10 +1409,11 @@ def write_poly(args, notes, drums_sec, gain_auto=False):
         ("FEAT_WAVE_NOISE", "noise" in used), ("FEAT_WAVE_SINE", "sine" in used),
         ("FEAT_IRQ0038", args.fast_irq), ("FEAT_PITCH", stats.get("bends", 0) > 0),
         ("FEAT_CARDS", bool(args.cards)), ("FEAT_SN", "sn" in args.cards),
-        ("FEAT_SID", "sid" in args.cards)) if on})
+        ("FEAT_SID", "sid" in args.cards), ("FEAT_SAA", "saa" in args.cards),
+        ("FEAT_OPL", "opl" in args.cards), ("FEAT_FASTMIX", args.poly_mix == "fast")) if on})
     print("poly: %.0f Hz mintavétel (osztó %d), %.2f tick/s, a keverés a CPU %.0f%%-a; "
           "hullámformák: %s; táblák: %d bájt a program után"
-          % (sr, args.poly_div, tick_rate, 100 * poly_cpu_load(args.poly_div, args.fast_irq),
+          % (sr, args.poly_div, tick_rate, 100 * poly_cpu_load(args.poly_div, args.fast_irq, args.poly_mix == "fast"),
              ", ".join(WAVE_NAMES[WAVES[w]] for w in slots), 256 * (2 + 8 * len(slots))))
     stats.setdefault("chords", 0)
     stats.setdefault("rests", 0)

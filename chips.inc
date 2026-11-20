@@ -28,38 +28,48 @@
 CARD_NONE   equ 0
 CARD_SN     equ 1
 CARD_SID    equ 2
+CARD_SAA    equ 3
+CARD_OPL    equ 4
 
 ; ---- felismerés ---------------------------------------------------------------
-; -> card_type, card_port (a hely I/O alapcíme)
+; -> card_type, card_port (a hely I/O alapcíme). Ha több is van, a sorrend:
+; vSID, OPL2, SAA1099, SN76489 (a Multichip kártyán mindhárom chip megvan).
 detect_card:
             IF FEAT_SID
             ld hl, name_256k
             call find_card
-            jr z, .sid
+            ld b, CARD_SID
+            jr z, .found
+            ENDIF
+            IF FEAT_OPL
+            ld hl, name_sndmx
+            call find_card
+            ld b, CARD_OPL
+            jr z, .found
+            ENDIF
+            IF FEAT_SAA
+            ld hl, name_sndmx
+            call find_card
+            ld b, CARD_SAA
+            jr z, .found
             ENDIF
             IF FEAT_SN
             ld hl, name_sndmx
             call find_card
-            jr z, .sn
+            ld b, CARD_SN
+            jr z, .found
             ld hl, name_joysn
             call find_card
-            jr z, .sn
+            ld b, CARD_SN
+            jr z, .found
             ENDIF
             xor a
             ld (card_type), a
             ret
-            IF FEAT_SN
-.sn:        ld (card_port), a
-            ld a, CARD_SN
+.found:     ld (card_port), a
+            ld a, b
             ld (card_type), a
             ret
-            ENDIF
-            IF FEAT_SID
-.sid:       ld (card_port), a
-            ld a, CARD_SID
-            ld (card_type), a
-            ret
-            ENDIF
 
 ; HL = a keresett név (hossz, betűk); Z = megvan, A = a hely I/O alapcíme
 find_card:
@@ -93,8 +103,10 @@ find_card:
             or 1                    ; NZ: nincs
             ret
 
-            IF FEAT_SN
+            IF FEAT_SN || FEAT_SAA || FEAT_OPL
 name_sndmx: db 5, "SndMx"
+            ENDIF
+            IF FEAT_SN
 name_joysn: db 6, "JOY+SN"
             ENDIF
             IF FEAT_SID
@@ -231,6 +243,14 @@ chip_init:
             cp CARD_SID
             jp z, sid_init
             ENDIF
+            IF FEAT_SAA
+            cp CARD_SAA
+            jp z, saa_init
+            ENDIF
+            IF FEAT_OPL
+            cp CARD_OPL
+            jp z, opl_init
+            ENDIF
             ret
 
 chip_update:
@@ -243,6 +263,14 @@ chip_update:
             cp CARD_SID
             jp z, sid_update
             ENDIF
+            IF FEAT_SAA
+            cp CARD_SAA
+            jp z, saa_update
+            ENDIF
+            IF FEAT_OPL
+            cp CARD_OPL
+            jp z, opl_update
+            ENDIF
             ret
 
 chip_silence:
@@ -254,6 +282,14 @@ chip_silence:
             IF FEAT_SID
             cp CARD_SID
             jp z, sid_silence
+            ENDIF
+            IF FEAT_SAA
+            cp CARD_SAA
+            jp z, saa_silence
+            ENDIF
+            IF FEAT_OPL
+            cp CARD_OPL
+            jp z, opl_silence
             ENDIF
             ret
 
@@ -314,6 +350,27 @@ div24:
 .nx:        dec ixl
             jr nz, .lp
             ret
+
+            IF FEAT_SID || FEAT_OPL
+; HL * DE -> DEHL (32 bit)
+mul16:
+            push bc
+            ld b, h
+            ld c, l
+            ld hl, 0
+            ld a, 16
+.m:         add hl, hl
+            rl e
+            rl d
+            jr nc, .n
+            add hl, bc
+            jr nc, .n
+            inc de
+.n:         dec a
+            jr nz, .m
+            pop bc
+            ret
+            ENDIF
 
             IF FEAT_SN
 ; ---- SN76489 (GameCard, Multichip) -------------------------------------------------
@@ -531,25 +588,6 @@ sid_w:
             pop bc
             ret
 
-; HL * DE -> DEHL (32 bit)
-mul16:
-            push bc
-            ld b, h
-            ld c, l
-            ld hl, 0
-            ld a, 16
-.m:         add hl, hl
-            rl e
-            rl d
-            jr nc, .n
-            add hl, bc
-            jr nc, .n
-            inc de
-.n:         dec a
-            jr nz, .m
-            pop bc
-            ret
-
 sid_update:
             ld hl, vstate
             xor a
@@ -682,6 +720,453 @@ sid_last:   ds 6
 sid_tmp:    ds 4
 sid_base:   db 0
 sid_ctl:    db 0
+            ENDIF
+
+            IF FEAT_SAA
+; ---- SAA1099 (Multichip) -------------------------------------------------------------
+; 6 négyszög-csatorna (ebből 3-at használunk) és 2 zajgenerátor, 8 MHz-es
+; órajel. Frekvencia: f = 15625 * 2^okt / (511 - N), okt 0..7, N 0..255.
+; A mi fázisnövekményünkből (F, mintaosztó d): 511 - N = 5242,88 * d * 2^okt / F;
+; T = SAA_K * d / F = 8 * 5242,88 * d / F, és az oktávot úgy választjuk, hogy
+; T * 2^okt a [2048, 4096) tartományba essen: 511 - N = T * 2^okt / 8.
+; Hangerő: 4 bites amplitúdó (bal, jobb). A zaj-hullámformájú szólam a 0. zaj-
+; generátort (a leggyorsabb) kapja a saját csatornáján.
+SAA_K       equ 41943
+
+saa_init:
+            ld a, (SONG_DIV)        ; saa_k = SAA_K * osztó (24 bit)
+            ld b, a
+            xor a
+            ld hl, 0
+            ld c, 0
+.m:         ld de, SAA_K
+            add hl, de
+            adc a, c
+            djnz .m
+            ld (saa_k), hl
+            ld (saa_k + 2), a
+            ld a, 1Ch               ; törlés, majd hang be
+            ld b, 02h
+            call saa_w
+            ld b, 01h
+            call saa_w
+            ld a, 16h               ; zajgenerátorok: a leggyorsabb
+            ld b, 0
+            call saa_w
+            ld a, 18h               ; burkológörbe-generátorok ki
+            call saa_w
+            inc a
+            call saa_w
+saa_silence:
+            xor a                   ; amplitúdók 0, frekvencia és zaj ki
+            ld b, a
+.s:         call saa_w
+            inc a
+            cp 6
+            jr c, .s
+            ld a, 14h
+            call saa_w
+            inc a
+            call saa_w
+            ret
+
+; A = regiszter, B = érték (A, B, DE, HL marad)
+saa_w:
+            push bc
+            push af
+            ld a, (card_port)
+            add a, 3
+            ld c, a
+            pop af
+            out (c), a              ; +3: cím
+            dec c
+            out (c), b              ; +2: adat
+            pop bc
+            ret
+
+saa_update:
+            xor a
+            ld (saa_oct), a
+            ld (saa_oct + 1), a
+            ld (saa_ten), a
+            ld (saa_nen), a
+            ld hl, vstate
+.voice:     push af                 ; A = csatorna
+            push hl
+            call voice_get          ; A = hullámforma, B = hangerő, DE = F
+            ld (ch_wave), a
+            ld a, b
+            ld (ch_vol), a
+            ld (ch_f), de
+            pop hl
+            pop af
+            push hl
+            push af
+            ld c, a                 ; C = csatorna
+            ld a, (ch_vol)          ; amplitúdó: bal = jobb = hangerő
+            ld b, a
+            add a, a
+            add a, a
+            add a, a
+            add a, a
+            or b
+            ld b, a
+            ld a, c
+            call saa_w
+            ld a, c                 ; B = 1 << csatorna
+            ld b, 1
+            or a
+            jr z, .bm
+.bl:        sla b
+            dec a
+            jr nz, .bl
+.bm:        ld a, (ch_vol)
+            or a
+            jr z, .next             ; néma: se hang, se zaj
+            ld a, (ch_wave)
+            cp 4
+            jr nz, .tone
+            ld a, (saa_nen)
+            or b
+            ld (saa_nen), a
+            jr .next
+.tone:      ld a, (saa_ten)
+            or b
+            ld (saa_ten), a
+            push bc
+            ld de, (ch_f)
+            ld a, d
+            or e
+            jr z, .low
+            ld b, d
+            ld c, e
+            ld hl, (saa_k)
+            ld a, (saa_k + 2)
+            call div24              ; AHL = T
+            or a
+            jr nz, .low
+            ld a, h
+            cp 10h
+            jr nc, .low             ; T >= 4096: a legmélyebb hang
+            ld e, 0                 ; E = oktáv
+.oc:        ld a, h
+            cp 08h
+            jr nc, .got
+            ld a, e
+            cp 7
+            jr z, .got
+            add hl, hl
+            inc e
+            jr .oc
+.got:       srl h                   ; 511 - N = HL / 8
+            rr l
+            srl h
+            rr l
+            srl h
+            rr l
+            ld a, h
+            or a
+            jr nz, .mok
+            ld l, 0                 ; túl magas: N = 255
+.mok:       ld a, l
+            cpl                     ; N = 511 - (256 + L) = 255 - L
+            ld d, a
+            jr .wr
+.low:       ld de, 0
+.wr:        pop bc
+            ld a, c                 ; frekvencia: 08h + csatorna
+            add a, 8
+            ld b, d
+            call saa_w
+            ld a, c                 ; oktáv: 10h (0., 1. csatorna), 11h (2.)
+            and 1
+            ld a, e
+            jr z, .ol
+            add a, a
+            add a, a
+            add a, a
+            add a, a
+.ol:        ld b, a
+            ld a, c
+            srl a
+            ld e, a
+            ld d, 0
+            ld hl, saa_oct
+            add hl, de
+            ld a, (hl)
+            or b
+            ld (hl), a
+.next:      pop af
+            pop hl
+            ld de, VS_SIZE
+            add hl, de
+            inc a
+            cp 3
+            jp nz, .voice
+            ld a, (saa_oct)
+            ld b, a
+            ld a, 10h
+            call saa_w
+            ld a, (saa_oct + 1)
+            ld b, a
+            ld a, 11h
+            call saa_w
+            ld a, (saa_ten)
+            ld b, a
+            ld a, 14h
+            call saa_w
+            ld a, (saa_nen)
+            ld b, a
+            ld a, 15h
+            call saa_w
+            ret
+
+saa_k:      ds 3
+saa_oct:    ds 2
+saa_ten:    db 0
+saa_nen:    db 0
+            ENDIF
+
+            IF FEAT_OPL
+; ---- YM3812 / OPL2 (Multichip) --------------------------------------------------------
+; 9 FM-csatorna, ebből 3: a 0..2. csatorna (modulátor: 0..2., vivő: 3..5.
+; operátor). Frekvencia: f = Fnum * 49716 / 2^(20 - blokk); a mi F-ünkből
+; Fnum (0. blokk) = F * 62,857 / d = F * opl_k / 65536, opl_k = OPL_K24 / d,
+; majd blokkonként felezve, amíg 1024 alá nem ér. Hangszín a hullámformából: a
+; modulátor szorzója, erőssége és visszacsatolása (1:2 arány = páratlan
+; felharmonikusok, négyszögszerű; 1:1 visszacsatolással = fűrészszerű; a
+; háromszög és a szinusz majdnem tiszta szinusz). Hangerő: a vivő
+; csillapítása (0,75 dB-es lépés). Új hangnál (a hangerő nő) a kulcs újra
+; lenyomódik. Írás után a chipnek idő kell (cím 3,3 us, adat 23 us).
+OPL_K24     equ 4119406
+
+opl_init:
+            ld a, (SONG_DIV)        ; opl_k = (OPL_K24 + osztó/2) / osztó
+            ld c, a
+            ld b, 0
+            srl a
+            ld e, a
+            ld d, 0
+            ld hl, OPL_K24 & 0FFFFh
+            add hl, de
+            ld a, OPL_K24 >> 16
+            adc a, 0
+            call div24
+            ld (opl_k), hl
+            ld (opl_k + 2), a
+            ld a, 01h               ; hullámforma-választás engedélyezve
+            ld b, 20h
+            call opl_w
+            ld a, 08h
+            ld b, 0
+            call opl_w
+            ld a, 0BDh              ; dallam-mód, nincs dob
+            call opl_w
+            ld e, 0                 ; a 0..5. operátor
+.op:        ld a, 20h
+            add a, e
+            ld b, 21h               ; kitartott, szorzó 1
+            call opl_w
+            ld a, 40h
+            add a, e
+            ld b, 3Fh               ; néma
+            call opl_w
+            ld a, 60h
+            add a, e
+            ld b, 0F0h              ; azonnali felfutás, nincs lecsengés
+            call opl_w
+            ld a, 80h
+            add a, e
+            ld b, 0Fh               ; kitartás a csúcson, gyors elengedés
+            call opl_w
+            ld a, 0E0h
+            add a, e
+            ld b, 0                 ; szinusz
+            call opl_w
+            inc e
+            ld a, e
+            cp 6
+            jr c, .op
+            xor a
+            ld (opl_last), a
+            ld (opl_last + 1), a
+            ld (opl_last + 2), a
+opl_silence:
+            ld e, 0
+.s:         ld a, 0B0h              ; kulcs fel
+            add a, e
+            ld b, 0
+            call opl_w
+            ld a, 43h               ; a vivő néma
+            add a, e
+            ld b, 3Fh
+            call opl_w
+            inc e
+            ld a, e
+            cp 3
+            jr c, .s
+            ret
+
+; A = regiszter, B = érték (A, DE, HL marad)
+opl_w:
+            push bc
+            push af
+            ld a, (card_port)
+            add a, 4
+            ld c, a
+            pop af
+            out (c), a              ; +4: regiszter
+            push af                 ; várakozás (3,3 us)
+            pop af
+            inc c
+            out (c), b              ; +5: adat
+            ld b, 6                 ; várakozás (23 us)
+.d:         djnz .d
+            pop bc
+            ret
+
+opl_update:
+            ld hl, vstate
+            xor a
+.voice:     push af                 ; A = csatorna
+            push hl
+            call voice_get          ; A = hullámforma, B = hangerő, DE = F
+            ld (ch_wave), a
+            ld a, b
+            ld (ch_vol), a
+            ld (ch_f), de
+            pop hl
+            pop af
+            push hl
+            push af
+            ld c, a                 ; C = csatorna
+            ld a, (ch_wave)         ; hangszín
+            ld e, a
+            ld d, 0
+            ld hl, opl_mmul
+            add hl, de
+            ld b, (hl)
+            ld a, 20h
+            add a, c
+            call opl_w              ; modulátor: szorzó
+            ld hl, opl_mtl
+            add hl, de
+            ld b, (hl)
+            ld a, 40h
+            add a, c
+            call opl_w              ; modulátor: erősség
+            ld hl, opl_fb
+            add hl, de
+            ld b, (hl)
+            ld a, 0C0h
+            add a, c
+            call opl_w              ; visszacsatolás, FM
+            ld a, (ch_vol)          ; vivő: csillapítás a hangerőből
+            ld e, a
+            ld hl, opl_tl
+            add hl, de
+            ld b, (hl)
+            ld a, 43h
+            add a, c
+            call opl_w
+            ; frekvencia
+            ld a, (ch_wave)
+            cp 4
+            ld hl, 03FFh            ; zaj: magas, fix
+            ld e, 6
+            jr z, .fw
+            push bc
+            ld hl, (ch_f)           ; Fnum0 = F * opl_k / 65536 (24 bit)
+            ld de, (opl_k)
+            call mul16
+            ex de, hl               ; HL = a szorzat felső 16 bitje
+            ld de, (ch_f)
+            ld a, (opl_k + 2)
+            ld b, a
+            xor a
+            inc b
+            jr .hc
+.hi:        add hl, de
+            adc a, 0
+.hc:        djnz .hi
+            ld e, 0                 ; E = blokk
+.bk:        or a
+            jr nz, .sh
+            ld b, a
+            ld a, h
+            cp 4
+            ld a, b
+            jr c, .bok
+.sh:        ld b, a
+            ld a, e
+            cp 7
+            ld a, b
+            jr z, .clamp
+            srl a
+            rr h
+            rr l
+            inc e
+            jr .bk
+.clamp:     ld hl, 03FFh
+.bok:       pop bc
+.fw:        ld a, 0A0h              ; Fnum alsó 8 bit
+            add a, c
+            ld b, l
+            call opl_w
+            ld a, e                 ; blokk << 2 | Fnum felső 2 bit
+            add a, a
+            add a, a
+            or h
+            ld (ch_f), a            ; (ideiglenesen)
+            ; kulcs: hangerő > 0; ha nő, előbb fel
+            ld e, c
+            ld d, 0
+            ld hl, opl_last
+            add hl, de
+            ld a, (ch_vol)
+            ld b, (hl)
+            ld (hl), a
+            or a
+            jr z, .off
+            cp b
+            jr z, .on
+            jr c, .on
+            ld a, (ch_f)            ; nő: kulcs fel, majd le
+            ld b, a
+            ld a, 0B0h
+            add a, c
+            call opl_w
+.on:        ld a, (ch_f)
+            or 20h
+            jr .key
+.off:       ld a, (ch_f)
+.key:       ld b, a
+            ld a, 0B0h
+            add a, c
+            call opl_w
+            pop af
+            pop hl
+            ld de, VS_SIZE
+            add hl, de
+            inc a
+            cp 3
+            jp nz, .voice
+            ret
+
+; hullámforma (0 négyszög, 1 impulzus 25%, 2 háromszög, 3 fűrész, 4 zaj, 5 szinusz)
+opl_mmul:   db 22h, 21h, 22h, 21h, 2Fh, 21h    ; modulátor: kitartott, szorzó
+opl_mtl:    db 21h, 21h, 2Dh, 25h, 00h, 3Fh    ; modulátor erőssége (0,75 dB-es lépés, 3Fh: nincs)
+opl_fb:     db 00h, 04h, 00h, 0Ch, 0Eh, 00h    ; visszacsatolás << 1, FM
+; hangerő (0..15, lineáris) -> a vivő csillapítása: round(-20 lg(v/15) / 0,75)
+opl_tl:     db 63, 31, 23, 19, 15, 13, 11, 9, 7, 6, 5, 4, 3, 2, 1, 0
+opl_k:      ds 3
+opl_last:   ds 3
+            ENDIF
+
+            IF FEAT_SAA || FEAT_OPL
+ch_wave:    db 0
+ch_vol:     db 0
+ch_f:       dw 0
             ENDIF
 
 card_type:  db 0

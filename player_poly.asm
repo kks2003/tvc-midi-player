@@ -55,7 +55,7 @@ LEVELS      equ 8                   ; hangerőszint hullámformánként
 MAX_SLOTS   equ 5
 
 ; ---- dal adatformátum (midi2tvc.py --mode poly) ---------------------------
-; +0   flags: b0 = ismétlés
+; +0   flags: b0 = ismétlés, b1 = gyors keverés (FEAT_FASTMIX)
 ; +1   lecsengés (tick / hangerőlépés, 0 = nincs)
 ; +2   lecsengés alsó szintje
 ; +3   a mintaóra osztója (mintafrekvencia = 195312,5 / osztó)
@@ -66,7 +66,8 @@ MAX_SLOTS   equ 5
 ;      2 háromszög, 3 fűrész, 4 zaj, 5 szinusz)
 ; +13  a szólamok legnagyobb hangereje (vmax; a hangkártyák skálázásához)
 ; +14  2 bájt tartalék
-; +16  64 bájt keverőtábla: összeg (0..45) -> kimenet (0..15)
+; +16  64 bájt keverőtábla: összeg (0..45) -> kimenet (0..15); gyors keverésnél
+;      (flags b1, FEAT_FASTMIX) szólamonként: érték (0..15) -> kimenet (0..5)
 ; +80  128 x dw fázisnövekmény (MIDI hangjegy -> f * 65536 / mintafrekvencia)
 ; +336 eseménylista:
 ;   80+16*s+h  n        hang a szólamon (s = 0..2, h = hangerő 0..15), n = hangjegy
@@ -148,6 +149,37 @@ start:
             inc hl
             inc de
             djnz .mt
+            IF FEAT_FASTMIX
+            ; gyors keverés: a szólamtáblákba közvetlenül a kimenet kerül
+            ; (keverőtábla[érték] << 2, legfeljebb 5 << 2), a kezelő csak összead
+            ld a, (tab_base)
+            inc a                   ; a 0. lap a csend: marad 0
+            ld h, a
+            ld l, 0
+            ld a, (SONG_NSLOTS)
+            add a, a
+            add a, a
+            add a, a
+            ld b, a                 ; B = lapok
+.fp:        ld a, (hl)
+            ld e, a
+            ld d, 0
+            push hl
+            ld hl, SONG_MIX
+            add hl, de
+            ld a, (hl)
+            pop hl
+            cp 6
+            jr c, .f5
+            ld a, 5
+.f5:        add a, a
+            add a, a
+            ld (hl), a
+            inc l
+            jr nz, .fp
+            inc h
+            djnz .fp
+            ENDIF
             ld a, (V_PORT03)        ; billentyűzet: a 7. sor marad kiválasztva
             and 0F0h
             or 07h
@@ -177,8 +209,14 @@ start:
             ENDIF
             ld a, (SONG_TICKN)
             ld (tickn + 1), a
+            IF FEAT_FASTMIX
+            ld a, (V_PORT06)        ; a kezelő bemásolása után (FEAT_IRQ0038)
+            and 0C3h
+            ld (fmc + 1), a
+            ELSE
             ld a, (mix_page)        ; a kezelő bemásolása után (FEAT_IRQ0038)
             ld (mixpg + 1), a
+            ENDIF
             call tick_work          ; az első események
             ld ix, 0
             ld iy, 0
@@ -250,6 +288,7 @@ exit:
 ; ---- mintamegszakítás -------------------------------------------------------
 ; árnyékregiszterek: HL' = 3. fázis, BC' munka, D' összeg, E' tickszámláló;
 ; IX, IY = 1. és 2. fázis.  Ciklus: 13 (IM 1) + 10 (JP) + 230
+; (FEAT_FASTMIX: keverőtábla nélkül, 219)
 ; FEAT_IRQ0038: a kezelő (a tick belépőjével együtt) a 0038h-ra fordítva, ide
 ; csak bemásoljuk (a 0038h..0038h+IRQ_LEN terület a végén visszaáll), így az
 ; ugrás elmarad: 13 + 230 ciklus
@@ -280,9 +319,13 @@ w2:         ld b, 0                 ; 7
 w3:         ld b, 0                 ; 7
             ld a, (bc)              ; 7
             add a, d                ; 4
+            IF FEAT_FASTMIX
+fmc:        or 0                    ; 7   a 06h többi bitje (induláskor írjuk be)
+            ELSE
             ld c, a                 ; 4
 mixpg:      ld b, 0                 ; 7   a keverőtábla lapja (induláskor írjuk be)
             ld a, (bc)              ; 7
+            ENDIF
             out (P_AMP), a          ; 11
             dec e                   ; 4
             jr z, tick_entry        ; 7

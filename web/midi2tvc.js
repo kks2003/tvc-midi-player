@@ -414,7 +414,7 @@
     const tickn = clamp(pyRound(sr / 50.0), 1, 255);
     return [sr, tickn, sr / tickn];
   }
-  const polyCpuLoad = (div, fastIrq) => (POLY_HANDLER_CYCLES - (fastIrq ? 10 : 0)) / (CPU_CLOCK / (TVC_CLOCK / div));
+  const polyCpuLoad = (div, fastIrq, fastMix) => (POLY_HANDLER_CYCLES - (fastIrq ? 10 : 0) - (fastMix ? 11 : 0)) / (CPU_CLOCK / (TVC_CLOCK / div));
   function polyFreqTable(tuning, sr) {
     const out = [];
     for (let n = 0; n < 128; n++) out.push(clamp(pyRound(noteFreq(n, tuning) * 65536 / sr), 1, 32767));
@@ -429,7 +429,8 @@
     const full = 3 * polyPeak(vmax);
     for (let s = 0; s < 64; s++) {
       const g = s * gain / 100.0;
-      const v = mode === 'clean' ? g * ceiling / full
+      const v = mode === 'fast' ? Math.min(Math.floor(ceiling / 3), g * ceiling / full)
+        : mode === 'clean' ? g * ceiling / full
         : g <= knee ? g : knee + (ceiling - knee) * (1 - Math.exp(-(g - knee) / 12.0));
       out.push(clamp(pyRound(v), 0, ceiling));
     }
@@ -935,21 +936,22 @@
       }
       if (!TONE_WAVES.includes(o.wave)) throw new Error('ismeretlen hullámforma: ' + o.wave);
       const r = convertPoly(notes, pd, o, sr, tickRate, ftab, chWaves);
-      gainMax = maxGain(3 * polyPeak(o.polyVolume), r.stats.peak_sum);
+      gainMax = o.polyMix === 'fast' ? 100 : maxGain(3 * polyPeak(o.polyVolume), r.stats.peak_sum);
       if (gainAuto) o.gain = gainMax;
       const sl = r.slots.concat(new Array(MAX_SLOTS - r.slots.length).fill(0));
-      const data = [o.loop ? 1 : 0, o.envelopeData ? 0 : o.decay, floor, o.polyDiv, 0, 0, tickn, r.slots.length, ...sl, o.polyVolume, 0, 0,
+      const data = [(o.loop ? 1 : 0) | (o.polyMix === 'fast' ? 2 : 0), o.envelopeData ? 0 : o.decay, floor, o.polyDiv, 0, 0, tickn, r.slots.length, ...sl, o.polyVolume, 0, 0,
         ...polyMixTable(o.polyKnee, 15, o.polyMix, o.polyVolume, o.gain)];
       for (const f of ftab) data.push(f & 0xFF, f >> 8);
       song = Uint8Array.from(data.concat(r.body));
       ({ total, stats, pause } = r);
-      polyInfo = { div: o.polyDiv, tickn, slots: r.slots, cpu: polyCpuLoad(o.polyDiv, o.fastIrq), tableBytes: 256 * (2 + 8 * r.slots.length) };
+      polyInfo = { div: o.polyDiv, tickn, slots: r.slots, cpu: polyCpuLoad(o.polyDiv, o.fastIrq, o.polyMix === 'fast'), tableBytes: 256 * (2 + 8 * r.slots.length) };
       const used = new Set(r.slots.map((w) => WAVES[w]));
       features = [['FEAT_DRUMS', (r.stats.slides || 0) > 0], ['FEAT_WAVE_PULSE', used.has('pulse')], ['FEAT_WAVE_TRI', used.has('triangle')],
         ['FEAT_WAVE_SAW', used.has('saw')], ['FEAT_WAVE_NOISE', used.has('noise')], ['FEAT_WAVE_SINE', used.has('sine')],
         ['FEAT_IRQ0038', !!o.fastIrq], ['FEAT_PITCH', (r.stats.bends || 0) > 0],
         ['FEAT_CARDS', (o.cards || []).length > 0], ['FEAT_SN', (o.cards || []).includes('sn')],
-        ['FEAT_SID', (o.cards || []).includes('sid')]]
+        ['FEAT_SID', (o.cards || []).includes('sid')], ['FEAT_SAA', (o.cards || []).includes('saa')],
+        ['FEAT_OPL', (o.cards || []).includes('opl')], ['FEAT_FASTMIX', o.polyMix === 'fast']]
         .filter((x) => x[1]).map((x) => x[0]);
       rate = tickRate;
     } else {
@@ -1009,7 +1011,7 @@
   // a .cas-ba csak a dalhoz kellő kód kerül; ugyanaz, mint a midi2tvc.py
   // POLY_FEATURES / MONO_FEATURES / features_inc
   const POLY_FEATURES = ['FEAT_DRUMS', 'FEAT_WAVE_PULSE', 'FEAT_WAVE_TRI', 'FEAT_WAVE_SAW', 'FEAT_WAVE_NOISE', 'FEAT_WAVE_SINE', 'FEAT_IRQ0038', 'FEAT_PITCH',
-    'FEAT_CARDS', 'FEAT_SN', 'FEAT_SID'];
+    'FEAT_CARDS', 'FEAT_SN', 'FEAT_SID', 'FEAT_SAA', 'FEAT_OPL', 'FEAT_FASTMIX'];
   const MONO_FEATURES = ['FEAT_DRUMS', 'FEAT_BG'];
   const featureNames = (mode) => (mode === 'poly' ? POLY_FEATURES : MONO_FEATURES);
   const featuresInc = (result) => featureNames(result.mode).map((n) => n + ' equ ' + (result.features.includes(n) ? 1 : 0) + '\n').join('');

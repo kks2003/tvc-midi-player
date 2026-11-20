@@ -119,12 +119,84 @@
     }
     return out;
   }
+  // SAA1099 (chips.inc saa_update): négyszög a 8 MHz-es chip oktáv/osztó
+  // felbontásával, a zaj-szólam a 0. zajgenerátoron (31,25 kHz)
+  function saaFreq(F, k) {
+    if (!F) return 15625 / 511;
+    let T = Math.floor(k / F);
+    if (T >= 4096) return 15625 / 511;
+    let oct = 0;
+    while (T < 2048 && oct < 7) { T *= 2; oct++; }
+    let m = T >> 3;
+    if (m < 256) m = 256;
+    return 15625 * (1 << oct) / m;
+  }
+  function saaTick(st, vs, waves, volScale, k, sr, n) {
+    const out = new Float32Array(n);
+    const ch = vs.map((v) => {
+      const amp = volScale[v.vol] / 15, noise = waves[v.slot] === 4;
+      return { amp, noise, inc: noise ? 0 : saaFreq(v.f, k) / sr };
+    });
+    const ninc = 31250 / sr;
+    for (let i = 0; i < n; i++) {
+      st.nph += ninc;
+      while (st.nph >= 1) {
+        st.nph -= 1;
+        const bit = ((st.lfsr >> 16) ^ (st.lfsr >> 13)) & 1;
+        st.lfsr = ((st.lfsr << 1) | bit) & 0x1FFFF;
+      }
+      let x = 0;
+      for (let c = 0; c < 3; c++) {
+        const q = ch[c];
+        if (!q.amp) continue;
+        if (q.noise) { if (st.lfsr & 1) x += q.amp; continue; }
+        st.ph[c] = (st.ph[c] + q.inc) % 1;
+        if (st.ph[c] < 0.5) x += q.amp;
+      }
+      out[i] = x * 15 / 3;
+    }
+    return out;
+  }
+  // OPL2 (chips.inc opl_update), egyszerűsített kétoperátoros FM: a vivő
+  // szinusz, a modulátor szorzója, erőssége és visszacsatolása a hullámformából
+  const OPL_MUL = [2, 1, 2, 1, 15, 1], OPL_MTL = [0x21, 0x21, 0x2D, 0x25, 0, 0x3F], OPL_FB = [0, 2, 0, 6, 7, 0];
+  const OPL_TL = [63, 31, 23, 19, 15, 13, 11, 9, 7, 6, 5, 4, 3, 2, 1, 0];
+  function oplFreq(F, k) {
+    let fn = Math.floor(F * k / 65536), blk = 0;
+    while (fn >= 1024 && blk < 7) { fn >>= 1; blk++; }
+    if (fn >= 1024) fn = 1023;
+    return fn * 49716 / Math.pow(2, 20 - blk);
+  }
+  function oplTick(st, vs, waves, volScale, k, sr, n) {
+    const out = new Float32Array(n);
+    const TAU = 2 * Math.PI;
+    const ch = vs.map((v) => {
+      const w = waves[v.slot] || 0, tl = OPL_TL[volScale[v.vol]];
+      const f = w === 4 ? 0x3FF * 49716 / 16384 : oplFreq(v.f, k);
+      return { amp: tl >= 63 ? 0 : Math.pow(10, -tl * 0.75 / 20), inc: f / sr, mul: OPL_MUL[w],
+        idx: OPL_MTL[w] >= 63 ? 0 : 8 * Math.PI * Math.pow(10, -OPL_MTL[w] * 0.75 / 20),
+        fb: OPL_FB[w] ? Math.PI / 32 * Math.pow(2, OPL_FB[w]) : 0 };
+    });
+    for (let i = 0; i < n; i++) {
+      let x = 0;
+      for (let c = 0; c < 3; c++) {
+        const q = ch[c];
+        st.ph[c] = (st.ph[c] + q.inc) % 1;
+        if (!q.amp) continue;
+        const m = q.idx ? Math.sin(TAU * ((st.ph[c] * q.mul) % 1) + q.fb * st.fbm[c]) : 0;
+        st.fbm[c] = m;
+        x += q.amp * Math.sin(TAU * st.ph[c] + q.idx * m);
+      }
+      out[i] = (x / 3 + 1) * 7.5;
+    }
+    return out;
+  }
   function simulatePoly(song, card) {
     const flags = song[0], decay = song[1], floor = song[2], div = song[3];
     const loopOff = song[4] | (song[5] << 8), tickn = song[6], nslots = song[7];
     const waves = Array.from(song.subarray(8, 8 + nslots));
     const sr = M.TVC_CLOCK / div;
-    const mix = song.subarray(16, 80);
+    const mix = song.subarray(16, 80), fastMix = !!(flags & 2);
     const F = (n) => song[80 + 2 * n] | (song[81 + 2 * n] << 8);
     const EV = 336;
     const tables = buildTables(waves);
@@ -177,10 +249,16 @@
     const volScale = Array.from({ length: 16 }, (_, v) => Math.min(15, Math.floor(v * 15 / vmax)));
     const snK = 37535 * div, snSt = { ph: [0, 0, 0], nph: 0, lfsr: 0x4000 };
     const sidK = Math.floor((3325563 + (div >> 1)) / div), sidSt = { ph: [0, 0, 0], noise: [0, 0, 0] };
+    const saaK = 41943 * div, saaSt = { ph: [0, 0, 0], nph: 0, lfsr: 1 };
+    const oplK = Math.floor((4119406 + (div >> 1)) / div), oplSt = { ph: [0, 0, 0], fbm: [0, 0, 0] };
+    const cardTick = { sn: () => snTick(snSt, vs, waves, volScale, snK, sr, tickn),
+      sid: () => sidTick(sidSt, vs, waves, volScale, sidK, sr, tickn),
+      saa: () => saaTick(saaSt, vs, waves, volScale, saaK, sr, tickn),
+      opl: () => oplTick(oplSt, vs, waves, volScale, oplK, sr, tickn) }[card];
     events(); voices();
     while (!done && tick < maxTicks) {
-      if (card === 'sn' || card === 'sid') {
-        chunks.push(card === 'sn' ? snTick(snSt, vs, waves, volScale, snK, sr, tickn) : sidTick(sidSt, vs, waves, volScale, sidK, sr, tickn));
+      if (cardTick) {
+        chunks.push(cardTick());
         roll.push(vs.map((v, i) => ({ v: i, note: v.note, vol: v.vol, drum: v.drum, noise: waves[v.slot] === 4 }))
           .filter((x) => x.vol > 0 && x.note >= 0));
         events(); voices();
@@ -194,7 +272,8 @@
         acc[0] = (acc[0] + f0) & 0xFFFF;
         acc[1] = (acc[1] + f1) & 0xFFFF;
         acc[2] = (acc[2] + f2) & 0xFFFF;
-        buf[i] = mix[tables[p0 + (acc[0] >> 8)] + tables[p1 + (acc[1] >> 8)] + tables[p2 + (acc[2] >> 8)]];
+        buf[i] = fastMix ? mix[tables[p0 + (acc[0] >> 8)]] + mix[tables[p1 + (acc[1] >> 8)]] + mix[tables[p2 + (acc[2] >> 8)]]
+          : mix[tables[p0 + (acc[0] >> 8)] + tables[p1 + (acc[1] >> 8)] + tables[p2 + (acc[2] >> 8)]];
       }
       chunks.push(buf);
       roll.push(vs.map((v, i) => ({ v: i, note: v.note, vol: v.vol, drum: v.drum, noise: waves[v.slot] === 4 }))
@@ -340,7 +419,7 @@
     return out;
   }
 
-  // card: 'sn' = a hangkártya hangja (csak a többszólamú lejátszónál)
+  // card: 'sn', 'sid', 'saa', 'opl' = a hangkártya hangja (csak a többszólamú lejátszónál)
   function simulate(song, mode, outRate, card) {
     return mode === 'poly' ? simulatePoly(song, card) : simulateMono(song, outRate || 44100);
   }

@@ -165,8 +165,9 @@ kerül, amit a dal használ. A konverter a dalból dönti el, és a
 | többszólamú | `FEAT_DRUMS` | ha szól szintetizált dob (csúszás, `B8` esemény) |
 | többszólamú | `FEAT_WAVE_PULSE`, `_TRI`, `_SAW`, `_NOISE`, `_SINE` | ha a dal használja az adott hullámformát (a négyszög mindig) |
 | többszólamú | `FEAT_IRQ0038` | `--fast-irq`: a mintakezelő a 0038h-n (−10 ciklus mintánként; a 0038h–0088h területet a lejátszás alatt használja, a végén visszaállítja) |
+| többszólamú | `FEAT_FASTMIX` | `--poly-mix fast`: keverőtábla nélkül (a szólamtáblákban már a kimenet van, a kezelő csak összead: −11 ciklus mintánként; szólamonként 6 hangerőszint) |
 | többszólamú | `FEAT_PITCH` | `--bend`, ha a dalban van hajlítás, vibrato vagy burkológörbe-hangmagasság (`B3+s lo hi` parancs) |
-| többszólamú | `FEAT_CARDS`, `FEAT_SN` | `--cards sn`: hangkártya-felismerés és SN76489-meghajtó (`chips.inc`) |
+| többszólamú | `FEAT_CARDS`, `FEAT_SN`, `FEAT_SID`, `FEAT_SAA`, `FEAT_OPL` | `--cards sn,sid,saa,opl`: hangkártya-felismerés és a kiválasztott chipek meghajtói (`chips.inc`) |
 | egycsatornás | `FEAT_DRUMS` | ha van dobkészlet |
 | egycsatornás | `FEAT_BG` | `--background` |
 
@@ -300,13 +301,25 @@ szól.
 | kártya | név a slot területén | chip, port |
 | --- | --- | --- |
 | GameCard | `JOY+SN` | SN76489 a hely `+0` portján |
-| Multichip Soundcard | `SndMx` | SN76489 `+0` (SAA1099 `+2`/`+3`, OPL2 `+4`/`+5`: tervben) |
+| Multichip Soundcard | `SndMx` | SN76489 `+0`, SAA1099 `+2` adat / `+3` cím, YM3812 (OPL2) `+4` regiszter / `+5` adat |
+| TVC256k++ | `256k++` | vSID: a kártya `E0h+n` regiszterei, `+0` sorszám, `+1` érték |
+
+A `--cards` lista: `sn` (SN76489), `sid` (vSID), `saa` (SAA1099), `opl`
+(OPL2). Ha több is szólhatna, a sorrend: vSID, OPL2, SAA1099, SN76489.
 
 Az SN76489 órajele 3 579 545 Hz, az osztó `N = órajel / (32 f)`, a
 lejátszó tickenként 24/16 bites osztással számolja a fázisnövekményből; a
-hangerő 2 dB-es csillapítás. A webes előnézet a kártya hangját is tudja
+hangerő 2 dB-es csillapítás. A vSID (985 337 Hz) frekvenciája
+`F · sid_k / 65536`, a hangerő a kitartási szint (ha nő, a kapu újraindul). Az
+SAA1099 (8 MHz) `f = 15625 · 2^okt / (511 − N)`: a lejátszó úgy választja
+az oktávot, hogy az osztó a legpontosabb legyen; a zaj a 0. zajgenerátor. Az
+OPL2 (`f = Fnum · 49716 / 2^(20−blokk)`) a 0–2. FM-csatornát használja: a
+hangszín a hullámformából jön (négyszög: 1:2 arányú moduláció, páratlan
+felharmonikusok; fűrész: 1:1 visszacsatolással; háromszög, szinusz: majdnem
+tiszta szinusz), a hangerő a vivő csillapítása. A webes előnézet a kártya hangját is tudja
 („Az előnézet a kártya hangjával”). Az emulátoros teszt GameCarddal,
-Multichip kártyával és kártya nélkül is lefut (`CARDS=hely:kártya` a
+Multichip kártyával (SN76489, SAA1099, OPL2), TVC256k++ kártyával és kártya
+nélkül is lefut (hangmagasság, a kártya portjai, a végén a BASIC) (`CARDS=hely:kártya` a
 harnessben).
 
 ## Az egycsatornás lejátszó (`player.asm`)
