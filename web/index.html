@@ -219,7 +219,8 @@ footer { color: var(--muted); font-size: 13px; display: grid; gap: 8px; }
 /* kottaszerkesztő */
 #ndDlg { width: calc(100vw - 16px); max-width: 1500px; height: calc(100vh - 16px); max-height: none; padding: 0; border: 1px solid var(--line); border-radius: var(--r); background: var(--surface); color: var(--ink); }
 #ndDlg::backdrop { background: rgba(0, 0, 0, 0.45); }
-#ndDlg .nd { display: grid; grid-template-rows: auto auto auto minmax(0, 1fr); gap: 10px; padding: 14px 16px; height: 100%; box-sizing: border-box; }
+#ndDlg .nd { display: flex; flex-direction: column; gap: 10px; padding: 14px 16px; height: 100%; box-sizing: border-box; }
+#ndDlg .nd > * { flex: none; }
 #ndDlg .eehead { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; justify-content: space-between; }
 #ndDlg h2 { margin: 0; }
 #ndDlg h3 { margin: 0; font-size: 14px; }
@@ -233,7 +234,7 @@ footer { color: var(--muted); font-size: 13px; display: grid; gap: 8px; }
 #ndDlg .ndzoom input[type=range] { width: 110px; accent-color: var(--accent); }
 #ndMsg { font-size: 13px; color: var(--muted); margin: 0; min-height: 1.2em; }
 #ndMsg.bad { color: var(--warn); }
-#ndDlg .ndmain { display: grid; grid-template-columns: 250px minmax(0, 1fr); gap: 12px; min-height: 0; }
+#ndDlg .nd > .ndmain { flex: 1 1 auto; display: grid; grid-template-columns: 250px minmax(0, 1fr); gap: 12px; min-height: 0; }
 #ndDlg .ndside { display: grid; gap: 6px; align-content: start; overflow-y: auto; min-height: 0; }
 #ndChans { list-style: none; margin: 0; padding: 0; display: grid; gap: 4px; }
 #ndChans li { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 2px 6px; align-items: center; padding: 5px 6px; border: 1px solid var(--line); border-radius: var(--r); font-size: 12.5px; }
@@ -245,15 +246,31 @@ footer { color: var(--muted); font-size: 13px; display: grid; gap: 8px; }
 #ndChans button { padding: 2px 8px; font-size: 12px; }
 #ndChans .tr { grid-column: 1 / -1; display: flex; gap: 4px; align-items: center; color: var(--muted); font-size: 12px; }
 #ndChans .tr button { padding: 1px 6px; min-width: 30px; }
-#ndDlg .ndroll { display: grid; grid-template-rows: minmax(0, 1fr) auto auto auto; gap: 8px; min-height: 0; min-width: 0; }
-#ndRoll { display: block; width: 100%; height: 100%; min-height: 260px; touch-action: none; border: 1px solid var(--line); border-radius: var(--r); background: var(--sunk); }
+#ndDlg .ndroll { display: flex; flex-direction: column; gap: 8px; min-height: 0; min-width: 0; overflow-y: auto; }
+#ndDlg .ndroll > * { flex: none; }
+#ndRoll { display: block; flex: 1 1 auto !important; width: 100%; height: 0; min-height: 240px; touch-action: none; border: 1px solid var(--line); border-radius: var(--r); background: var(--sunk); }
+#ndDlg .ndhelp summary { cursor: pointer; font-size: 12.5px; color: var(--muted); }
+#ndDlg .ndhelp p { margin-top: 4px; }
 #ndRoll:focus-visible { outline: 2px solid var(--accent); }
 #ndDlg .ndsel { display: flex; flex-wrap: wrap; gap: 6px; align-items: center; font-size: 13px; }
 #ndDlg .ndsel button { padding: 3px 8px; font-size: 12.5px; }
 #ndVel { width: 4.2em; padding: 3px 5px; }
 #ndDlg .ndinfo { margin: 0; font-size: 12.5px; color: var(--muted); min-height: 1.2em; }
 #ndDlg .hint { margin: 0; }
-@media (max-width: 760px) { #ndDlg .ndmain { grid-template-columns: minmax(0, 1fr); grid-template-rows: auto minmax(0, 1fr); } #ndDlg .ndside { max-height: 160px; } }
+/* telefon: az egész ablak görgethető, felül a tekercs (nagyban), alatta a csatornák; a fejléc rögzítve */
+@media (max-width: 760px) {
+  #ndDlg { width: 100vw; max-width: 100vw; height: 100dvh; max-height: 100dvh; margin: 0; border-radius: 0; border: 0; overflow-y: auto; }
+  #ndDlg .nd { height: auto; min-height: 100%; padding: 0 12px 16px; gap: 8px; }
+  #ndDlg .eehead { position: sticky; top: 0; z-index: 2; background: var(--surface); padding: 10px 0 8px; border-bottom: 1px solid var(--line); }
+  #ndDlg h2 { font-size: 15px; }
+  #ndDlg .ndbtns button { padding: 6px 10px; }
+  #ndDlg .nd > .ndmain { display: flex; flex-direction: column; gap: 10px; }
+  #ndDlg .ndroll { order: 1; overflow: visible; }
+  #ndDlg .ndside { order: 2; overflow: visible; }
+  #ndRoll { flex: none !important; height: 62vh; min-height: 320px; }
+  #ndDlg .ndnew { margin-left: 0; }
+  #ndDlg .ndzoom input[type=range] { width: 90px; }
+}
 
 /* burkológörbe-szerkesztő */
 #envDlg { width: min(1040px, calc(100vw - 16px)); max-height: calc(100vh - 16px); padding: 0; border: 1px solid var(--line); border-radius: var(--r); background: var(--surface); color: var(--ink); }
@@ -542,7 +559,7 @@ footer code, .hint code { font-family: var(--font-mono); font-size: 12.5px; }
             <button id="ndDel" type="button" title="Törlés (Delete)">Törlés</button>
           </div>
           <p class="ndinfo"><span id="ndInfo"></span> <span id="ndHover"></span></p>
-          <p class="hint">Görgő: fel-le; Shift+görgő: előre-hátra; Ctrl+görgő: vízszintes, Alt+görgő: függőleges nagyítás (az egér körül); érintőn két ujjal: csippentés = nagyítás (vízszintesen és függőlegesen külön), húzás = görgetés. A vonalzóra kattintva onnan szól a meghallgatás. Nyilak: átültetés / mozgatás a rács szerint; K: kihagyás; Delete: törlés; Ctrl+A: mind. A halvány hangokat a TVC nem játssza le (nincs szabad szólam, vagy a csatorna nincs kiválasztva): ha egy hang fontos, hagyd ki a vele egy időben szólókat, vagy tedd őket más magasságba.</p>
+          <details class="ndhelp"><summary>Súgó</summary><p class="hint">Kijelölés módban: kattintás egy hangon = kijelölés (Shift: hozzáadás), húzás üres helyen = kijelölés téglalappal; a kijelölt hang húzható, a vége húzásával a hossza állítható. Rajzolás módban: kattintás = új hang (húzva a hossza). Dupla kattintás egy hangon: törlés. Görgő: fel-le; Shift+görgő: előre-hátra; Ctrl+görgő: vízszintes, Alt+görgő: függőleges nagyítás (az egér körül); érintőn két ujjal: csippentés = nagyítás (vízszintesen és függőlegesen külön), húzás = görgetés. A vonalzóra kattintva onnan szól a meghallgatás. Nyilak: átültetés / mozgatás a rács szerint; K: kihagyás; Delete: törlés; Ctrl+A: mind. A halvány hangokat a TVC nem játssza le (nincs szabad szólam, vagy a csatorna nincs kiválasztva): ha egy hang fontos, hagyd ki a vele egy időben szólókat, vagy tedd őket más magasságba.</p></details>
         </div>
       </div>
     </div>

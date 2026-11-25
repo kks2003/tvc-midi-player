@@ -639,7 +639,7 @@
         dlg.showModal();
         fit(); computePlayed();
         renderChannels(); draw(); info();
-        if (!fresh) msg('Kijelölés: kattintás, Shift+kattintás, húzás üres helyen; a hang húzható (vége: hossz). Rajzolás: kattintás = új hang. Dupla kattintás egy hangon: törlés.');
+        if (!fresh) msg('Kattintás egy hangon: kijelölés; a kijelölt hang húzható. A kezelés részletei a tekercs alatti „Súgó”-ban.');
         cv.focus();
       },
     };
