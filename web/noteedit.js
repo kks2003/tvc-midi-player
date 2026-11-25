@@ -62,6 +62,13 @@
       if (dirty) played = null; else computePlayed();
       renderChannels(); draw(); info();
     }
+    function restoreQuiet(s) {                    // a csippentéssel megszakított húzás nyoma nélkül
+      const o = JSON.parse(s);
+      song.notes = o.notes; song.ctrl = o.ctrl; song.names = o.names;
+      sel.clear();
+      dirty = undoStack.length !== cleanAt;
+      if (!dirty) computePlayed();
+    }
     function undo() { if (!undoStack.length) return; redoStack.push(snapshot()); restore(undoStack.pop()); }
     function redo() { if (!redoStack.length) return; undoStack.push(snapshot()); restore(redoStack.pop()); }
 
@@ -124,15 +131,38 @@
       const ns = song.notes.filter((n) => n.ch !== 9);
       const lo = ns.length ? Math.min(...ns.map((n) => n.n)) : 48, hi = ns.length ? Math.max(...ns.map((n) => n.n)) : 72;
       const { w, h } = size();
-      view.kh = clamp(Math.floor((h - RULER) / (hi - lo + 5)), 6, 14);
+      view.kh = clamp(Math.floor((h - RULER) / (hi - lo + 5)), 6, 16);
       view.top = Math.min(127, hi + 2);
       view.t0 = 0;
-      view.ppt = clamp((w - KEYW) / (song.division * 4 * 8), 0.02, 4);   // kb. 8 ütem
+      view.ppt = clamp((w - KEYW) / (song.division * 4 * 8), PPT_MIN, PPT_MAX);   // kb. 8 ütem
     }
     const xOf = (t) => KEYW + (t - view.t0) * view.ppt;
     const yOf = (n) => RULER + (view.top - n) * view.kh;
     const tOf = (x) => view.t0 + (x - KEYW) / view.ppt;
     const nOf = (y) => view.top - Math.floor((y - RULER) / view.kh);
+    // nagyítás: vízszintesen px / tick (PPT_MIN..PPT_MAX), függőlegesen px / félhang (KH_MIN..KH_MAX)
+    const PPT_MIN = 0.005, PPT_MAX = 12, KH_MIN = 3, KH_MAX = 40;
+    function zoomX(f, x) {                        // x: a rögzített pont (px); alapból a közép
+      const w = cv.getBoundingClientRect().width;
+      if (x === undefined) x = KEYW + (w - KEYW) / 2;
+      const t = tOf(x);
+      view.ppt = clamp(view.ppt * f, PPT_MIN, PPT_MAX);
+      view.t0 = Math.max(0, t - (x - KEYW) / view.ppt);
+    }
+    function zoomY(f, y) {
+      const h = cv.getBoundingClientRect().height;
+      if (y === undefined) y = RULER + (h - RULER) / 2;
+      const n = view.top - (y - RULER) / view.kh;   // a rögzített hangmagasság (tört)
+      view.kh = clamp(view.kh * f, KH_MIN, KH_MAX);
+      view.top = clamp(Math.round(n + (y - RULER) / view.kh), 12, 127);
+    }
+    // a csúszkák: logaritmikus skála
+    const toSlider = (v, a, b) => Math.round(1000 * Math.log(v / a) / Math.log(b / a));
+    const fromSlider = (s, a, b) => a * Math.pow(b / a, s / 1000);
+    function syncZoom() {
+      $('ndZoomX').value = toSlider(view.ppt, PPT_MIN, PPT_MAX);
+      $('ndZoomY').value = toSlider(view.kh, KH_MIN, KH_MAX);
+    }
     function hit(x, y) {
       for (let i = song.notes.length - 1; i >= 0; i--) {
         const nt = song.notes[i];
@@ -145,6 +175,7 @@
 
     function draw() {
       if (!song) return;
+      syncZoom();
       const { w, h, dpr } = size();
       const c = cv.getContext('2d');
       c.setTransform(dpr, 0, 0, dpr, 0, 0);
@@ -212,7 +243,10 @@
       for (let n = view.top; n >= Math.max(0, nBot); n--) {
         const y = yOf(n);
         if (BLACK[n % 12]) { c.fillStyle = ink; c.globalAlpha = 0.75; c.fillRect(0, y, KEYW * 0.6, view.kh); c.globalAlpha = 1; }
-        if (n % 12 === 0 && view.kh >= 6) { c.fillStyle = muted; c.fillText(noteName(n), KEYW * 0.62, y + view.kh / 2); }
+        if ((n % 12 === 0 && view.kh >= 6) || view.kh >= 14) {     // nagy sormagasságnál minden hang neve
+          c.fillStyle = BLACK[n % 12] ? css('--surface') || '#fff' : muted;
+          c.fillText(noteName(n), BLACK[n % 12] ? 3 : KEYW * 0.62, y + view.kh / 2);
+        }
       }
       c.fillStyle = line; c.fillRect(KEYW - 1, RULER, 1, h - RULER);
       // a mutatott hang adatai
@@ -324,9 +358,26 @@
 
     // ---- egér -----------------------------------------------------------------------
     const pos = (e) => { const r = cv.getBoundingClientRect(); return [e.clientX - r.left, e.clientY - r.top]; };
+    // két ujj (érintő): csippentés = nagyítás vízszintesen és függőlegesen külön, húzás = görgetés
+    const touches = new Map();
+    let pinch = null;
+    function pinchState() {
+      const [a, b] = [...touches.values()];
+      return { mx: (a[0] + b[0]) / 2, my: (a[1] + b[1]) / 2, dx: Math.abs(a[0] - b[0]), dy: Math.abs(a[1] - b[1]) };
+    }
     cv.addEventListener('pointerdown', (e) => {
+      if (e.pointerType === 'touch') {
+        touches.set(e.pointerId, pos(e));
+        if (touches.size === 2) {                   // a második ujj: a megkezdett művelet elmarad
+          if (drag && (drag.kind === 'move' || drag.kind === 'len') && undoStack.length) { if (drag.created) song.notes.pop(); restoreQuiet(undoStack.pop()); }
+          drag = null;
+          pinch = pinchState();
+          return;
+        }
+        if (touches.size > 2) return;
+      }
       if (!song || e.button !== 0) return;
-      cv.setPointerCapture(e.pointerId);
+      try { cv.setPointerCapture(e.pointerId); } catch (err) { /* (szimulált esemény) */ }
       const [x, y] = pos(e);
       if (y < RULER) {                              // a vonalzó: a meghallgatás kezdete
         playTick = Math.max(0, snap(tOf(Math.max(KEYW, x))));
@@ -359,6 +410,19 @@
     });
     cv.addEventListener('pointermove', (e) => {
       if (!song) return;
+      if (e.pointerType === 'touch' && touches.has(e.pointerId)) {
+        touches.set(e.pointerId, pos(e));
+        if (pinch && touches.size === 2) {
+          const s = pinchState();
+          if (pinch.dx > 30 && s.dx > 0) zoomX(s.dx / pinch.dx, s.mx);
+          if (pinch.dy > 30 && s.dy > 0) zoomY(s.dy / pinch.dy, s.my);
+          view.t0 = Math.max(0, view.t0 - (s.mx - pinch.mx) / view.ppt);
+          view.top = clamp(Math.round(view.top + (s.my - pinch.my) / view.kh), 12, 127);
+          pinch = s;
+          draw();
+          return;
+        }
+      }
       const [x, y] = pos(e);
       if (!drag) {
         const h = x >= KEYW && y >= RULER ? hit(x, y) : null;
@@ -392,7 +456,11 @@
       }
       draw();
     });
-    const endDrag = () => {
+    const endDrag = (e) => {
+      if (e && e.pointerType === 'touch') {
+        touches.delete(e.pointerId);
+        if (pinch) { if (touches.size < 2) pinch = null; drag = null; return; }
+      }
       if (drag && (drag.kind === 'move' || drag.kind === 'len') && !drag.moved) undoStack.pop();   // csak kattintás volt
       drag = null;
       draw(); info();
@@ -416,14 +484,13 @@
       if (!song) return;
       e.preventDefault();
       const [x] = pos(e);
-      if (e.ctrlKey || e.metaKey) {                 // vízszintes nagyítás az egér körül
-        const t = tOf(x);
-        view.ppt = clamp(view.ppt * (e.deltaY < 0 ? 1.25 : 0.8), 0.01, 8);
-        view.t0 = Math.max(0, t - (x - KEYW) / view.ppt);
+      const [, y] = pos(e);
+      if (e.altKey) {                               // függőleges nagyítás az egér körül
+        zoomY(e.deltaY < 0 ? 1.15 : 1 / 1.15, y);
+      } else if (e.ctrlKey || e.metaKey) {          // vízszintes nagyítás az egér körül
+        zoomX(e.deltaY < 0 ? 1.25 : 0.8, x);
       } else if (e.shiftKey || Math.abs(e.deltaX) > Math.abs(e.deltaY)) {
         view.t0 = Math.max(0, view.t0 + (e.deltaX || e.deltaY) / view.ppt);
-      } else if (e.altKey) {
-        view.kh = clamp(view.kh + (e.deltaY < 0 ? 1 : -1), 4, 24);
       } else {
         view.top = clamp(view.top + (e.deltaY < 0 ? 2 : -2), 12, 127);
       }
@@ -510,8 +577,12 @@
     $('ndUndo').addEventListener('click', undo);
     $('ndRedo').addEventListener('click', redo);
     $('ndFit').addEventListener('click', () => { fit(); draw(); });
-    $('ndZoomIn').addEventListener('click', () => { view.ppt = clamp(view.ppt * 1.5, 0.01, 8); draw(); });
-    $('ndZoomOut').addEventListener('click', () => { view.ppt = clamp(view.ppt / 1.5, 0.01, 8); draw(); });
+    $('ndZoomXIn').addEventListener('click', () => { zoomX(1.5); draw(); });
+    $('ndZoomXOut').addEventListener('click', () => { zoomX(1 / 1.5); draw(); });
+    $('ndZoomYIn').addEventListener('click', () => { zoomY(1.3); draw(); });
+    $('ndZoomYOut').addEventListener('click', () => { zoomY(1 / 1.3); draw(); });
+    $('ndZoomX').addEventListener('input', () => { zoomX(fromSlider(+$('ndZoomX').value, PPT_MIN, PPT_MAX) / view.ppt); draw(); });
+    $('ndZoomY').addEventListener('input', () => { zoomY(fromSlider(+$('ndZoomY').value, KH_MIN, KH_MAX) / view.kh); draw(); });
     $('ndGrid').addEventListener('change', draw);
     $('ndPlay').addEventListener('click', () => { if (audio) stopAudio(); else playAudio(); });
     $('ndSave').addEventListener('click', () => {

@@ -228,6 +228,9 @@ footer { color: var(--muted); font-size: 13px; display: grid; gap: 8px; }
 #ndDlg .ndbar button { padding: 4px 10px; }
 #ndDlg .ndnew { display: inline-flex; gap: 6px; align-items: center; margin-left: auto; }
 #ndBpm { width: 4.5em; padding: 3px 5px; }
+#ndDlg .ndzoom { display: inline-flex; align-items: center; gap: 4px; color: var(--muted); }
+#ndDlg .ndzoom button { padding: 2px 9px; }
+#ndDlg .ndzoom input[type=range] { width: 110px; accent-color: var(--accent); }
 #ndMsg { font-size: 13px; color: var(--muted); margin: 0; min-height: 1.2em; }
 #ndMsg.bad { color: var(--warn); }
 #ndDlg .ndmain { display: grid; grid-template-columns: 250px minmax(0, 1fr); gap: 12px; min-height: 0; }
@@ -512,7 +515,11 @@ footer code, .hint code { font-family: var(--font-mono); font-size: 12.5px; }
           <input type="radio" name="ndMode" id="ndModeDraw"><label for="ndModeDraw">Rajzolás</label>
         </span>
         <label for="ndGrid">Rács</label><select id="ndGrid"><option value="4">negyed</option><option value="8">nyolcad</option><option value="16" selected>tizenhatod</option><option value="32">harmincketted</option><option value="0">nincs</option></select>
-        <button id="ndZoomOut" type="button" title="Kicsinyítés (Ctrl+görgő)">−</button><button id="ndZoomIn" type="button" title="Nagyítás (Ctrl+görgő)">+</button><button id="ndFit" type="button">Teljes nézet</button>
+        <span class="ndzoom" title="Vízszintes nagyítás: az idő (Ctrl+görgő; érintőn két ujjal vízszintesen széthúzva)">↔
+          <button id="ndZoomXOut" type="button" aria-label="Vízszintesen kicsinyítés">−</button><input id="ndZoomX" type="range" min="0" max="1000" aria-label="Vízszintes nagyítás"><button id="ndZoomXIn" type="button" aria-label="Vízszintesen nagyítás">+</button></span>
+        <span class="ndzoom" title="Függőleges nagyítás: a hangmagasság (Alt+görgő; érintőn két ujjal függőlegesen széthúzva)">↕
+          <button id="ndZoomYOut" type="button" aria-label="Függőlegesen kicsinyítés">−</button><input id="ndZoomY" type="range" min="0" max="1000" aria-label="Függőleges nagyítás"><button id="ndZoomYIn" type="button" aria-label="Függőlegesen nagyítás">+</button></span>
+        <button id="ndFit" type="button" title="Az egész dal hangterjedelme, az első ütemek">Teljes nézet</button>
         <button id="ndPlay" type="button" title="A TVC szimulációja a fő oldal beállításaival, a piros vonaltól (szóköz)">▶ Meghallgatás</button>
         <button id="ndSave" type="button">Mentés .mid fájlba</button>
         <span class="ndnew"><button id="ndNew" type="button">Új dal</button><input id="ndBpm" type="number" min="20" max="300" value="120" title="Az új dal tempója"> BPM</span>
@@ -535,7 +542,7 @@ footer code, .hint code { font-family: var(--font-mono); font-size: 12.5px; }
             <button id="ndDel" type="button" title="Törlés (Delete)">Törlés</button>
           </div>
           <p class="ndinfo"><span id="ndInfo"></span> <span id="ndHover"></span></p>
-          <p class="hint">Görgő: fel-le; Shift+görgő: előre-hátra; Ctrl+görgő: nagyítás; Alt+görgő: sormagasság. A vonalzóra kattintva onnan szól a meghallgatás. Nyilak: átültetés / mozgatás a rács szerint; K: kihagyás; Delete: törlés; Ctrl+A: mind. A halvány hangokat a TVC nem játssza le (nincs szabad szólam, vagy a csatorna nincs kiválasztva): ha egy hang fontos, hagyd ki a vele egy időben szólókat, vagy tedd őket más magasságba.</p>
+          <p class="hint">Görgő: fel-le; Shift+görgő: előre-hátra; Ctrl+görgő: vízszintes, Alt+görgő: függőleges nagyítás (az egér körül); érintőn két ujjal: csippentés = nagyítás (vízszintesen és függőlegesen külön), húzás = görgetés. A vonalzóra kattintva onnan szól a meghallgatás. Nyilak: átültetés / mozgatás a rács szerint; K: kihagyás; Delete: törlés; Ctrl+A: mind. A halvány hangokat a TVC nem játssza le (nincs szabad szólam, vagy a csatorna nincs kiválasztva): ha egy hang fontos, hagyd ki a vele egy időben szólókat, vagy tedd őket más magasságba.</p>
         </div>
       </div>
     </div>
