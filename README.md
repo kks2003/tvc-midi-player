@@ -39,8 +39,12 @@ A `web/index.html` böngészőben végzi el ugyanezt, telepítés nélkül:
 - **kottaszerkesztő** (`web/noteedit.js`, „Kottaszerkesztő…” és „Új dal…”):
   a dal hangjai zongoratekercsen, csatornánként színezve. A hangok kijelölhetők
   (kattintás, Shift, dobozos húzás), mozgathatók, a hosszuk húzható, újak
-  rajzolhatók, törölhetők, az erősségük állítható; egy hang **kihagyható**
-  (nem kerül át a TVC-re). Halványan látszik, melyik hangot **nem játssza le a
+  rajzolhatók, törölhetők, az erősségük állítható. **Mi szóljon a TVC 3
+  szólamán:** egy hang „★ Mindenképp” jelölést kaphat (elsőként kap szólamot,
+  a legkevésbé fontosat kiszorítja), „Ha van hely” jelölést (csak a többi után)
+  vagy **kihagyható** (nem kerül át a TVC-re). A jelölés a MIDI-ben a 16-os
+  vezérlő (General Purpose 1) a hang előtt: 64..127 mindenképp, 1..63 ha van
+  hely, 0 normál; a `midi2tvc.py` is így olvassa, mindhárom módban. Halványan látszik, melyik hangot **nem játssza le a
   TVC** (nincs szabad szólam), így eldönthető, mit érdemes kihagyni vagy
   áthelyezni. Csatornánként hangszer és **átültetés** (±félhang, ±oktáv), új
   csatorna, új dal üresből (tempóval), visszavonás, meghallgatás a TVC

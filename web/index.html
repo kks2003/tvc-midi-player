@@ -255,6 +255,7 @@ footer { color: var(--muted); font-size: 13px; display: grid; gap: 8px; }
 #ndDlg .ndsel { display: flex; flex-wrap: wrap; gap: 6px; align-items: center; font-size: 13px; }
 #ndDlg .ndsel button { padding: 3px 8px; font-size: 12.5px; }
 #ndVel { width: 4.2em; padding: 3px 5px; }
+#ndDlg .ndprio { display: inline-flex; flex-wrap: wrap; gap: 4px; align-items: center; padding: 2px 6px; border: 1px solid var(--line); border-radius: var(--r); }
 #ndDlg .ndinfo { margin: 0; font-size: 12.5px; color: var(--muted); min-height: 1.2em; }
 #ndDlg .hint { margin: 0; }
 /* telefon: az egész ablak görgethető, felül a tekercs (nagyban), alatta a csatornák; a fejléc rögzítve */
@@ -554,12 +555,14 @@ footer code, .hint code { font-family: var(--font-mono); font-size: 12.5px; }
           <div class="ndsel" id="ndSelBar" hidden>
             <span>Kijelölés:</span>
             <button id="ndDown12" type="button" title="Egy oktávval le (Shift+↓)">−12</button><button id="ndDown1" type="button" title="Egy félhanggal le (↓)">−1</button><button id="ndUp1" type="button" title="Egy félhanggal fel (↑)">+1</button><button id="ndUp12" type="button" title="Egy oktávval fel (Shift+↑)">+12</button>
-            <button id="ndOff" type="button" title="Nem kerül át a TVC-re (K)">Kihagyás</button><button id="ndOn" type="button">Visszavétel</button>
+            <span class="ndprio">A TVC-n:
+              <button id="ndPrioHi" type="button" title="Mindenképp szóljon: elsőként kap szólamot, kiszorítja a többit (M)">★ Mindenképp</button><button id="ndPrioNorm" type="button" title="Normál: a konverter dönt (legmagasabb, legmélyebb, a többi) (N)">Normál</button><button id="ndPrioLo" type="button" title="Csak ha van hely: a többi után kap szólamot (H)">Ha van hely</button><button id="ndOff" type="button" title="Nem kerül át a TVC-re (K)">Kihagyás</button><button id="ndOn" type="button" title="A kihagyott hang újra átkerül">Visszavétel</button>
+            </span>
             <label for="ndVel">Erősség</label><input id="ndVel" type="number" min="1" max="127" value="100"><button id="ndVelSet" type="button">Beállít</button>
             <button id="ndDel" type="button" title="Törlés (Delete)">Törlés</button>
           </div>
           <p class="ndinfo"><span id="ndInfo"></span> <span id="ndHover"></span></p>
-          <details class="ndhelp"><summary>Súgó</summary><p class="hint">Kijelölés módban: kattintás egy hangon = kijelölés (Shift: hozzáadás), húzás üres helyen = kijelölés téglalappal; a kijelölt hang húzható, a vége húzásával a hossza állítható. Rajzolás módban: kattintás = új hang (húzva a hossza). Dupla kattintás egy hangon: törlés. Görgő: fel-le; Shift+görgő: előre-hátra; Ctrl+görgő: vízszintes, Alt+görgő: függőleges nagyítás (az egér körül); érintőn két ujjal: csippentés = nagyítás (vízszintesen és függőlegesen külön), húzás = görgetés. A vonalzóra kattintva onnan szól a meghallgatás. Nyilak: átültetés / mozgatás a rács szerint; K: kihagyás; Delete: törlés; Ctrl+A: mind. A halvány hangokat a TVC nem játssza le (nincs szabad szólam, vagy a csatorna nincs kiválasztva): ha egy hang fontos, hagyd ki a vele egy időben szólókat, vagy tedd őket más magasságba.</p></details>
+          <details class="ndhelp"><summary>Súgó</summary><p class="hint">Kijelölés módban: kattintás egy hangon = kijelölés (Shift: hozzáadás), húzás üres helyen = kijelölés téglalappal; a kijelölt hang húzható, a vége húzásával a hossza állítható. Rajzolás módban: kattintás = új hang (húzva a hossza). Dupla kattintás egy hangon: törlés. <b>Mi szóljon a TVC 3 szólamán:</b> a TVC egyszerre 3 hangot játszik; a halvány hangok most kimaradnak. Egy hang bejuttatása: jelöld ki, és „★ Mindenképp” (M) – elsőként kap szólamot, a legkevésbé fontosat kiszorítja (a tekercsen a hang bal szélén sötét csík). Ami ne foglaljon helyet: „Ha van hely” (H; áthúzva) – csak a többi után szól; vagy „Kihagyás” (K; szaggatott keret) – egyáltalán nem kerül át. A „Használat a konverterben” után a halványítás az új állapotot mutatja. A jelölés a mentett .mid-ben is megmarad (16-os vezérlő), a parancssori konverter is ugyanígy kezeli. Görgő: fel-le; Shift+görgő: előre-hátra; Ctrl+görgő: vízszintes, Alt+görgő: függőleges nagyítás (az egér körül); érintőn két ujjal: csippentés = nagyítás (vízszintesen és függőlegesen külön), húzás = görgetés. A vonalzóra kattintva onnan szól a meghallgatás. Nyilak: átültetés / mozgatás a rács szerint; K: kihagyás; Delete: törlés; Ctrl+A: mind. A halvány hangokat a TVC nem játssza le (nincs szabad szólam, vagy a csatorna nincs kiválasztva): ha egy hang fontos, hagyd ki a vele egy időben szólókat, vagy tedd őket más magasságba.</p></details>
         </div>
       </div>
     </div>

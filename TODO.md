@@ -88,9 +88,10 @@ kicsi és gyors, vagy teljes tudású, vagy egy adott hangkártyára szabott.
 - [x] **Kottaszerkesztő** a webes felületen: hangonként kihagyható, mi kerüljön
   át; látszik, melyik hangot nem játssza a TVC; csatornánkénti átültetés,
   szerkesztés, új dal.
-- [ ] **Okosabb szólamválasztás:** csatornánként „mindig szóljon” / „csak ha
-  van hely” jelölés (a szerkesztőben hangonként is), a dallamcsatorna
-  automatikus felismerése.
+- [x] **Szólam-elsőbbség hangonként** a kottaszerkesztőben („★ Mindenképp”,
+  „Ha van hely”, kihagyás; a MIDI-ben CC 16), mindhárom módban.
+- [ ] A dallamcsatorna automatikus felismerése; csatornánkénti alapértelmezett
+  elsőbbség a Csatornák táblázatban.
 - [ ] **Más forrásformátumok:** MOD / XM (tracker-zene), VGM (AY, SN76489,
   SAA1099, OPL2 hangchipes zene). A VGM különösen jól illik a hangkártyákhoz
   (lent).

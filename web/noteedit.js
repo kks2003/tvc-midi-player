@@ -219,6 +219,8 @@
           c.globalAlpha = 1;
           if (p === false) { c.strokeStyle = col; c.strokeRect(x0 + 0.5, y + 0.5, wd - 1, view.kh - 2); }
         }
+        if (!nt.off && nt.pr > 0) { c.fillStyle = ink; c.fillRect(x0, y, Math.min(3, wd), view.kh - 1); }       // mindenképp
+        if (!nt.off && nt.pr < 0) { c.fillStyle = bg; c.fillRect(x0, y + Math.floor((view.kh - 1) / 2), wd, 1); } // ha van hely
         if (sel.has(nt)) { c.strokeStyle = ink; c.lineWidth = 2; c.strokeRect(x0 + 1, y + 1, Math.max(1, wd - 2), view.kh - 3); c.lineWidth = 1; }
       }
       // kijelölő téglalap
@@ -252,7 +254,7 @@
       // a mutatott hang adatai
       const t = hover ? hover.nt : null;
       $('ndHover').textContent = t ? '— ' + noteName(t.n) + ' · ' + (t.ch + 1) + '. csatorna · erősség ' + t.v +
-        ' · ' + (t.d / song.division).toFixed(2).replace('.', ',') + ' negyed' + (t.off ? ' · kihagyva' : '') +
+        ' · ' + (t.d / song.division).toFixed(2).replace('.', ',') + ' negyed' + (t.off ? ' · kihagyva' : t.pr > 0 ? ' · ★ mindenképp szóljon' : t.pr < 0 ? ' · csak ha van hely' : '') +
         (played && played.get(t) === false ? ' · a TVC-n nem szól (nincs szabad szólam)' : '') : '';
     }
 
@@ -260,6 +262,9 @@
       if (!song) return;
       const on = song.notes.filter((n) => !n.off).length;
       let t = song.notes.length + ' hang, ebből ' + (song.notes.length - on) + ' kihagyva';
+      const hi = song.notes.filter((n) => !n.off && n.pr > 0).length, lo = song.notes.filter((n) => !n.off && n.pr < 0).length;
+      if (hi) t += ', ' + hi + ' ★ mindenképp';
+      if (lo) t += ', ' + lo + ' csak ha van hely';
       if (played) {
         let p = 0, q = 0;
         for (const v of played.values()) { if (v) p++; else q++; }
@@ -340,6 +345,12 @@
       if (!sel.size) return;
       mark();
       for (const nt of sel) nt.off = v || undefined;
+      draw(); info();
+    }
+    function setPrio(v) {
+      if (!sel.size) return;
+      mark();
+      for (const nt of sel) { if (v) nt.pr = v; else delete nt.pr; }
       draw(); info();
     }
     function del() {
@@ -510,6 +521,9 @@
       else if (k === 'ArrowRight') { e.preventDefault(); moveTime(gridTicks()); }
       else if (k === 'ArrowLeft') { e.preventDefault(); moveTime(-gridTicks()); }
       else if (k === 'k' || k === 'K') { e.preventDefault(); setOff(![...sel].every((n) => n.off)); }
+      else if (k === 'm' || k === 'M') { e.preventDefault(); setPrio(1); }
+      else if (k === 'n' || k === 'N') { e.preventDefault(); setPrio(0); }
+      else if (k === 'h' || k === 'H') { e.preventDefault(); setPrio(-1); }
       else if (k === ' ') { e.preventDefault(); if (audio) stopAudio(); else playAudio(); }
     });
 
@@ -613,6 +627,9 @@
     $('ndUp12').addEventListener('click', () => transpose(12));
     $('ndDown12').addEventListener('click', () => transpose(-12));
     $('ndOff').addEventListener('click', () => setOff(true));
+    $('ndPrioHi').addEventListener('click', () => setPrio(1));
+    $('ndPrioNorm').addEventListener('click', () => setPrio(0));
+    $('ndPrioLo').addEventListener('click', () => setPrio(-1));
     $('ndOn').addEventListener('click', () => setOff(false));
     $('ndDel').addEventListener('click', del);
     $('ndVelSet').addEventListener('click', () => setVel(+$('ndVel').value));

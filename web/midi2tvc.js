@@ -182,7 +182,7 @@
   // hangnál a legrégebbi nyitott zárul, a CC 120/123 mindet lezárja) és a többi esemény.
   // -> {division, notes: [{ch, n, t, d, v}], ctrl: [[tick, kind, ch, a, b]], names: {ch: név}}
   function songFromParsed(p) {
-    const notes = [], ctrl = [], open = new Map();
+    const notes = [], ctrl = [], open = new Map(), prio = new Array(16).fill(0);
     let last = 0;
     const close = (k, tick) => {
       const lst = open.get(k);
@@ -194,6 +194,7 @@
       last = Math.max(last, tick);
       if (kind === 'on') {
         const nt = { ch, n: a, t: tick, d: 0, v: b };
+        if (prio[ch]) nt.pr = prio[ch];
         notes.push(nt);
         const k = ch * 256 + a;
         if (!open.has(k)) open.set(k, []);
@@ -201,6 +202,8 @@
       } else if (kind === 'off') {
         const k = ch * 256 + a;
         if (open.has(k)) close(k, tick);
+      } else if (kind === 'cc' && a === NOTE_PRIO_CC) {
+        prio[ch] = notePrio(b);             // a hanghoz kerül (nt.pr), a writeMidi írja vissza
       } else {
         ctrl.push([tick, kind, ch, a, b]);
         if (kind === 'cc' && (a === 120 || a === 123)) {
@@ -230,8 +233,15 @@
       const out = [];
       if (name) { vlq(0, out); const b = enc(name); out.push(0xFF, 0x03); vlq(b.length, out); out.push(...b); }
       evs.sort((x, y) => (x[0] - y[0]) || (x[1] - y[1]) || (x[2] - y[2]));
-      let prev = 0;
-      for (const [tick, , , bytes] of evs) { vlq(tick - prev, out); prev = tick; out.push(...bytes); }
+      let prev = 0, pr = 0;
+      for (const [tick, , , bytes, npr] of evs) {
+        if (npr !== undefined && npr !== pr) {      // a hang szólam-elsőbbsége (CC 16) előtte
+          vlq(tick - prev, out); prev = tick;
+          out.push(0xB0 | (bytes[0] & 0x0F), NOTE_PRIO_CC, npr > 0 ? 127 : (npr < 0 ? 16 : 0));
+          pr = npr;
+        }
+        vlq(tick - prev, out); prev = tick; out.push(...bytes);
+      }
       out.push(0x00, 0xFF, 0x2F, 0x00);
       return out;
     };
@@ -245,7 +255,7 @@
     });
     song.notes.forEach((nt, i) => {
       if (nt.off) return;                      // kihagyott hang
-      add(nt.ch, [nt.t, 2, i, [0x90 | nt.ch, nt.n & 0x7F, Math.max(1, Math.min(127, nt.v))]]);
+      add(nt.ch, [nt.t, 2, i, [0x90 | nt.ch, nt.n & 0x7F, Math.max(1, Math.min(127, nt.v))], nt.pr || 0]);
       add(nt.ch, [nt.t + Math.max(1, nt.d), 1, i, [0x80 | nt.ch, nt.n & 0x7F, 0x40]]);
     });
     const chans = [...per.keys()].sort((a, b) => a - b);
@@ -256,7 +266,11 @@
     return Uint8Array.from(out);
   }
 
-  // -> [[start, end, note, vel, ch, program]] (program: a leütéskor érvényes hangszer)
+  // a hang szólam-elsőbbsége (kottaszerkesztő): CC 16 = 64..127 mindenképp szóljon (1),
+  // 1..63 csak ha van hely (-1), 0 normál (midi2tvc.py note_prio)
+  const NOTE_PRIO_CC = 16;
+  const notePrio = (v) => (v >= 64 ? 1 : (v > 0 ? -1 : 0));
+  // -> [[start, end, note, vel, ch, program, prio]] (program: a leütéskor érvényes hangszer)
   function collectNotes(division, events, channels, transpose, speed) {
     const conv = tickToSeconds(division, events);
     const open = new Map(), held = new Map();
@@ -265,8 +279,9 @@
     const program = new Array(16).fill(0);
     const notes = [];
     const K = (ch, n) => ch * 256 + n;
-    const finish = (ch, note, start, [vel, pg], end) =>
-      notes.push([start, end, note, vel * volume[ch] * expression[ch] / (127 * 127), ch, pg]);
+    const prio = new Array(16).fill(0);
+    const finish = (ch, note, start, [vel, pg, pr], end) =>
+      notes.push([start, end, note, vel * volume[ch] * expression[ch] / (127 * 127), ch, pg, pr]);
     for (const [tick, , kind, ch, a, b] of events) {
       const t = conv(tick) / speed;
       if (kind === 'tempo') continue;
@@ -275,6 +290,7 @@
       if (kind === 'cc') {
         if (a === 7) volume[ch] = b;
         else if (a === 11) expression[ch] = b;
+        else if (a === NOTE_PRIO_CC) prio[ch] = notePrio(b);
         else if (a === 64) {
           const down = b >= 64;
           if (sustain[ch] && !down) {
@@ -303,7 +319,7 @@
           held.delete(key);
         }
         if (!open.has(key)) open.set(key, []);
-        open.get(key).push([t, [b, program[ch]]]);
+        open.get(key).push([t, [b, program[ch], prio[ch]]]);
       } else {
         const lst = open.get(key);
         if (!lst || !lst.length) continue;
@@ -384,9 +400,9 @@
     const hi = end !== null && end !== undefined ? end / speed : Infinity;
     const clip = (lst, onsetOnly) => {
       const out = [];
-      for (const [s, e, n, v, ch, pg] of lst) {
-        if (onsetOnly) { if (lo <= s && s < hi) out.push([s, Math.min(e, hi), n, v, ch, pg]); }
-        else if (s < hi && e > lo) out.push([Math.max(s, lo), Math.min(e, hi), n, v, ch, pg]);
+      for (const [s, e, n, v, ch, pg, pr] of lst) {
+        if (onsetOnly) { if (lo <= s && s < hi) out.push([s, Math.min(e, hi), n, v, ch, pg, pr]); }
+        else if (s < hi && e > lo) out.push([Math.max(s, lo), Math.min(e, hi), n, v, ch, pg, pr]);
       }
       return out;
     };
@@ -398,7 +414,7 @@
       if (onsets.length) shift = onsets.reduce((a, b) => Math.min(a, b));
     }
     const minLen = (end !== null && end !== undefined && !trim) ? hi - lo : null;
-    const move = (lst) => lst.map(([s, e, n, v, ch, pg]) => [s - shift, e - shift, n, v, ch, pg]).sort(cmpTuple);
+    const move = (lst) => lst.map(([s, e, n, v, ch, pg, pr]) => [s - shift, e - shift, n, v, ch, pg, pr]).sort(cmpTuple);
     return [move(notes), move(drumNotes), shift, minLen];
   }
 
@@ -530,8 +546,30 @@
       return [st, Math.max(st + 1, pyRound(e * rate)), n, v, ch, i, pg];
     });
   }
-  function choose(active, mode, prio, maxNotes, keepBass) {
+  // notePr: idx -> szólam-elsőbbség (midi2tvc.py choose)
+  function choose(active, mode, prio, maxNotes, keepBass, notePr) {
     if (!active.length) return [];
+    if (notePr && notePr.size) {
+      const P = (idx) => notePr.get(idx) || 0;
+      const top = Math.max(...active.map((a) => P(a[3])));
+      if (mode === 'mono') active = active.filter((a) => P(a[3]) === top);
+      else if (active.some((a) => P(a[3]))) {
+        const uniq = new Map();
+        for (const [n, v, st, idx] of active) {
+          const u = uniq.get(n);
+          if (!u || P(idx) > P(u[3]) || (P(idx) === P(u[3]) && st > u[2])) uniq.set(n, [n, v, st, idx]);
+        }
+        const ordered = [...uniq.values()].sort((a, b) => (P(b[3]) - P(a[3])) || (b[0] - a[0]));
+        let pick = ordered.slice(0, maxNotes);
+        const rest = ordered.filter((a) => P(a[3]) >= 0);
+        if (keepBass && ordered.length > maxNotes && rest.length) {
+          const bass = rest.reduce((m, a) => (a[0] < m[0] ? a : m));
+          if (!pick.includes(bass) && P(pick[pick.length - 1][3]) <= 0) pick = pick.slice(0, maxNotes - 1).concat([bass]);
+        }
+        pick.sort((a, b) => a[0] - b[0]);
+        return pick.map(([n, v, , idx]) => [n, v, idx]);
+      }
+    }
     if (mode === 'mono') {
       let best;
       if (prio === 'high') best = maxBy(active, (a) => [a[0], a[2]]);
@@ -576,6 +614,8 @@
 
   function convert(notes, o, drums) {
     const ticks = buildTicks(notes, o.rate);
+    const notePr = new Map();
+    notes.forEach((n, i) => { if (n[6]) notePr.set(i, n[6]); });
     let pause = 0;
     let total = maxOf(ticks.map((t) => t[1]).concat([...drums.keys()].map((t) => t + 6),
       o.minLen ? [pyRound(o.minLen * o.rate)] : []));
@@ -587,7 +627,7 @@
     for (let t = 0; t <= total; t++) {
       expire(active, t);
       for (const [st, en, n, v, , idx] of starts.get(t) || []) active.set(idx, [st, en, n, v]);
-      const sel = choose([...active].map(([i, a]) => [a[2], a[3], a[0], i]), o.mode, o.prio, o.maxNotes, o.arpBass);
+      const sel = choose([...active].map(([i, a]) => [a[2], a[3], a[0], i]), o.mode, o.prio, o.maxNotes, o.arpBass, notePr);
       const notesKey = sel.map((s) => s[0]).join(',');
       const idxSet = new Set(sel.map((s) => s[2]));
       const same = prev && prev.notesKey === notesKey && prev.idxSet.size === idxSet.size &&
@@ -901,14 +941,18 @@
       }
       // (burkológörbével az elengedett, még lecsengő hangok csak a szabad
       // szólamokra jutnak, a lenyomva tartottak után)
+      // a kottaszerkesztő jelölése (CC 16): a „mindenképp” hangok előre, a „csak ha van hely” hátra
       const uniq = new Map(), tails = [];
       for (const [idx, [st, , n, v]] of active) {
+        const pr = notes[idx][6] || 0;
         if (seqs.has(idx) && t >= seqs.get(idx)[1]) tails.push([st, idx, n]);
-        else if (!uniq.has(n) || st > uniq.get(n)[0]) uniq.set(n, [st, idx, v]);
+        else if (!uniq.has(n) || pr > uniq.get(n)[3] || (pr === uniq.get(n)[3] && st > uniq.get(n)[0])) uniq.set(n, [st, idx, v, pr]);
       }
       const ordered = [...uniq.keys()].sort((a, b) => b - a);
-      const prio = ordered.length > 1
+      let prio = ordered.length > 1
         ? [ordered[0], ordered[ordered.length - 1], ...ordered.slice(1, -1)] : ordered;
+      if (prio.some((n) => uniq.get(n)[3]))
+        prio = prio.filter((n) => uniq.get(n)[3] > 0).concat(prio.filter((n) => uniq.get(n)[3] === 0), prio.filter((n) => uniq.get(n)[3] < 0));
       const cands = prio.map((n) => [uniq.get(n)[1], n]);
       for (const [, idx, n] of tails.sort((a, b) => cmpTuple(b, a))) if (!uniq.has(n)) cands.push([idx, n]);
       if (drums.has(t)) {
