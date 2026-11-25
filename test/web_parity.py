@@ -229,6 +229,22 @@ def main():
                       % (os.path.basename(mid), " ".join(args) or "(alap)", len(want), len(got), first))
             else:
                 print("azonos: %s %s (%d bájt)" % (os.path.basename(mid), " ".join(args) or "(alap)", len(got)))
+    # a kottaszerkesztő MIDI-írója: MIDI -> dal -> MIDI után a konverzió ugyanaz
+    rt = ("const M=require(process.argv[1]+'/web/midi2tvc.js');require(process.argv[1]+'/web/envelopes.js');"
+          "const fs=require('fs');const b=new Uint8Array(fs.readFileSync(process.argv[2]));const p=M.parseMidi(b);"
+          "const p2=M.parseMidi(M.writeMidi(M.songFromParsed(p)));const bad=[];"
+          "for(const o of [{mode:'poly'},{mode:'arp'},{mode:'mono'},{mode:'poly',envelopes:'tvc',envPlayer:true},{mode:'poly',bend:true}]){"
+          "const a=M.convertMidi(p,Object.assign({},M.DEFAULTS,o)),c=M.convertMidi(p2,Object.assign({},M.DEFAULTS,o));"
+          "if(Buffer.compare(Buffer.from(a.song),Buffer.from(c.song)))bad.push(JSON.stringify(o));}"
+          "console.log(bad.join(' '))")
+    for mid in mids:
+        n += 1
+        out_ = subprocess.check_output(["node", "-e", rt, REPO, mid]).decode().strip()
+        if out_:
+            bad += 1
+            print("ELTÉR: MIDI-író körbejárás %s: %s" % (os.path.basename(mid), out_))
+        else:
+            print("azonos: MIDI-író körbejárás %s" % os.path.basename(mid))
     # a cím (TVC ékezetes kódok) és az ékezet nélküli fájlnév
     sys.path.insert(0, REPO)
     import midi2tvc

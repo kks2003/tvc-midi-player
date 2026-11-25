@@ -85,8 +85,12 @@ kicsi és gyors, vagy teljes tudású, vagy egy adott hangkártyára szabott.
 
 ## 2. Konverter
 
+- [x] **Kottaszerkesztő** a webes felületen: hangonként kihagyható, mi kerüljön
+  át; látszik, melyik hangot nem játssza a TVC; csatornánkénti átültetés,
+  szerkesztés, új dal.
 - [ ] **Okosabb szólamválasztás:** csatornánként „mindig szóljon” / „csak ha
-  van hely” jelölés, a dallamcsatorna automatikus felismerése.
+  van hely” jelölés (a szerkesztőben hangonként is), a dallamcsatorna
+  automatikus felismerése.
 - [ ] **Más forrásformátumok:** MOD / XM (tracker-zene), VGM (AY, SN76489,
   SAA1099, OPL2 hangchipes zene). A VGM különösen jól illik a hangkártyákhoz
   (lent).

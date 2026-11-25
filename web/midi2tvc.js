@@ -177,6 +177,85 @@
     };
   }
 
+  // ---- szerkesztett dal <-> MIDI (kottaszerkesztő, noteedit.js) ---------------------
+  // A beolvasott eseményekből hangok (on/off párok, mint a collectNotes-ban: azonos
+  // hangnál a legrégebbi nyitott zárul, a CC 120/123 mindet lezárja) és a többi esemény.
+  // -> {division, notes: [{ch, n, t, d, v}], ctrl: [[tick, kind, ch, a, b]], names: {ch: név}}
+  function songFromParsed(p) {
+    const notes = [], ctrl = [], open = new Map();
+    let last = 0;
+    const close = (k, tick) => {
+      const lst = open.get(k);
+      const nt = lst.shift();
+      nt.d = Math.max(1, tick - nt.t);
+      if (!lst.length) open.delete(k);
+    };
+    for (const [tick, , kind, ch, a, b] of p.events) {
+      last = Math.max(last, tick);
+      if (kind === 'on') {
+        const nt = { ch, n: a, t: tick, d: 0, v: b };
+        notes.push(nt);
+        const k = ch * 256 + a;
+        if (!open.has(k)) open.set(k, []);
+        open.get(k).push(nt);
+      } else if (kind === 'off') {
+        const k = ch * 256 + a;
+        if (open.has(k)) close(k, tick);
+      } else {
+        ctrl.push([tick, kind, ch, a, b]);
+        if (kind === 'cc' && (a === 120 || a === 123)) {
+          for (const k of [...open.keys()]) if ((k >> 8) === ch) while (open.has(k)) close(k, tick);
+        }
+      }
+    }
+    for (const k of [...open.keys()]) while (open.has(k)) close(k, Math.max(last, open.get(k)[0].t + 1));
+    const names = {};
+    for (const t of p.tracks || []) {
+      if (!t.name) continue;
+      for (const ch of Object.keys(t.channels || {})) if (!(ch in names)) names[ch] = t.name.trim();
+    }
+    return { division: p.division, notes, ctrl, names };
+  }
+
+  // -> Standard MIDI (1-es formátum): 0. sáv a tempó, utána csatornánként egy sáv
+  // (névvel); azonos időpontban a vezérlők, a hangok vége, majd az elejük.
+  function writeMidi(song) {
+    const vlq = (n, out) => {
+      const b = [n & 0x7F];
+      for (n >>>= 7; n; n >>>= 7) b.unshift(0x80 | (n & 0x7F));
+      out.push(...b);
+    };
+    const enc = (s) => Array.from(s, (c) => { const x = c.charCodeAt(0); return x < 256 ? x : 0x3F; });
+    const track = (evs, name) => {
+      const out = [];
+      if (name) { vlq(0, out); const b = enc(name); out.push(0xFF, 0x03); vlq(b.length, out); out.push(...b); }
+      evs.sort((x, y) => (x[0] - y[0]) || (x[1] - y[1]) || (x[2] - y[2]));
+      let prev = 0;
+      for (const [tick, , , bytes] of evs) { vlq(tick - prev, out); prev = tick; out.push(...bytes); }
+      out.push(0x00, 0xFF, 0x2F, 0x00);
+      return out;
+    };
+    const tempo = [], per = new Map();
+    const add = (ch, ev) => { if (!per.has(ch)) per.set(ch, []); per.get(ch).push(ev); };
+    song.ctrl.forEach(([tick, kind, ch, a, b], i) => {
+      if (kind === 'tempo') tempo.push([tick, 0, i, [0xFF, 0x51, 0x03, (a >> 16) & 0xFF, (a >> 8) & 0xFF, a & 0xFF]]);
+      else if (kind === 'prog') add(ch, [tick, 0, i, [0xC0 | ch, a & 0x7F]]);
+      else if (kind === 'cc') add(ch, [tick, 0, i, [0xB0 | ch, a & 0x7F, b & 0x7F]]);
+      else if (kind === 'pb') add(ch, [tick, 0, i, [0xE0 | ch, a & 0x7F, b & 0x7F]]);
+    });
+    song.notes.forEach((nt, i) => {
+      if (nt.off) return;                      // kihagyott hang
+      add(nt.ch, [nt.t, 2, i, [0x90 | nt.ch, nt.n & 0x7F, Math.max(1, Math.min(127, nt.v))]]);
+      add(nt.ch, [nt.t + Math.max(1, nt.d), 1, i, [0x80 | nt.ch, nt.n & 0x7F, 0x40]]);
+    });
+    const chans = [...per.keys()].sort((a, b) => a - b);
+    const tracks = [track(tempo, '')].concat(chans.map((ch) => track(per.get(ch), (song.names || {})[ch] || '')));
+    const out = [0x4D, 0x54, 0x68, 0x64, 0, 0, 0, 6, 0, 1, (tracks.length >> 8) & 0xFF, tracks.length & 0xFF,
+      (song.division >> 8) & 0xFF, song.division & 0xFF];
+    for (const t of tracks) out.push(0x4D, 0x54, 0x72, 0x6B, (t.length >>> 24) & 0xFF, (t.length >> 16) & 0xFF, (t.length >> 8) & 0xFF, t.length & 0xFF, ...t);
+    return Uint8Array.from(out);
+  }
+
   // -> [[start, end, note, vel, ch, program]] (program: a leütéskor érvényes hangszer)
   function collectNotes(division, events, channels, transpose, speed) {
     const conv = tickToSeconds(division, events);
@@ -1279,7 +1358,7 @@
   const api = {
     TVC_CLOCK, FRAME_RATE, CPU_CLOCK, POLY_VOICES, WAVES, WAVE_NAMES, DRUM_CHANNEL, DRUM_KIT, POLY_KIT, DEFAULTS,
     compileEnvelopes, envelopeLevels, envelopeFrames, featuresInc, featureNames, assembleCas, pyRound, parseMidi, collectNotes, pitchTable, polyFreqTable, polyMixTable, polyRates, noteFreq,
-    convertMidi, buildCas, titleBytes, LOAD_LIMIT, BIG_TOP, BIG_LIMIT, polyTablesEnd, asciiName, selectRange, cliArgs, sourcePackage, zipFiles,
+    convertMidi, buildCas, titleBytes, songFromParsed, writeMidi, tickToSeconds, LOAD_LIMIT, BIG_TOP, BIG_LIMIT, polyTablesEnd, asciiName, selectRange, cliArgs, sourcePackage, zipFiles,
   };
   if (typeof module !== 'undefined' && module.exports) module.exports = api;
   else root.Midi2Tvc = api;
