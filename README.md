@@ -36,6 +36,23 @@ A `web/index.html` böngészőben végzi el ugyanezt, telepítés nélkül:
 - **előnézet:** a `web/preview.js` a két lejátszót szimulálja (a poly motort
   mintára pontosan), zongoratekercs-nézettel, amelyen halványan a MIDI,
   színesen a TVC kimenete látszik,
+- **kottaszerkesztő** (`web/noteedit.js`, „Kottaszerkesztő…” és „Új dal…”):
+  a dal hangjai zongoratekercsen, csatornánként színezve. A hangok kijelölhetők
+  (kattintás, Shift, dobozos húzás), mozgathatók, a hosszuk húzható, újak
+  rajzolhatók, törölhetők, az erősségük állítható. **Mi szóljon a TVC 3
+  szólamán:** egy hang „★ Mindenképp” jelölést kaphat (elsőként kap szólamot,
+  a legkevésbé fontosat kiszorítja), „Ha van hely” jelölést (csak a többi után)
+  vagy **kihagyható** (nem kerül át a TVC-re). A jelölés a MIDI-ben a 16-os
+  vezérlő (General Purpose 1) a hang előtt: 64..127 mindenképp, 1..63 ha van
+  hely, 0 normál; a `midi2tvc.py` is így olvassa, mindhárom módban. Halványan látszik, melyik hangot **nem játssza le a
+  TVC** (nincs szabad szólam), így eldönthető, mit érdemes kihagyni vagy
+  áthelyezni. Csatornánként hangszer és **átültetés** (±félhang, ±oktáv), új
+  csatorna, új dal üresből (tempóval), visszavonás, meghallgatás a TVC
+  szimulációjával, mentés `.mid`-be. A „Használat a konverterben” után a dal
+  Standard MIDI-ként megy a konverterbe (a `midi2tvc.js` `writeMidi`-je: 1-es
+  formátum, csatornánként egy sáv), így a forráscsomag és a parancssori
+  `midi2tvc.py` is ugyanazt kapja; a web_parity ellenőrzi, hogy a visszaírt
+  MIDI-ből bájtra ugyanaz a dal lesz,
 - **rész kijelölése:** a zongoratekercsen húzással, az időmezőkkel vagy az
   „Eleje = itt” / „Vége = itt” gombokkal; csak a kijelölt rész szól és
   kerül a `.cas`-ba, a kimaradó rész a tekercsen sötétebb. A „Teljes” gomb

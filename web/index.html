@@ -216,6 +216,63 @@ pre.basic {
 .status { font-size: 13px; min-height: 1.2em; }
 footer { color: var(--muted); font-size: 13px; display: grid; gap: 8px; }
 
+/* kottaszerkesztő */
+#ndDlg { width: calc(100vw - 16px); max-width: 1500px; height: calc(100vh - 16px); max-height: none; padding: 0; border: 1px solid var(--line); border-radius: var(--r); background: var(--surface); color: var(--ink); }
+#ndDlg::backdrop { background: rgba(0, 0, 0, 0.45); }
+#ndDlg .nd { display: flex; flex-direction: column; gap: 10px; padding: 14px 16px; height: 100%; box-sizing: border-box; }
+#ndDlg .nd > * { flex: none; }
+#ndDlg .eehead { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; justify-content: space-between; }
+#ndDlg h2 { margin: 0; }
+#ndDlg h3 { margin: 0; font-size: 14px; }
+#ndDlg .ndbtns { display: flex; gap: 8px; flex-wrap: wrap; }
+#ndDlg .ndbar { display: flex; flex-wrap: wrap; gap: 6px 8px; align-items: center; font-size: 13.5px; }
+#ndDlg .ndbar button { padding: 4px 10px; }
+#ndDlg .ndnew { display: inline-flex; gap: 6px; align-items: center; margin-left: auto; }
+#ndBpm { width: 4.5em; padding: 3px 5px; }
+#ndDlg .ndzoom { display: inline-flex; align-items: center; gap: 4px; color: var(--muted); }
+#ndDlg .ndzoom button { padding: 2px 9px; }
+#ndDlg .ndzoom input[type=range] { width: 110px; accent-color: var(--accent); }
+#ndMsg { font-size: 13px; color: var(--muted); margin: 0; min-height: 1.2em; }
+#ndMsg.bad { color: var(--warn); }
+#ndDlg .nd > .ndmain { flex: 1 1 auto; display: grid; grid-template-columns: 250px minmax(0, 1fr); gap: 12px; min-height: 0; }
+#ndDlg .ndside { display: grid; gap: 6px; align-content: start; overflow-y: auto; min-height: 0; }
+#ndChans { list-style: none; margin: 0; padding: 0; display: grid; gap: 4px; }
+#ndChans li { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 2px 6px; align-items: center; padding: 5px 6px; border: 1px solid var(--line); border-radius: var(--r); font-size: 12.5px; }
+#ndChans .vis { display: flex; gap: 6px; align-items: center; min-width: 0; cursor: pointer; }
+#ndChans .vis input { margin: 0; }
+#ndChans .nm { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+#ndChans .dot { width: 10px; height: 10px; border-radius: 50%; flex: none; }
+#ndChans select { grid-column: 1; min-width: 0; font-size: 12px; padding: 2px 4px; }
+#ndChans button { padding: 2px 8px; font-size: 12px; }
+#ndChans .tr { grid-column: 1 / -1; display: flex; gap: 4px; align-items: center; color: var(--muted); font-size: 12px; }
+#ndChans .tr button { padding: 1px 6px; min-width: 30px; }
+#ndDlg .ndroll { display: flex; flex-direction: column; gap: 8px; min-height: 0; min-width: 0; overflow-y: auto; }
+#ndDlg .ndroll > * { flex: none; }
+#ndRoll { display: block; flex: 1 1 auto !important; width: 100%; height: 0; min-height: 240px; touch-action: none; border: 1px solid var(--line); border-radius: var(--r); background: var(--sunk); }
+#ndDlg .ndhelp summary { cursor: pointer; font-size: 12.5px; color: var(--muted); }
+#ndDlg .ndhelp p { margin-top: 4px; }
+#ndRoll:focus-visible { outline: 2px solid var(--accent); }
+#ndDlg .ndsel { display: flex; flex-wrap: wrap; gap: 6px; align-items: center; font-size: 13px; }
+#ndDlg .ndsel button { padding: 3px 8px; font-size: 12.5px; }
+#ndVel { width: 4.2em; padding: 3px 5px; }
+#ndDlg .ndprio { display: inline-flex; flex-wrap: wrap; gap: 4px; align-items: center; padding: 2px 6px; border: 1px solid var(--line); border-radius: var(--r); }
+#ndDlg .ndinfo { margin: 0; font-size: 12.5px; color: var(--muted); min-height: 1.2em; }
+#ndDlg .hint { margin: 0; }
+/* telefon: az egész ablak görgethető, felül a tekercs (nagyban), alatta a csatornák; a fejléc rögzítve */
+@media (max-width: 760px) {
+  #ndDlg { width: 100vw; max-width: 100vw; height: 100dvh; max-height: 100dvh; margin: 0; border-radius: 0; border: 0; overflow-y: auto; }
+  #ndDlg .nd { height: auto; min-height: 100%; padding: 0 12px 16px; gap: 8px; }
+  #ndDlg .eehead { position: sticky; top: 0; z-index: 2; background: var(--surface); padding: 10px 0 8px; border-bottom: 1px solid var(--line); }
+  #ndDlg h2 { font-size: 15px; }
+  #ndDlg .ndbtns button { padding: 6px 10px; }
+  #ndDlg .nd > .ndmain { display: flex; flex-direction: column; gap: 10px; }
+  #ndDlg .ndroll { order: 1; overflow: visible; }
+  #ndDlg .ndside { order: 2; overflow: visible; }
+  #ndRoll { flex: none !important; height: 62vh; min-height: 320px; }
+  #ndDlg .ndnew { margin-left: 0; }
+  #ndDlg .ndzoom input[type=range] { width: 90px; }
+}
+
 /* burkológörbe-szerkesztő */
 #envDlg { width: min(1040px, calc(100vw - 16px)); max-height: calc(100vh - 16px); padding: 0; border: 1px solid var(--line); border-radius: var(--r); background: var(--surface); color: var(--ink); }
 #envDlg::backdrop { background: rgba(0, 0, 0, 0.45); }
@@ -278,6 +335,8 @@ footer code, .hint code { font-family: var(--font-mono); font-size: 12.5px; }
             <label class="btn primary" for="fileInput">MIDI-fájl megnyitása…</label>
             <input id="fileInput" type="file" accept=".mid,.midi,audio/midi" hidden>
             <button id="sampleBtn" type="button">Példadal</button>
+            <button id="noteEditBtn" type="button" disabled title="A dal hangjainak szerkesztése: melyik hang kerüljön át, átültetés csatornánként, új hangok">Kottaszerkesztő…</button>
+            <button id="noteNewBtn" type="button" title="Új dal üresből a kottaszerkesztőben">Új dal…</button>
           </div>
         </div>
       </section>
@@ -458,6 +517,57 @@ footer code, .hint code { font-family: var(--font-mono); font-size: 12.5px; }
     </div>
   </div>
 
+  <dialog id="ndDlg" aria-labelledby="ndTitle">
+    <div class="nd">
+      <div class="eehead">
+        <h2 id="ndTitle">Kottaszerkesztő</h2>
+        <div class="ndbtns">
+          <button id="ndApply" class="primary" type="button">Használat a konverterben</button>
+          <button id="ndClose" type="button">Bezárás</button>
+        </div>
+      </div>
+      <div class="ndbar">
+        <button id="ndUndo" type="button" title="Visszavonás (Ctrl+Z)">↶</button><button id="ndRedo" type="button" title="Újra (Ctrl+Y)">↷</button>
+        <span class="seg mini" role="radiogroup" aria-label="Egér mód">
+          <input type="radio" name="ndMode" id="ndModeSel" checked><label for="ndModeSel">Kijelölés</label>
+          <input type="radio" name="ndMode" id="ndModeDraw"><label for="ndModeDraw">Rajzolás</label>
+        </span>
+        <label for="ndGrid">Rács</label><select id="ndGrid"><option value="4">negyed</option><option value="8">nyolcad</option><option value="16" selected>tizenhatod</option><option value="32">harmincketted</option><option value="0">nincs</option></select>
+        <span class="ndzoom" title="Vízszintes nagyítás: az idő (Ctrl+görgő; érintőn két ujjal vízszintesen széthúzva)">↔
+          <button id="ndZoomXOut" type="button" aria-label="Vízszintesen kicsinyítés">−</button><input id="ndZoomX" type="range" min="0" max="1000" aria-label="Vízszintes nagyítás"><button id="ndZoomXIn" type="button" aria-label="Vízszintesen nagyítás">+</button></span>
+        <span class="ndzoom" title="Függőleges nagyítás: a hangmagasság (Alt+görgő; érintőn két ujjal függőlegesen széthúzva)">↕
+          <button id="ndZoomYOut" type="button" aria-label="Függőlegesen kicsinyítés">−</button><input id="ndZoomY" type="range" min="0" max="1000" aria-label="Függőleges nagyítás"><button id="ndZoomYIn" type="button" aria-label="Függőlegesen nagyítás">+</button></span>
+        <button id="ndFit" type="button" title="Az egész dal hangterjedelme, az első ütemek">Teljes nézet</button>
+        <button id="ndPlay" type="button" title="A TVC szimulációja a fő oldal beállításaival, a piros vonaltól (szóköz)">▶ Meghallgatás</button>
+        <button id="ndSave" type="button">Mentés .mid fájlba</button>
+        <span class="ndnew"><button id="ndNew" type="button">Új dal</button><input id="ndBpm" type="number" min="20" max="300" value="120" title="Az új dal tempója"> BPM</span>
+      </div>
+      <p id="ndMsg" role="status"></p>
+      <div class="ndmain">
+        <div class="ndside">
+          <h3>Csatornák</h3>
+          <ul id="ndChans"></ul>
+          <select id="ndAddCh" aria-label="Új csatorna"></select>
+          <p class="hint">A jelölőnégyzet mutatja / elrejti a csatornát (a tekercsen), a kör jelöli, hová kerülnek az új hangok. Hogy melyik csatorna szóljon a TVC-n, azt a fő oldal Csatornák táblázata dönti el.</p>
+        </div>
+        <div class="ndroll">
+          <canvas id="ndRoll" tabindex="0" aria-label="Zongoratekercs: a dal hangjai csatornánként színezve; a halvány hangok a TVC-n nem szólnak, a szaggatott keretesek ki vannak hagyva"></canvas>
+          <div class="ndsel" id="ndSelBar" hidden>
+            <span>Kijelölés:</span>
+            <button id="ndDown12" type="button" title="Egy oktávval le (Shift+↓)">−12</button><button id="ndDown1" type="button" title="Egy félhanggal le (↓)">−1</button><button id="ndUp1" type="button" title="Egy félhanggal fel (↑)">+1</button><button id="ndUp12" type="button" title="Egy oktávval fel (Shift+↑)">+12</button>
+            <span class="ndprio">A TVC-n:
+              <button id="ndPrioHi" type="button" title="Mindenképp szóljon: elsőként kap szólamot, kiszorítja a többit (M)">★ Mindenképp</button><button id="ndPrioNorm" type="button" title="Normál: a konverter dönt (legmagasabb, legmélyebb, a többi) (N)">Normál</button><button id="ndPrioLo" type="button" title="Csak ha van hely: a többi után kap szólamot (H)">Ha van hely</button><button id="ndOff" type="button" title="Nem kerül át a TVC-re (K)">Kihagyás</button><button id="ndOn" type="button" title="A kihagyott hang újra átkerül">Visszavétel</button>
+            </span>
+            <label for="ndVel">Erősség</label><input id="ndVel" type="number" min="1" max="127" value="100"><button id="ndVelSet" type="button">Beállít</button>
+            <button id="ndDel" type="button" title="Törlés (Delete)">Törlés</button>
+          </div>
+          <p class="ndinfo"><span id="ndInfo"></span> <span id="ndHover"></span></p>
+          <details class="ndhelp"><summary>Súgó</summary><p class="hint">Kijelölés módban: kattintás egy hangon = kijelölés (Shift: hozzáadás), húzás üres helyen = kijelölés téglalappal; a kijelölt hang húzható, a vége húzásával a hossza állítható. Rajzolás módban: kattintás = új hang (húzva a hossza). Dupla kattintás egy hangon: törlés. <b>Mi szóljon a TVC 3 szólamán:</b> a TVC egyszerre 3 hangot játszik; a halvány hangok most kimaradnak. Egy hang bejuttatása: jelöld ki, és „★ Mindenképp” (M) – elsőként kap szólamot, a legkevésbé fontosat kiszorítja (a tekercsen a hang bal szélén sötét csík). Ami ne foglaljon helyet: „Ha van hely” (H; áthúzva) – csak a többi után szól; vagy „Kihagyás” (K; szaggatott keret) – egyáltalán nem kerül át. A „Használat a konverterben” után a halványítás az új állapotot mutatja. A jelölés a mentett .mid-ben is megmarad (16-os vezérlő), a parancssori konverter is ugyanígy kezeli. Görgő: fel-le; Shift+görgő: előre-hátra; Ctrl+görgő: vízszintes, Alt+görgő: függőleges nagyítás (az egér körül); érintőn két ujjal: csippentés = nagyítás (vízszintesen és függőlegesen külön), húzás = görgetés. A vonalzóra kattintva onnan szól a meghallgatás. Nyilak: átültetés / mozgatás a rács szerint; K: kihagyás; Delete: törlés; Ctrl+A: mind. A halvány hangokat a TVC nem játssza le (nincs szabad szólam, vagy a csatorna nincs kiválasztva): ha egy hang fontos, hagyd ki a vele egy időben szólókat, vagy tedd őket más magasságba.</p></details>
+        </div>
+      </div>
+    </div>
+  </dialog>
+
   <dialog id="envDlg" aria-labelledby="eeTitle">
     <div class="ee">
       <div class="eehead">
@@ -519,6 +629,7 @@ footer code, .hint code { font-family: var(--font-mono); font-size: 12.5px; }
 <script src="players.js"></script>
 <script src="envelopes.js"></script>
 <script src="envedit.js"></script>
+<script src="noteedit.js"></script>
 <script src="assembler.js"></script>
 <script src="autvc-core.js"></script>
 <script src="preview.js"></script>
@@ -581,7 +692,34 @@ footer code, .hint code { font-family: var(--font-mono); font-size: 12.5px; }
     const bpm = tempo ? Math.round(60e6 / tempo[4]) : 120;
     $('srcMeta').textContent = p.tracks.length + ' sáv · ' + chans.length + ' csatorna · ' + bpm + ' BPM · ' + bytes.length + ' bájt';
     renderChannels(chans);
+    $('noteEditBtn').disabled = false;
     regenerate();
+  }
+  // a kottaszerkesztőből: a szerkesztett dal (MIDI) a konverterbe; a csatornák
+  // kiválasztása és hullámformája megmarad, az új csatornák bekapcsolva jönnek
+  function applyEdited(bytes, name) {
+    const p = M.parseMidi(bytes);
+    const first = !parsed;
+    const known = parsed ? new Set(channelInfo(parsed).map((c) => c.ch)) : new Set();
+    midiBytes = bytes; parsed = p;
+    if (first) {
+      fileBase = name.replace(/\.[^.]*$/, '') || 'dal';
+      $('title').value = fileBase.slice(0, 32);
+      $('fname').value = defaultName();
+      $('fname').placeholder = defaultName();
+      view.z = 1; view.s = 0; rangeFrom = rangeTo = null; offset = 0;
+    }
+    $('srcName').textContent = fileBase + '.mid (szerkesztett)';
+    const chans = channelInfo(p);
+    for (const c of chans) if (!known.has(c.ch)) channelSel.add(c.ch);
+    for (const ch of [...channelSel]) if (!chans.some((c) => c.ch === ch)) channelSel.delete(ch);
+    const tempo = p.events.find((e) => e[2] === 'tempo');
+    $('srcMeta').textContent = p.tracks.length + ' sáv · ' + chans.length + ' csatorna · ' + (tempo ? Math.round(60e6 / tempo[4]) : 120) + ' BPM · ' + bytes.length + ' bájt (a kottaszerkesztőből)';
+    renderChannels(chans);
+    $('noteEditBtn').disabled = false;
+    stop();
+    doRegenerate();
+    return p;
   }
   function channelInfo(p) {
     const map = new Map();
@@ -765,6 +903,17 @@ footer code, .hint code { font-family: var(--font-mono); font-size: 12.5px; }
     },
   });
   $('envEdit').addEventListener('click', () => envEditor.open());
+  // a kottaszerkesztő (noteedit.js)
+  const noteEditor = window.TvcNoteEditor.NoteEditor({
+    M, PV, chColor, gmName: (n) => GM[n] || 'Program ' + n,
+    options: () => options(),
+    fullResult: () => ({ result: fullResult, sim: fullSim }),
+    current: () => (parsed ? { parsed, name: fileBase, channels: channelInfo(parsed).map((c) => c.ch) } : null),
+    apply: (bytes, name) => applyEdited(bytes, name),
+    stopMain: () => { if (srcNode) stop(); },
+  });
+  $('noteEditBtn').addEventListener('click', () => noteEditor.open(false));
+  $('noteNewBtn').addEventListener('click', () => noteEditor.open(true));
   // a mintavétel-választó CPU-feliratai (a gyors megszakítással kevesebb)
   function updateDivLabels() {
     for (const opt of $('polyDiv').options) {

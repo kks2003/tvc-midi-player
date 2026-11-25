@@ -157,9 +157,19 @@ def tick_to_seconds(division, events):
     return conv
 
 
+NOTE_PRIO_CC = 16                  # General Purpose 1: a hang szólam-elsőbbsége (kottaszerkesztő)
+
+
+def note_prio(value):
+    """a CC 16 értéke -> 1 = mindenképp szóljon (64..127), -1 = csak ha van hely
+    (1..63), 0 = normál (0)"""
+    return 1 if value >= 64 else (-1 if value > 0 else 0)
+
+
 def collect_notes(division, events, channels, transpose, speed):
-    """-> [(start_sec, end_sec, note, velocity, ch, program)] a kitartó pedállal
-    együtt (program: a hang leütésekor érvényes hangszer, 0..127)."""
+    """-> [(start_sec, end_sec, note, velocity, ch, program, prio)] a kitartó
+    pedállal együtt (program: a hang leütésekor érvényes hangszer, 0..127; prio:
+    a szólam-elsőbbség a CC 16-ból, lásd note_prio)."""
     conv = tick_to_seconds(division, events)
     open_notes = {}               # (ch, note) -> [(start, vel), ...]
     sustain = [False] * 16
@@ -167,11 +177,12 @@ def collect_notes(division, events, channels, transpose, speed):
     volume = [100] * 16
     expression = [127] * 16
     program = [0] * 16
+    prio = [0] * 16
     notes = []
 
     def finish(ch, note, start, vel, end):
-        vel, pg = vel
-        notes.append((start, end, note, vel * volume[ch] * expression[ch] / (127 * 127), ch, pg))
+        vel, pg, pr = vel
+        notes.append((start, end, note, vel * volume[ch] * expression[ch] / (127 * 127), ch, pg, pr))
 
     for tick, _, kind, ch, a, b in events:
         t = conv(tick) / speed
@@ -187,6 +198,8 @@ def collect_notes(division, events, channels, transpose, speed):
                 volume[ch] = b
             elif a == 11:
                 expression[ch] = b
+            elif a == NOTE_PRIO_CC:
+                prio[ch] = note_prio(b)
             elif a == 64:
                 down = b >= 64
                 if sustain[ch] and not down:
@@ -214,7 +227,7 @@ def collect_notes(division, events, channels, transpose, speed):
             if key in held:
                 for st, v in held.pop(key):
                     finish(ch, note, st, v, t)
-            open_notes.setdefault(key, []).append((t, (b, program[ch])))
+            open_notes.setdefault(key, []).append((t, (b, program[ch], prio[ch])))
         else:
             lst = open_notes.get(key)
             if not lst:
@@ -323,12 +336,12 @@ def select_range(notes, drum_notes, start, end, speed, trim):
 
     def clip(lst, onset_only):
         out = []
-        for s, e, n, v, ch, pg in lst:
+        for s, e, n, v, ch, pg, pr in lst:
             if onset_only:
                 if lo <= s < hi:
-                    out.append((s, min(e, hi), n, v, ch, pg))
+                    out.append((s, min(e, hi), n, v, ch, pg, pr))
             elif s < hi and e > lo:
-                out.append((max(s, lo), min(e, hi), n, v, ch, pg))
+                out.append((max(s, lo), min(e, hi), n, v, ch, pg, pr))
         return out
     notes, drum_notes = clip(notes, False), clip(drum_notes, True)
     shift = lo
@@ -339,7 +352,7 @@ def select_range(notes, drum_notes, start, end, speed, trim):
     min_len = None
     if end is not None and not trim:
         min_len = hi - lo                 # a kijelölt rész a csenddel együtt
-    move = lambda lst: sorted((s - shift, e - shift, n, v, ch, pg) for s, e, n, v, ch, pg in lst)
+    move = lambda lst: sorted((s - shift, e - shift, n, v, ch, pg, pr) for s, e, n, v, ch, pg, pr in lst)
     return move(notes), move(drum_notes), shift, min_len
 
 
@@ -433,7 +446,7 @@ def build_kit(kit_offset, pct=100):
 def drum_hits(notes, rate, curve):
     """Dob hangok -> {tick: (dob, gyengítés)}"""
     hits = {}
-    for s, e, n, v, ch, pg in notes:
+    for s, e, n, v, ch, pg, _ in notes:
         if n not in GM_DRUMS and not 27 <= n <= 87:
             continue
         k = GM_DRUMS.get(n, HAT)
@@ -951,14 +964,20 @@ def convert_poly(notes, drums, args, sr, tick_rate, ftab, ch_waves):
         # a hangok sorrendje: legmagasabb, legmélyebb, majd a többi lefelé
         # (burkológörbével az elengedett, még lecsengő hangok csak a szabad
         # szólamokra jutnak, a lenyomva tartottak után)
+        # a kottaszerkesztő jelölése (CC 16): a „mindenképp” hangok előre, a
+        # „csak ha van hely” hangok a normálok után
         uniq, tails = {}, []
         for idx, (st, en, n, v, ch) in active.items():
+            pr = notes[idx][6]
             if idx in seqs and t >= seqs[idx][1]:
                 tails.append((st, idx, n))
-            elif n not in uniq or st > uniq[n][0]:
-                uniq[n] = (st, idx, v)
+            elif n not in uniq or (pr, st) > (uniq[n][3], uniq[n][0]):
+                uniq[n] = (st, idx, v, pr)
         ordered = sorted(uniq, reverse=True)
         prio = ordered[:1] + ordered[-1:] + ordered[1:-1] if len(ordered) > 1 else ordered
+        if any(uniq[n][3] for n in prio):
+            prio = [n for n in prio if uniq[n][3] > 0] + [n for n in prio if uniq[n][3] == 0] + \
+                [n for n in prio if uniq[n][3] < 0]
         cands = [(uniq[n][1], n) for n in prio]
         for st, idx, n in sorted(tails, reverse=True):
             if n not in uniq:
@@ -1115,18 +1134,38 @@ def build_ticks(notes, rate):
     """Hangok -> (start_tick, end_tick, note, vel, ch, idx, program); minden
     hang legalább 1 tick hosszú."""
     out = []
-    for i, (s, e, n, v, ch, pg) in enumerate(notes):
+    for i, (s, e, n, v, ch, pg, _) in enumerate(notes):
         st = int(round(s * rate))
         en = max(st + 1, int(round(e * rate)))
         out.append((st, en, n, v, ch, i, pg))
     return out
 
 
-def choose(active, mode, prio, max_notes, keep_bass=False):
+def choose(active, mode, prio, max_notes, keep_bass=False, note_pr=None):
     """Az aktív hangokból a megszólalók kiválasztása.
-    active: [(note, vel, start_tick, idx)] -> [(note, vel, idx)]"""
+    active: [(note, vel, start_tick, idx)] -> [(note, vel, idx)]; note_pr: idx ->
+    szólam-elsőbbség (1 mindenképp, -1 csak ha van hely): a jelölt hangok előre
+    (mono: csak közülük választ), a „csak ha van hely” hangok hátra kerülnek"""
     if not active:
         return []
+    if note_pr:
+        top = max(note_pr.get(a[3], 0) for a in active)
+        if mode == "mono":
+            active = [a for a in active if note_pr.get(a[3], 0) == top]
+        elif any(note_pr.get(a[3], 0) for a in active):
+            uniq = {}
+            for n, v, st, idx in active:
+                pr = note_pr.get(idx, 0)
+                if n not in uniq or (pr, st) > (note_pr.get(uniq[n][3], 0), uniq[n][2]):
+                    uniq[n] = (n, v, st, idx)
+            ordered = sorted(uniq.values(), key=lambda a: (-note_pr.get(a[3], 0), -a[0]))
+            pick = ordered[:max_notes]
+            rest = [a for a in ordered if note_pr.get(a[3], 0) >= 0]
+            if keep_bass and len(ordered) > max_notes and rest and min(rest, key=lambda a: a[0]) not in pick \
+                    and note_pr.get(pick[-1][3], 0) <= 0:
+                pick = pick[:max_notes - 1] + [min(rest, key=lambda a: a[0])]
+            pick.sort(key=lambda a: a[0])
+            return [(n, v, idx) for n, v, st, idx in pick]
     if mode == "mono":
         if prio == "high":
             best = max(active, key=lambda a: (a[0], a[2]))
@@ -1161,6 +1200,7 @@ def encode_wait(out, n):
 
 def convert(notes, args, drums=None):
     ticks = build_ticks(notes, args.rate)
+    note_pr = {i: n[6] for i, n in enumerate(notes) if n[6]}
     drums = drums or {}
     total = max([t[1] for t in ticks] + [t + 6 for t in drums] +
                 ([int(round(args.min_len * args.rate))] if args.min_len else []))
@@ -1179,7 +1219,7 @@ def convert(notes, args, drums=None):
         for st, en, n, v, ch, idx, pg in starts.get(t, ()):
             active[idx] = (st, en, n, v)
         sel = choose([(a[2], a[3], a[0], i) for i, a in active.items()],
-                     args.mode, args.prio, args.max_notes, args.arp_bass)
+                     args.mode, args.prio, args.max_notes, args.arp_bass, note_pr)
         key = (tuple(s[0] for s in sel), frozenset(s[2] for s in sel))
         if key != prev:
             new_attack = prev is None or any(s[2] not in prev[1] for s in sel)

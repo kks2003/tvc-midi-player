@@ -163,6 +163,33 @@ def big_midi():
     return path
 
 
+def prio_midi():
+    """próbadal a szólam-elsőbbséghez (CC 16): ötszólamú akkordok, a középső hang
+    „mindenképp szóljon”, a legmagasabb „csak ha van hely”, a második csatornán normál"""
+    import struct
+    def vlq(n):
+        b = [n & 0x7F]
+        n >>= 7
+        while n:
+            b.append(0x80 | (n & 0x7F))
+            n >>= 7
+        return bytes(reversed(b))
+    ev = bytearray()
+    for k in range(12):
+        root = 48 + (k * 5) % 12
+        chord = [root, root + 4, root + 7, root + 12, root + 16]
+        for j, n in enumerate(chord):
+            ch = 0 if j < 3 else 1
+            pr = {2: 127, 4: 16}.get(j, 0)
+            ev += vlq(0) + bytes((0xB0 | ch, 16, pr)) + vlq(0) + bytes((0x90 | ch, n, 90))
+        for j, n in enumerate(chord):
+            ev += vlq(96 if j == 0 else 0) + bytes((0x80 | (0 if j < 3 else 1), n, 0))
+    ev += b"\x00\xff\x2f\x00"
+    path = os.path.join(tempfile.mkdtemp(prefix="tvcprio_"), "elsobbseg.mid")
+    open(path, "wb").write(b"MThd" + struct.pack(">IHHH", 6, 0, 1, 96) + b"MTrk" + struct.pack(">I", len(ev)) + bytes(ev))
+    return path
+
+
 BIG_CASES = [["--mode", "poly"], ["--mode", "poly", "--compress", "off", "--fast-irq"]]
 
 
@@ -174,6 +201,7 @@ def main():
     if not sys.argv[1:]:
         mids.append(bend_midi())
         mids.append(big_midi())
+        mids.append(prio_midi())
     subprocess.check_call([sys.executable, os.path.join(REPO, "tools", "export_players.py")],
                           stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
     tmp = tempfile.mkdtemp(prefix="tvcweb_")
@@ -184,6 +212,10 @@ def main():
         for args, opts in CASES:
             # a hajlítás próbadala rövid: csak az alap és a --bend esetek
             if mid.endswith("bend.mid") and args and "--bend" not in args and args != ["--mode", "poly"]:
+                continue
+            # az elsőbbség próbadala: a három mód
+            if mid.endswith("elsobbseg.mid") and args not in ([], ["--mode", "poly"], ["--mode", "mono"],
+                                                               ["--max-notes", "2", "--arp-bass", "--arp-speed", "2", "--loop"]):
                 continue
             # a nagy próbadal: csak a BIG_CASES
             if mid.endswith("nagy.mid") and args not in BIG_CASES:
@@ -229,6 +261,22 @@ def main():
                       % (os.path.basename(mid), " ".join(args) or "(alap)", len(want), len(got), first))
             else:
                 print("azonos: %s %s (%d bájt)" % (os.path.basename(mid), " ".join(args) or "(alap)", len(got)))
+    # a kottaszerkesztő MIDI-írója: MIDI -> dal -> MIDI után a konverzió ugyanaz
+    rt = ("const M=require(process.argv[1]+'/web/midi2tvc.js');require(process.argv[1]+'/web/envelopes.js');"
+          "const fs=require('fs');const b=new Uint8Array(fs.readFileSync(process.argv[2]));const p=M.parseMidi(b);"
+          "const p2=M.parseMidi(M.writeMidi(M.songFromParsed(p)));const bad=[];"
+          "for(const o of [{mode:'poly'},{mode:'arp'},{mode:'mono'},{mode:'poly',envelopes:'tvc',envPlayer:true},{mode:'poly',bend:true}]){"
+          "const a=M.convertMidi(p,Object.assign({},M.DEFAULTS,o)),c=M.convertMidi(p2,Object.assign({},M.DEFAULTS,o));"
+          "if(Buffer.compare(Buffer.from(a.song),Buffer.from(c.song)))bad.push(JSON.stringify(o));}"
+          "console.log(bad.join(' '))")
+    for mid in mids:
+        n += 1
+        out_ = subprocess.check_output(["node", "-e", rt, REPO, mid]).decode().strip()
+        if out_:
+            bad += 1
+            print("ELTÉR: MIDI-író körbejárás %s: %s" % (os.path.basename(mid), out_))
+        else:
+            print("azonos: MIDI-író körbejárás %s" % os.path.basename(mid))
     # a cím (TVC ékezetes kódok) és az ékezet nélküli fájlnév
     sys.path.insert(0, REPO)
     import midi2tvc
